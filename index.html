@@ -1,0 +1,1712 @@
+<!DOCTYPE html>
+<html lang="ja" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Asset & JS Bundler with Code Golfing</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              900: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Babel Standalone (AST Parser & Transpiler & Mangler) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* 簡易コード表示用のカスタムスクロールバー */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased">
+
+  <!-- ヘッダー -->
+  <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-brand-600/20 text-brand-500 rounded-xl border border-brand-500/30">
+          <i data-lucide="sparkles" class="w-8 h-8"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent flex items-center gap-2">
+            Web Asset & JS Bundler <span class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono font-normal">Golf Edition ⛳️</span>
+          </h1>
+          <p class="text-xs text-slate-400">複数ファイルを安全に1枚にバンドル ＆ AST解析で極限まで削り落とすコードゴルフ機能搭載</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full border border-emerald-500/20 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          100% ローカル（安全）
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <!-- 左サイドバー: ファイル選択 & 設定 (5カラム) -->
+    <div class="lg:col-span-5 flex flex-col gap-6">
+      
+      <!-- アップロードゾーン -->
+      <div id="drop-zone" class="border-2 border-dashed border-slate-800 hover:border-brand-500/50 bg-slate-900/30 hover:bg-brand-500/5 transition-all rounded-2xl p-8 text-center cursor-pointer flex flex-col items-center justify-center relative overflow-hidden group">
+        <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
+        <input type="file" id="files-input" multiple class="hidden">
+        
+        <div class="p-4 bg-slate-800/50 rounded-2xl mb-4 group-hover:scale-110 group-hover:bg-brand-500/10 text-slate-400 group-hover:text-brand-500 transition-all">
+          <i data-lucide="folder-up" class="w-10 h-10"></i>
+        </div>
+        
+        <h3 class="text-base font-semibold mb-1">フォルダをドラッグ＆ドロップ</h3>
+        <p class="text-xs text-slate-400 max-w-xs mb-4">HTML、CSS、JS、各種画像（PNG, JPG, SVGなど）を含むフォルダに対応</p>
+        
+        <div class="flex gap-2">
+          <button onclick="document.getElementById('folder-input').click()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 border border-slate-700">
+            <i data-lucide="folder" class="w-3.5 h-3.5"></i> フォルダを選択
+          </button>
+          <button onclick="document.getElementById('files-input').click()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 border border-slate-700">
+            <i data-lucide="files" class="w-3.5 h-3.5"></i> 複数ファイルを選択
+          </button>
+        </div>
+      </div>
+
+      <!-- ファイル管理・結合設定 -->
+      <div id="settings-card" class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-5 hidden">
+        <div class="flex items-center justify-between border-b border-slate-800/60 pb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="settings" class="w-5 h-5 text-brand-500"></i>
+            <h2 class="font-bold text-sm">結合方法の設定</h2>
+          </div>
+          <button id="clear-btn" class="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors">
+            <i data-lucide="trash-2" class="w-3 h-3"></i> リセット
+          </button>
+        </div>
+
+        <!-- モード切り替えタブ -->
+        <div class="bg-slate-950 p-1 rounded-xl border border-slate-800/80 flex flex-wrap gap-1">
+          <button id="mode-html-btn" class="flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-brand-400 bg-slate-900 shadow-sm border border-slate-800" onclick="switchMode('html')">
+            🌐 単一HTML化
+          </button>
+          <button id="mode-smart-btn" class="flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200" onclick="switchMode('smart')">
+            📦 JSスマート解析
+          </button>
+          <button id="mode-simple-btn" class="flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200" onclick="switchMode('simple')">
+            🔗 JS単純結合
+          </button>
+        </div>
+
+        <!-- 各種設定オプションパネル -->
+        
+        <!-- 0. HTML単一化モードの設定エリア -->
+        <div id="html-options" class="flex flex-col gap-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5 font-medium">起点HTMLファイル</label>
+            <select id="html-entry-select" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-brand-500">
+              <!-- 動的追加 -->
+            </select>
+            <p class="text-[10px] text-slate-500 mt-1">※ このHTML内の外部CSS、外部JS、画像などをすべてインライン展開します。</p>
+            <p class="text-[10px] text-amber-500 mt-0.5">※ 元の &lt;script type="module"&gt; タグは、インライン化後もモジュールスコープ（遅延実行）を維持するため `type="module"` 属性を残したままインライン展開されます。</p>
+          </div>
+          
+          <div class="flex flex-col gap-2.5 bg-slate-950 p-3 rounded-xl border border-slate-800/80">
+            <span class="text-[11px] font-bold text-slate-400 border-b border-slate-900 pb-1.5 mb-1">インライン化の対象設定</span>
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="html-opt-css" checked class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+              <label for="html-opt-css" class="text-xs text-slate-300 cursor-pointer">CSSファイルを &lt;style&gt; に変換</label>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="html-opt-js" checked class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+              <label for="html-opt-js" class="text-xs text-slate-300 cursor-pointer">JSファイルを &lt;script&gt; に変換 (AST依存解決付)</label>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="html-opt-img" checked class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+              <label for="html-opt-img" class="text-xs text-slate-300 cursor-pointer">画像をBase64/DataURL形式で埋め込み</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1. スマート解析モードの設定エリア -->
+        <div id="smart-options" class="flex flex-col gap-4 hidden">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5 font-medium">エントリーポイント（起点となるJS）</label>
+            <select id="entry-point-select" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-brand-500">
+              <!-- 動的追加 -->
+            </select>
+            <p class="text-[10px] text-slate-500 mt-1">※ 指定されたJSからimport/require文をたどり、自動で解析します。</p>
+            <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ AST（抽象構文木）解析エンジン「Babel Parser」を搭載！複合インポート、aliasインポート、および名前付き再エクスポートがフルサポートされました！</p>
+            <p class="text-[10px] text-red-400 mt-0.5 font-medium">※ 制限事項: 1行に複数の変数宣言を並べる `export const a = 1, b = 2;` には対応していません。個別に行を分けてエクスポートしてください。</p>
+          </div>
+        </div>
+
+        <!-- 2. 単純結合モードの設定エリア -->
+        <div id="simple-options" class="flex flex-col gap-4 hidden">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-400 font-medium">結合順序の調整</span>
+            <span class="text-[10px] text-slate-500">▲▼ボタンで優先順を変更</span>
+          </div>
+          <div id="simple-file-list" class="max-h-60 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl p-2 flex flex-col gap-1.5 font-mono text-xs">
+            <!-- ファイル順序変更リスト -->
+          </div>
+          <div class="flex items-center gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800">
+            <input type="checkbox" id="opt-iife" class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+            <div class="flex flex-col">
+              <label for="opt-iife" class="text-xs font-semibold text-slate-200 cursor-pointer">即時関数 (IIFE) で安全に包む</label>
+              <span class="text-[10px] text-slate-500">各ファイルを変数衝突が起きないように個別の関数に隔離して結合します</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ⛳️ コードゴルフ化設定セクション -->
+        <div class="border-t border-slate-800/80 pt-4 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2 text-amber-500 font-bold text-xs uppercase tracking-wider">
+              <i data-lucide="award" class="w-4 h-4"></i>
+              コードゴルフ化オプション
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="opt-golf" class="sr-only peer" onchange="toggleGolfUI()">
+              <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600 peer-checked:after:bg-white"></div>
+            </label>
+          </div>
+
+          <div id="golf-details" class="flex flex-col gap-2.5 bg-amber-500/5 p-3.5 rounded-xl border border-amber-500/20 transition-all opacity-40 pointer-events-none">
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="golf-mangle" checked class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+              <div class="flex flex-col">
+                <label for="golf-mangle" class="text-xs font-semibold text-slate-200 cursor-pointer">変数・関数名の一文字化 (Mangle)</label>
+                <span class="text-[9px] text-slate-400">ASTを解析し、ローカルスコープ内のバインディングを安全に圧縮</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="golf-console" checked class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+              <div class="flex flex-col">
+                <label for="golf-console" class="text-xs font-semibold text-slate-200 cursor-pointer">console.logの全自動消去</label>
+                <span class="text-[9px] text-slate-400">デバッグ用のログ出力文を安全に消去（式内の場合はundefinedに置換）</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="golf-minify-assets" checked class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+              <div class="flex flex-col">
+                <label for="golf-minify-assets" class="text-xs font-semibold text-slate-200 cursor-pointer">HTMLとCSSも徹底圧縮</label>
+                <span class="text-[9px] text-slate-400">タグ間の余白を極限まで縮小し、CSSのcalc内の演算子スペースは安全に保護</span>
+              </div>
+            </div>
+            <!-- ⛳️ 新設：極限ハックトグル -->
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="golf-extreme" checked class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+              <div class="flex flex-col">
+                <label for="golf-extreme" class="text-xs font-semibold text-slate-200 cursor-pointer">極限圧縮ハック (Boolean / Number / If短縮)</label>
+                <span class="text-[9px] text-slate-400">true➔!0、10000➔1e4、単一if文➔&&短絡評価、定数畳み込みなどの過激な最適化</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 共通オプション -->
+        <div class="border-t border-slate-800/60 pt-4 flex flex-col gap-3">
+          <div class="flex items-center gap-2">
+            <input type="checkbox" id="opt-strict" checked class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+            <label for="opt-strict" class="text-xs font-semibold text-slate-200 cursor-pointer">"use strict"; を先頭に追加</label>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" id="opt-comments" checked class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+            <label for="opt-comments" class="text-xs font-semibold text-slate-200 cursor-pointer">ファイル境界の区切りコメントを残す</label>
+          </div>
+        </div>
+
+        <!-- アプリケーション実行ボタン -->
+        <button id="bundle-btn" class="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-brand-600/15">
+          <i data-lucide="sparkles" class="w-4 h-4"></i>
+          1つのファイルに変換する
+        </button>
+      </div>
+
+      <!-- 検知されたファイル一覧 -->
+      <div id="file-list-card" class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex-1 flex flex-col min-h-[250px] hidden">
+        <div class="flex items-center justify-between border-b border-slate-800/60 pb-3 mb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="file-code-2" class="w-5 h-5 text-brand-500"></i>
+            <h2 class="font-bold text-sm">検知されたアセット (<span id="file-count">0</span>)</h2>
+          </div>
+        </div>
+        <div id="detected-files" class="flex-1 overflow-y-auto max-h-[300px] flex flex-col gap-1 pr-1 font-mono text-xs">
+          <!-- アップロードされたファイルが動的に追加されます -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 右メインエリア: 変換結果プレビュー (7カラム) -->
+    <div class="lg:col-span-7 flex flex-col gap-6 h-[calc(100vh-120px)] min-h-[500px]">
+      
+      <!-- ⛳️ ゴルフスコアボード（初期状態は隠す） -->
+      <div id="golf-scoreboard" class="bg-gradient-to-r from-amber-600/10 to-brand-600/10 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-4 hidden">
+        <div class="flex items-center gap-3">
+          <div class="p-3 bg-amber-500/10 text-amber-500 rounded-xl border border-amber-500/20 animate-bounce">
+            <i data-lucide="flag" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <div class="text-xs text-slate-400 font-bold">⛳️ CODE GOLF SCOREBOARD</div>
+            <div class="text-lg font-extrabold text-amber-400 flex items-center gap-2">
+              極限圧縮を達成！
+              <span id="golf-rank-badge" class="px-2 py-0.5 text-xs bg-red-500 text-white rounded font-mono font-bold animate-pulse">RANK S</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex gap-4 sm:gap-6 font-mono">
+          <div class="text-center">
+            <div class="text-[10px] text-slate-500">元サイズ合計</div>
+            <div id="golf-orig-size" class="text-sm font-bold text-slate-400">0 KB</div>
+          </div>
+          <div class="flex items-center text-slate-700">➔</div>
+          <div class="text-center">
+            <div class="text-[10px] text-slate-500">ゴルフ成果物</div>
+            <div id="golf-final-size" class="text-sm font-bold text-emerald-400">0 KB</div>
+          </div>
+          <div class="border-l border-slate-800 pl-4 sm:pl-6 text-center">
+            <div class="text-[10px] text-slate-500">極限削減率</div>
+            <div id="golf-reduction" class="text-base font-extrabold text-amber-500">-0.0%</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex-1 bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col overflow-hidden relative">
+        
+        <!-- プレビューコントロールバー -->
+        <div class="flex items-center justify-between border-b border-slate-800/60 pb-3 mb-4">
+          <div class="flex items-center gap-2">
+            <div class="w-3 h-3 rounded-full bg-slate-700"></div>
+            <div class="w-3 h-3 rounded-full bg-slate-700"></div>
+            <div class="w-3 h-3 rounded-full bg-slate-700"></div>
+            <span id="preview-filename" class="text-xs text-slate-400 font-mono ml-2">index.html (出力プレビュー)</span>
+          </div>
+          
+          <div class="flex gap-2" id="preview-actions">
+            <!-- コピー、ダウンロードボタン -->
+            <button id="copy-btn" disabled class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-1.5 border border-slate-700">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i> コピー
+            </button>
+            <button id="download-btn" disabled class="px-3 py-1.5 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-800 text-xs font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-brand-600/10">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i> ダウンロード
+            </button>
+          </div>
+        </div>
+
+        <!-- 変換プロセスログ・コンソール -->
+        <div id="process-log" class="hidden bg-slate-950 border border-slate-800/80 rounded-xl p-4 font-mono text-xs text-slate-300 overflow-y-auto max-h-40 mb-4">
+          <div class="text-slate-500 border-b border-slate-900 pb-1.5 mb-1.5">バンドルプロセス・ログ:</div>
+          <div id="log-content"></div>
+        </div>
+
+        <!-- コード出力エリア -->
+        <div class="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl overflow-hidden flex relative">
+          <!-- 行番号 -->
+          <div id="line-numbers" class="w-12 bg-slate-950 border-r border-slate-800/80 py-4 text-right pr-3 text-xs font-mono text-slate-600 select-none">
+            1
+          </div>
+          <!-- コード内容 -->
+          <textarea id="output-code" readonly class="flex-1 bg-slate-950 p-4 font-mono text-xs text-emerald-400 focus:outline-none resize-none overflow-auto whitespace-pre leading-relaxed" placeholder="// ここにまとまったソースコードが出力されます。&#10;// 左側のパネルからフォルダをアップロードして「変換」をクリックしてください。"></textarea>
+          
+          <!-- ローディング表示 -->
+          <div id="loading-overlay" class="hidden absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+            <div class="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-sm font-semibold text-slate-300">ファイルを結合して構築中...</p>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <footer class="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
+    <p>Web Asset & JS Bundler with Code Golfing &copy; 2026. すべての処理はブラウザのメモリ上で完全にローカル実行されます。</p>
+  </footer>
+
+  <!-- カスタムトースト通知 -->
+  <div id="toast" class="fixed bottom-6 right-6 transform translate-y-10 opacity-0 bg-slate-900 border border-slate-800/80 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50">
+    <span id="toast-icon"></span>
+    <span id="toast-text" class="font-medium">メッセージ</span>
+  </div>
+
+  <script>
+    // グローバルステート
+    let filesStore = {}; // { "path/to/file": { content, size, isBinary } }
+    let currentMode = 'html'; // 'html', 'smart', 'simple'
+    let fileOrder = []; // 単純結合用の並び順
+    let usedFilesSet = new Set(); // ⛳️ 実際にバンドルされた（到達した）アセットのみを格納する追跡Set
+
+    // DOM要素の参照
+    const dropZone = document.getElementById('drop-zone');
+    const folderInput = document.getElementById('folder-input');
+    const filesInput = document.getElementById('files-input');
+    const settingsCard = document.getElementById('settings-card');
+    const fileListCard = document.getElementById('file-list-card');
+    const detectedFiles = document.getElementById('detected-files');
+    const fileCount = document.getElementById('file-count');
+    
+    const htmlEntrySelect = document.getElementById('html-entry-select');
+    const entryPointSelect = document.getElementById('entry-point-select');
+    const simpleFileList = document.getElementById('simple-file-list');
+    
+    const htmlOptions = document.getElementById('html-options');
+    const smartOptions = document.getElementById('smart-options');
+    const simpleOptions = document.getElementById('simple-options');
+    
+    const bundleBtn = document.getElementById('bundle-btn');
+    const outputCode = document.getElementById('output-code');
+    const lineNumbers = document.getElementById('line-numbers');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const copyBtn = document.getElementById('copy-btn');
+    const downloadBtn = document.getElementById('download-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const logSection = document.getElementById('process-log');
+    const logContent = document.getElementById('log-content');
+    const previewFilename = document.getElementById('preview-filename');
+
+    const optGolf = document.getElementById('opt-golf');
+    const golfDetails = document.getElementById('golf-details');
+    const golfScoreboard = document.getElementById('golf-scoreboard');
+
+    // 初期化
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      setupDragAndDrop();
+      setupEventListeners();
+    });
+
+    // ゴルフUIトグル
+    function toggleGolfUI() {
+      if (optGolf.checked) {
+        golfDetails.classList.remove('opacity-40', 'pointer-events-none');
+        showToast("コードゴルフ機能が有効化されました！⛳️", "info");
+      } else {
+        golfDetails.classList.add('opacity-40', 'pointer-events-none');
+        golfScoreboard.classList.add('hidden');
+      }
+    }
+
+    // ドラッグ＆ドロップのイベント設定
+    function setupDragAndDrop() {
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          dropZone.classList.add('border-brand-500', 'bg-brand-500/10');
+        }, false);
+      });
+
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          dropZone.classList.remove('border-brand-500', 'bg-brand-500/10');
+        }, false);
+      });
+
+      dropZone.addEventListener('drop', async (e) => {
+        const items = e.dataTransfer.items;
+        if (!items) return;
+
+        showLoading(true, "アップロードされたアセットを走査中...");
+        
+        try {
+          for (let i = 0; i < items.length; i++) {
+            const entry = items[i].webkitGetAsEntry();
+            if (entry) {
+              await scanEntry(entry);
+            }
+          }
+          onFilesUpdated();
+          showToast("ファイル群の読込が完了しました！", "success");
+        } catch (err) {
+          showToast("ファイルの読込エラーが発生しました", "error");
+          console.error(err);
+        } finally {
+          showLoading(false);
+        }
+      });
+    }
+
+    // ディレクトリ巡回関数（HTML, CSS, JS, 画像ファイルを適切に仕分け）
+    async function scanEntry(entry, path = "") {
+      if (entry.isFile) {
+        const file = await new Promise((resolve) => entry.file(resolve));
+        if (isSupportedFile(file.name)) {
+          const relativePath = path + file.name;
+          const binary = isBinaryFile(file.name);
+          let content = "";
+          
+          if (binary) {
+            content = await readFileAsDataURL(file);
+          } else {
+            content = await file.text();
+          }
+
+          filesStore[relativePath] = {
+            content: content,
+            size: file.size,
+            isBinary: binary
+          };
+        }
+      } else if (entry.isDirectory) {
+        const dirReader = entry.createReader();
+        const entries = await new Promise((resolve) => {
+          dirReader.readEntries(resolve);
+        });
+        for (const subEntry of entries) {
+          await scanEntry(subEntry, path + entry.name + "/");
+        }
+      }
+    }
+
+    // イベントリスナー設定
+    function setupEventListeners() {
+      folderInput.addEventListener('change', async (e) => {
+        await handleFileSelection(e.target.files);
+      });
+
+      filesInput.addEventListener('change', async (e) => {
+        await handleFileSelection(e.target.files);
+      });
+
+      bundleBtn.addEventListener('click', runBundle);
+      copyBtn.addEventListener('click', copyToClipboard);
+      downloadBtn.addEventListener('click', downloadOutput);
+      clearBtn.addEventListener('click', resetAll);
+
+      outputCode.addEventListener('scroll', () => {
+        lineNumbers.scrollTop = outputCode.scrollTop;
+      });
+    }
+
+    // ファイル選択処理
+    async function handleFileSelection(fileList) {
+      if (fileList.length === 0) return;
+      showLoading(true, "ファイルをメモリに格納中...");
+      
+      try {
+        for (let i = 0; i < fileList.length; i++) {
+          const file = fileList[i];
+          const path = file.webkitRelativePath || file.name;
+          if (isSupportedFile(file.name)) {
+            const binary = isBinaryFile(file.name);
+            let content = "";
+            
+            if (binary) {
+              content = await readFileAsDataURL(file);
+            } else {
+              content = await file.text();
+            }
+
+            filesStore[path] = {
+              content: content,
+              size: file.size,
+              isBinary: binary
+            };
+          }
+        }
+        onFilesUpdated();
+        showToast("ファイルを読み込みました！", "success");
+      } catch (err) {
+        showToast("ファイルの読み込み中にエラーが発生しました", "error");
+        console.error(err);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    // 非同期 DataURL 読込
+    function readFileAsDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // サポートファイル形式判別
+    function isSupportedFile(filename) {
+      const ext = filename.split('.').pop().toLowerCase();
+      const textExts = ['js', 'mjs', 'jsx', 'ts', 'tsx', 'html', 'htm', 'css', 'json', 'svg'];
+      const binaryExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico'];
+      return textExts.includes(ext) || binaryExts.includes(ext);
+    }
+
+    // バイナリファイル形式判別 (Base64埋め込みの対象)
+    function isBinaryFile(filename) {
+      const ext = filename.split('.').pop().toLowerCase();
+      const binaryExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico'];
+      return binaryExts.includes(ext);
+    }
+
+    // JS関連ファイルか判別
+    function isJSFile(filename) {
+      const ext = filename.split('.').pop().toLowerCase();
+      return ['js', 'mjs', 'jsx', 'ts', 'tsx'].includes(ext);
+    }
+
+    // ストア更新時の処理
+    function onFilesUpdated() {
+      const keys = Object.keys(filesStore);
+      if (keys.length === 0) {
+        resetAll();
+        return;
+      }
+
+      settingsCard.classList.remove('hidden');
+      fileListCard.classList.remove('hidden');
+      dropZone.classList.add('py-4'); // ドロップエリア縮小
+      
+      fileCount.textContent = keys.length;
+      fileOrder = keys.filter(path => isJSFile(path)).sort();
+
+      updateDetectedFilesList();
+      updateSimpleOrderList();
+      updateDropdowns();
+      updatePreviewFilename();
+    }
+
+    // UI更新: 検知アセット一覧
+    function updateDetectedFilesList() {
+      detectedFiles.innerHTML = '';
+      Object.keys(filesStore).sort().forEach(path => {
+        const file = filesStore[path];
+        const sizeKB = (file.size / 1024).toFixed(1);
+        const isBin = file.isBinary;
+        
+        let iconType = "file-code";
+        let iconColor = "text-brand-400";
+        const ext = path.split('.').pop().toLowerCase();
+
+        if (['html', 'htm'].includes(ext)) {
+          iconType = "globe";
+          iconColor = "text-amber-400";
+        } else if (ext === 'css') {
+          iconType = "file-spreadsheet";
+          iconColor = "text-purple-400";
+        } else if (isBin || ext === 'svg') {
+          iconType = "image";
+          iconColor = "text-emerald-400";
+        }
+
+        const div = document.createElement('div');
+        div.className = "flex items-center justify-between p-2 hover:bg-slate-800/40 rounded-lg group border border-transparent hover:border-slate-800 transition-all";
+        div.innerHTML = `
+          <div class="flex items-center gap-2 truncate">
+            <i data-lucide="${iconType}" class="w-3.5 h-3.5 ${iconColor} shrink-0"></i>
+            <span class="truncate text-slate-300" title="${path}">${path}</span>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            <span class="text-[10px] text-slate-500">${sizeKB} KB</span>
+            <button onclick="deleteFile('${path}')" class="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-0.5">
+              <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        `;
+        detectedFiles.appendChild(div);
+      });
+      lucide.createIcons();
+    }
+
+    // UI更新: JS単純結合順リスト
+    function updateSimpleOrderList() {
+      simpleFileList.innerHTML = '';
+      const jsFiles = fileOrder;
+      
+      if (jsFiles.length === 0) {
+        simpleFileList.innerHTML = '<div class="text-center text-slate-500 p-4">結合可能なJSファイルが見つかりません</div>';
+        return;
+      }
+
+      jsFiles.forEach((path, idx) => {
+        const div = document.createElement('div');
+        div.className = "flex items-center justify-between p-2 bg-slate-900 border border-slate-800/60 rounded-lg";
+        div.innerHTML = `
+          <div class="flex items-center gap-2 truncate">
+            <span class="text-[10px] text-slate-500 font-mono w-4 text-right">${idx + 1}.</span>
+            <span class="truncate text-slate-300" title="${path}">${path.split('/').pop()}</span>
+            <span class="text-[9px] text-slate-600 truncate max-w-[120px]" title="${path}">(${path})</span>
+          </div>
+          <div class="flex gap-1">
+            <button onclick="moveOrder(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} class="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-30">
+              <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
+            </button>
+            <button onclick="moveOrder(${idx}, 1)" ${idx === jsFiles.length - 1 ? 'disabled' : ''} class="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-30">
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        `;
+        simpleFileList.appendChild(div);
+      });
+      lucide.createIcons();
+    }
+
+    // UI更新: 起点アセット選択ドロップダウンの抽出
+    function updateDropdowns() {
+      const keys = Object.keys(filesStore).sort();
+      
+      // HTMLファイル抽出
+      const htmlKeys = keys.filter(k => {
+        const ext = k.split('.').pop().toLowerCase();
+        return ['html', 'htm'].includes(ext);
+      });
+      
+      // JSファイル抽出
+      const jsKeys = keys.filter(k => isJSFile(k));
+
+      // 1. HTML用ドロップダウン
+      const currentHtmlSelected = htmlEntrySelect.value;
+      htmlEntrySelect.innerHTML = '';
+      
+      if (htmlKeys.length === 0) {
+        const opt = document.createElement('option');
+        opt.textContent = "HTMLファイルをアップロードしてください";
+        htmlEntrySelect.appendChild(opt);
+      } else {
+        // index.html優先選択
+        let defaultHtml = htmlKeys[0];
+        for (const k of htmlKeys) {
+          if (k.toLowerCase().includes('index.html')) {
+            defaultHtml = k;
+            break;
+          }
+        }
+        htmlKeys.forEach(path => {
+          const opt = document.createElement('option');
+          opt.value = path;
+          opt.textContent = path;
+          if (path === currentHtmlSelected || (!currentHtmlSelected && path === defaultHtml)) {
+            opt.selected = true;
+          }
+          htmlEntrySelect.appendChild(opt);
+        });
+      }
+
+      // 2. JS用ドロップダウン
+      const currentJsSelected = entryPointSelect.value;
+      entryPointSelect.innerHTML = '';
+      
+      if (jsKeys.length === 0) {
+        const opt = document.createElement('option');
+        opt.textContent = "JSファイルをアップロードしてください";
+        entryPointSelect.appendChild(opt);
+      } else {
+        let defaultJs = jsKeys[0];
+        const matchKeywords = ['index.', 'main.', 'app.'];
+        for (const k of jsKeys) {
+          const lower = k.toLowerCase();
+          if (matchKeywords.some(keyword => lower.includes(keyword))) {
+            defaultJs = k;
+            break;
+          }
+        }
+        jsKeys.forEach(path => {
+          const opt = document.createElement('option');
+          opt.value = path;
+          opt.textContent = path;
+          if (path === currentJsSelected || (!currentJsSelected && path === defaultJs)) {
+            opt.selected = true;
+          }
+          entryPointSelect.appendChild(opt);
+        });
+      }
+    }
+
+    // プレビューファイル名インジケータ更新
+    function updatePreviewFilename() {
+      if (currentMode === 'html') {
+        previewFilename.textContent = "index.html (単一統合済みHTML)";
+      } else {
+        previewFilename.textContent = "bundle.js (結合済みJavaScript)";
+      }
+    }
+
+    // ファイル削除
+    window.deleteFile = function(path) {
+      delete filesStore[path];
+      fileOrder = fileOrder.filter(p => p !== path);
+      onFilesUpdated();
+      showToast(`アセットを削除しました: ${path.split('/').pop()}`, "info");
+    };
+
+    // 並び替え処理
+    window.moveOrder = function(index, direction) {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= fileOrder.length) return;
+      
+      const temp = fileOrder[index];
+      fileOrder[index] = fileOrder[targetIndex];
+      fileOrder[targetIndex] = temp;
+      
+      updateSimpleOrderList();
+    };
+
+    // モード切り替え
+    window.switchMode = function(mode) {
+      currentMode = mode;
+      const htmlBtn = document.getElementById('mode-html-btn');
+      const smartBtn = document.getElementById('mode-smart-btn');
+      const simpleBtn = document.getElementById('mode-simple-btn');
+
+      const tabs = [htmlBtn, smartBtn, simpleBtn];
+      tabs.forEach(tab => {
+        tab.className = "flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200";
+      });
+
+      const targetBtn = mode === 'html' ? htmlBtn : (mode === 'smart' ? smartBtn : simpleBtn);
+      targetBtn.className = "flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-brand-400 bg-slate-900 shadow-sm border border-slate-800";
+
+      // オプションパネル表示切り替え
+      htmlOptions.classList.add('hidden');
+      smartOptions.classList.add('hidden');
+      simpleOptions.classList.add('hidden');
+
+      if (mode === 'html') {
+        htmlOptions.classList.remove('hidden');
+      } else if (mode === 'smart') {
+        smartOptions.classList.remove('hidden');
+      } else {
+        simpleOptions.classList.remove('hidden');
+      }
+
+      updatePreviewFilename();
+    };
+
+    // 完全リセット
+    function resetAll() {
+      filesStore = {};
+      fileOrder = [];
+      usedFilesSet.clear();
+      
+      settingsCard.classList.add('hidden');
+      fileListCard.classList.add('hidden');
+      dropZone.classList.remove('py-4');
+      folderInput.value = '';
+      filesInput.value = '';
+      
+      outputCode.value = '';
+      updateLineNumbers("");
+      
+      copyBtn.disabled = true;
+      downloadBtn.disabled = true;
+      logSection.classList.add('hidden');
+      logContent.innerHTML = '';
+      golfScoreboard.classList.add('hidden');
+      optGolf.checked = false;
+      toggleGolfUI();
+      
+      showToast("すべてクリアされました", "info");
+    }
+
+    // ローディングマスク制御
+    function showLoading(show, message = "処理中...") {
+      if (show) {
+        loadingOverlay.querySelector('p').textContent = message;
+        loadingOverlay.classList.remove('hidden');
+      } else {
+        loadingOverlay.classList.add('hidden');
+      }
+    }
+
+    // 処理ログ出力
+    function addLog(message, type = 'info') {
+      const colors = {
+        info: 'text-slate-300',
+        success: 'text-emerald-400',
+        warn: 'text-amber-400',
+        error: 'text-red-400 font-bold'
+      };
+      const prefix = {
+        info: 'ℹ',
+        success: '✔',
+        warn: '⚠',
+        error: '❌'
+      };
+      
+      const div = document.createElement('div');
+      div.className = `${colors[type]} mb-1`;
+      div.textContent = `${prefix[type]} ${message}`;
+      logContent.appendChild(div);
+      logSection.scrollTop = logSection.scrollHeight;
+    }
+
+    // ==========================================
+    // ⛳️ HTML / CSS ミニファイ補助ロジック (修正版)
+    // ==========================================
+    
+    // HTMLの軽量圧縮 (JSを破壊しない安全なミニファイ)
+    function minifyHtml(html) {
+      return html
+        .replace(/<!--[\s\S]*?-->/g, '')  // HTMLコメントの安全な削除
+        .replace(/>\s+</g, '><')          // タグ間の余白を極限まで詰める（内部のJSや改行は保護）
+        .trim();
+    }
+
+    // CSSの超高密度圧縮（calc破損バグを修正）
+    function minifyCss(css) {
+      return css
+        .replace(/\/\*[\s\S]*?\*\//g, '')       // コメントの全削除
+        // ⚠️ + と - は calc() で必須なのでスペース削除対象から除外！
+        .replace(/\s*([{}~>;:,!])\s*/g, '$1') 
+        .replace(/;}/g, '}')                    // 最後の不要なセミコロンを削除
+        .replace(/(^|[:\s])0+(px|em|rem|%|vw|vh|pt)/gi, '$10') // 0pxなどを 0 に短縮
+        .replace(/#([0-9a-fA-F])\1([0-9a-fA-F])\2([0-9a-fA-F])\3/g, '#$1$2$3') // #ffffff -> #fff
+        .trim();
+    }
+
+    // ゴルフ評価ランク判定
+    function getGolfRank(reductionPercent) {
+      if (reductionPercent >= 80) return { rank: "🏆 SSS", color: "bg-red-600" };
+      if (reductionPercent >= 60) return { rank: "💎 SS", color: "bg-orange-500" };
+      if (reductionPercent >= 40) return { rank: "🔥 S", color: "bg-amber-500" };
+      if (reductionPercent >= 25) return { rank: "⭐ A", color: "bg-emerald-500" };
+      if (reductionPercent >= 10) return { rank: "⚡ B", color: "bg-brand-500" };
+      return { rank: "⛳️ C", color: "bg-slate-500" };
+    }
+
+    // スコアボードダッシュボードの表示更新
+    function updateGolfScoreboard(originalBytes, finalBytes) {
+      const saved = Math.max(originalBytes - finalBytes, 0);
+      const reduction = originalBytes > 0 ? ((saved / originalBytes) * 100).toFixed(1) : 0;
+      
+      document.getElementById('golf-orig-size').textContent = `${(originalBytes / 1024).toFixed(2)} KB`;
+      document.getElementById('golf-final-size').textContent = `${(finalBytes / 1024).toFixed(2)} KB`;
+      document.getElementById('golf-reduction').textContent = `-${reduction}%`;
+      
+      const rankInfo = getGolfRank(parseFloat(reduction));
+      const badge = document.getElementById('golf-rank-badge');
+      badge.textContent = rankInfo.rank;
+      badge.className = `px-2 py-0.5 text-xs text-white rounded font-mono font-bold animate-pulse ${rankInfo.color}`;
+
+      golfScoreboard.classList.remove('hidden');
+      addLog(`[⛳️ ゴルフコンパイラ] 実参照されたアセット合計 ${originalBytes} バイト ➔ ${finalBytes} バイトに圧縮完了。削減率 -${reduction}% !`, "success");
+    }
+
+    // ⛳️ 実際にバンドルプロセスで参照された（usedFilesSetに登録された）アセットのみの合計サイズ算出
+    function getTotalOriginalBytes() {
+      if (optGolf.checked && usedFilesSet.size > 0) {
+        let sum = 0;
+        usedFilesSet.forEach(path => {
+          if (filesStore[path]) {
+            sum += filesStore[path].size;
+          }
+        });
+        return sum;
+      }
+      return Object.values(filesStore).reduce((sum, file) => sum + file.size, 0);
+    }
+
+    // ==========================================
+    // ⚙️ バンドラー実行コアロジック
+    // ==========================================
+    
+    function runBundle() {
+      showLoading(true, "ビルド中...");
+      logSection.classList.remove('hidden');
+      logContent.innerHTML = '';
+      outputCode.value = '';
+      usedFilesSet.clear(); // 毎回バンドル時に、参照されたファイルを追跡するためにクリア
+      
+      setTimeout(() => {
+        try {
+          const addStrict = document.getElementById('opt-strict').checked;
+          const keepComments = document.getElementById('opt-comments').checked;
+          let finalContent = "";
+
+          addLog("ビルドタスクを開始します...", "info");
+
+          if (currentMode === 'html') {
+            finalContent = executeHtmlBundle();
+          } else if (currentMode === 'smart') {
+            finalContent = executeSmartJSBundle(entryPointSelect.value, addStrict, keepComments);
+          } else {
+            finalContent = executeSimpleJSBundle(addStrict, keepComments);
+          }
+
+          if (finalContent) {
+            outputCode.value = finalContent;
+            updateLineNumbers(finalContent);
+            copyBtn.disabled = false;
+            downloadBtn.disabled = false;
+            showToast("バンドル処理が完了しました！", "success");
+            addLog("ビルド成果物が正常に出力されました！", "success");
+
+            // ゴルフスコア集計（ゴルフ化チェックが入っているときのみ）
+            if (optGolf.checked) {
+              const originalSize = getTotalOriginalBytes();
+              const blob = new Blob([finalContent], { type: currentMode === 'html' ? 'text/html' : 'application/javascript' });
+              updateGolfScoreboard(originalSize, blob.size);
+            } else {
+              golfScoreboard.classList.add('hidden');
+            }
+          }
+        } catch (error) {
+          console.error(error);
+          addLog(`処理失敗: ${error.message}`, "error");
+          showToast("バンドル実行に失敗しました", "error");
+        } finally {
+          showLoading(false);
+        }
+      }, 400);
+    }
+
+    // ------------------------------------------
+    // 🌐 HTML単一化 バンドルロジック
+    // ------------------------------------------
+    function executeHtmlBundle() {
+      const entryHtmlPath = htmlEntrySelect.value;
+      if (!entryHtmlPath || !filesStore[entryHtmlPath]) {
+        throw new Error("起点となるHTMLファイルが見つかりません。");
+      }
+
+      addLog(`起点HTMLの解析を開始します: ${entryHtmlPath}`, "info");
+      usedFilesSet.add(entryHtmlPath);
+
+      const optCss = document.getElementById('html-opt-css').checked;
+      const optJs = document.getElementById('html-opt-js').checked;
+      const optImg = document.getElementById('html-opt-img').checked;
+
+      const golfEnabled = optGolf && optGolf.checked;
+      const minifyAssets = document.getElementById('golf-minify-assets') && document.getElementById('golf-minify-assets').checked;
+
+      const rawHtml = filesStore[entryHtmlPath].content;
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(rawHtml, 'text/html');
+
+      if (optCss) {
+        addLog("CSSのアセットスキャンを開始...", "info");
+        const links = doc.querySelectorAll('link[rel="stylesheet"]');
+        links.forEach(link => {
+          const href = link.getAttribute('href');
+          if (!href || href.startsWith('http') || href.startsWith('//')) return;
+
+          const resolvedPath = resolveRelativePath(entryHtmlPath, href);
+          if (filesStore[resolvedPath]) {
+            usedFilesSet.add(resolvedPath);
+            let cssContent = filesStore[resolvedPath].content;
+            if (optImg) cssContent = inlineCssImages(resolvedPath, cssContent);
+            if (golfEnabled && minifyAssets) cssContent = minifyCss(cssContent);
+
+            const styleEl = doc.createElement('style');
+            // 🐛修正: 行コメント // をブロックコメント /* */ に変更
+            styleEl.textContent = `\n/* Inlined: ${resolvedPath} */\n` + cssContent + '\n';
+            link.replaceWith(styleEl);
+            addLog(`CSSファイルをスタイルブロックに展開: ${resolvedPath}`, "success");
+          }
+        });
+      }
+
+      if (optJs) {
+        addLog("JSアセットスキャンを開始...", "info");
+        const scripts = doc.querySelectorAll('script[src]');
+        scripts.forEach(script => {
+          const src = script.getAttribute('src');
+          if (!src || src.startsWith('http') || src.startsWith('//')) return;
+
+          const resolvedPath = resolveRelativePath(entryHtmlPath, src);
+          if (filesStore[resolvedPath]) {
+            let jsContent = "";
+            try {
+              jsContent = executeSmartJSBundle(resolvedPath, false, !golfEnabled);
+            } catch (err) {
+              usedFilesSet.add(resolvedPath);
+              jsContent = filesStore[resolvedPath].content;
+            }
+
+            const scriptEl = doc.createElement('script');
+            Array.from(script.attributes).forEach(attr => {
+              if (attr.name !== 'src' && attr.name !== 'type') scriptEl.setAttribute(attr.name, attr.value);
+            });
+
+            const typeAttr = script.getAttribute('type');
+            if (typeAttr === 'module') scriptEl.setAttribute('type', 'module');
+            else if (script.hasAttribute('defer')) scriptEl.setAttribute('defer', '');
+
+            const safeJsContent = jsContent.replace(new RegExp('\\x3c/\\\\s*script\\\\s*\\x3e', 'gi'), '\\x3c\\/script\\x3e');
+            // 🐛修正: 行コメント // をブロックコメント /* */ に変更
+            scriptEl.textContent = `\n/* Inlined & Bundled: ${resolvedPath} */\n` + safeJsContent + '\n';
+            script.replaceWith(scriptEl);
+            addLog(`JavaScriptを展開: ${resolvedPath}`, "success");
+          }
+        });
+      }
+
+      if (optImg) {
+        const imgs = doc.querySelectorAll('img[src]');
+        imgs.forEach(img => {
+          const src = img.getAttribute('src');
+          if (!src || src.startsWith('http') || src.startsWith('data:') || src.startsWith('//')) return;
+          const resolvedPath = resolveRelativePath(entryHtmlPath, src);
+          if (filesStore[resolvedPath]) {
+            usedFilesSet.add(resolvedPath);
+            if (filesStore[resolvedPath].isBinary) {
+              img.setAttribute('src', filesStore[resolvedPath].content);
+            } else if (resolvedPath.toLowerCase().endsWith('.svg')) {
+              img.setAttribute('src', `data:image/svg+xml;utf8,${encodeURIComponent(filesStore[resolvedPath].content)}`);
+            }
+          }
+        });
+
+        const icons = doc.querySelectorAll('link[rel*="icon"]');
+        icons.forEach(icon => {
+          const href = icon.getAttribute('href');
+          if (!href || href.startsWith('http') || href.startsWith('data:') || href.startsWith('//')) return;
+          const resolvedPath = resolveRelativePath(entryHtmlPath, href);
+          if (filesStore[resolvedPath]) {
+            usedFilesSet.add(resolvedPath);
+            icon.setAttribute('href', filesStore[resolvedPath].content);
+          }
+        });
+      }
+
+      let htmlString = "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
+      if (golfEnabled && minifyAssets) {
+        htmlString = minifyHtml(htmlString);
+      }
+      return htmlString;
+    }
+
+    // CSS内の url(...) をインラインBase64に変換するヘルパー
+    function inlineCssImages(cssPath, cssContent) {
+      const urlRegex = /url\s*\(\s*['"`]?([^'"`\)]+)['"`]?\s*\)/gi;
+      
+      return cssContent.replace(urlRegex, (match, urlPath) => {
+        if (urlPath.startsWith('http://') || urlPath.startsWith('https://') || urlPath.startsWith('data:') || urlPath.startsWith('//')) {
+          return match;
+        }
+
+        const resolvedImagePath = resolveRelativePath(cssPath, urlPath);
+        if (filesStore[resolvedImagePath]) {
+          const file = filesStore[resolvedImagePath];
+          usedFilesSet.add(resolvedImagePath); // ⛳️ CSS内から読み出されたローカル画像を記録
+          
+          if (file.isBinary) {
+            addLog(`CSS内画像のBase64変換: ${resolvedImagePath}`, "success");
+            return `url("${file.content}")`;
+          } else if (resolvedImagePath.toLowerCase().endsWith('.svg')) {
+            addLog(`CSS内SVG画像のData URLインライン変換: ${resolvedImagePath}`, "success");
+            const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(file.content)}`;
+            return `url("${dataUrl}")`;
+          } else {
+            addLog(`CSS内アセットを展開: ${resolvedImagePath}`, "success");
+            return `url("${file.content}")`;
+          }
+        } else {
+          addLog(`警告: CSSから参照される画像 [${urlPath}] がフォルダ内に見つかりません。`, "warn");
+          return match;
+        }
+      });
+    }
+
+
+    // ------------------------------------------
+    // 📦 JavaScript スマートバンドル処理
+    // ------------------------------------------
+    function executeSmartJSBundle(entryPoint, addStrict, keepComments) {
+      if (!entryPoint || !filesStore[entryPoint]) throw new Error("起点となるJSが見つかりません。");
+      const bundledModules = {};
+      const visited = new Set();
+      const golfEnabled = optGolf && optGolf.checked;
+
+      function buildDependencyTree(currentPath) {
+        if (visited.has(currentPath)) return;
+        visited.add(currentPath);
+        usedFilesSet.add(currentPath);
+
+        const file = filesStore[currentPath];
+        if (!file) return;
+
+        if (!isJSFile(currentPath)) {
+          bundledModules[currentPath] = { code: "module.exports={};", path: currentPath };
+          return;
+        }
+
+        const rawSource = file.content;
+        const dependencies = extractDependencies(rawSource);
+        
+        const localDependencyPaths = {};
+        dependencies.forEach(dep => {
+          const resolvedPath = resolveRelativePath(currentPath, dep);
+          if (resolvedPath && filesStore[resolvedPath]) {
+            localDependencyPaths[dep] = resolvedPath;
+            buildDependencyTree(resolvedPath);
+          }
+        });
+
+        const transformedSource = transformESMtoCJS(rawSource, currentPath, localDependencyPaths, keepComments);
+        bundledModules[currentPath] = { code: transformedSource, path: currentPath };
+      }
+
+      buildDependencyTree(entryPoint);
+
+      let finalBundle = "";
+      if (addStrict) finalBundle += `"use strict";\n`;
+
+      if (golfEnabled) {
+        // ⛳️ エグいゴルフ：モジュールランタイム（require関数群）を極小の無名IIFEに圧縮
+        finalBundle += `!function(m,c){function r(i){if(c[i])return c[i].exports;var e=c[i]={exports:{}};if(!m[i])return window[i];m[i](r,e,e.exports);return e.exports}r(${JSON.stringify(entryPoint)})}({\n`;
+        const moduleKeys = Object.keys(bundledModules);
+        moduleKeys.forEach((path, index) => {
+          finalBundle += `${JSON.stringify(path)}:function(require,module,exports){${bundledModules[path].code}}${index === moduleKeys.length - 1 ? '' : ','}\n`;
+        });
+        finalBundle += `},{});`;
+      } else {
+        // 従来の可読性重視ランタイム（🐛 行コメント // を /* */ に修正）
+        finalBundle += `(function() {\n  /* Web Asset Bundler - Modules Container */\n  const modules = {\n`;
+        const moduleKeys = Object.keys(bundledModules);
+        moduleKeys.forEach((path, index) => {
+          if (keepComments) finalBundle += `    /* --- Module Boundary: ${path} --- */\n`;
+          finalBundle += `    ${JSON.stringify(path)}: function(require, module, exports) {\n`;
+          finalBundle += bundledModules[path].code.split('\n').map(line => '      ' + line).join('\n') + `\n`;
+          finalBundle += `    }${index === moduleKeys.length - 1 ? '' : ','}\n\n`;
+        });
+        finalBundle += `  };\n  const cache = {};\n  function require(moduleId) {\n`;
+        finalBundle += `    if (cache[moduleId]) return cache[moduleId].exports;\n`;
+        finalBundle += `    const module = cache[moduleId] = { exports: {} };\n`;
+        finalBundle += `    if (!modules[moduleId]) {\n`;
+        finalBundle += `      if (typeof window !== 'undefined' && window[moduleId]) return window[moduleId];\n`;
+        finalBundle += `      throw new Error("Cannot find module '" + moduleId + "' in dynamic bundle");\n    }\n`;
+        finalBundle += `    modules[moduleId](require, module, module.exports);\n    return module.exports;\n  }\n`;
+        finalBundle += `  return require(${JSON.stringify(entryPoint)});\n})();\n`;
+      }
+
+      return finalBundle;
+    }
+
+    // ------------------------------------------
+    // 🔗 JavaScript 単純上から結合
+    // ------------------------------------------
+    function executeSimpleJSBundle(addStrict, keepComments) {
+      const iifeWrapped = document.getElementById('opt-iife').checked;
+      let output = "";
+
+      if (addStrict) output += `"use strict";\n`;
+
+      fileOrder.forEach(path => {
+        const file = filesStore[path];
+        if (!file) return;
+        usedFilesSet.add(path);
+
+        // 🐛修正: 行コメント // をブロックコメント /* */ に変更
+        if (keepComments) {
+          output += `/* ========================================== */\n`;
+          output += `/* FILE: ${path} */\n`;
+          output += `/* ========================================== */\n`;
+        }
+
+        if (iifeWrapped) output += `(function() {\n/* --- START OF SCOPE --- */\n`;
+        output += file.content + `\n`;
+        if (iifeWrapped) output += `})(); /* --- END OF SCOPE --- */\n\n`;
+        else output += `\n`;
+      });
+
+      const golfEnabled = optGolf && optGolf.checked;
+      if (golfEnabled) {
+        try {
+          const enableMangle = document.getElementById('golf-mangle').checked;
+          const enableConsoleStrip = document.getElementById('golf-console').checked;
+          const activePlugins = [];
+          if (enableConsoleStrip) activePlugins.push(consoleStripperPlugin);
+          if (enableMangle) activePlugins.push(astVariableManglerPlugin);
+          // 極限圧縮も有効なら追加
+          const enableExtreme = document.getElementById('golf-extreme') && document.getElementById('golf-extreme').checked;
+          if (enableExtreme) activePlugins.push(extremeGolfPlugin);
+
+          const { code } = Babel.transform(output, {
+            plugins: activePlugins,
+            parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy'] },
+            comments: false, minified: true, compact: true
+          });
+          output = code;
+        } catch (err) {
+          addLog(`コードゴルフ処理中にエラー: ${err.message}`, "warn");
+        }
+      }
+      return output;
+    }
+
+    // ------------------------------------------
+    // 🧬 依存モジュール解決 & トランスパイラ補助
+    // ------------------------------------------
+    
+    // パス解決ロジック（相対・ルート絶対パス対応）
+    function resolveRelativePath(fromPath, relativePath) {
+      let cleanRelativePath = relativePath;
+      if (relativePath.startsWith('/')) {
+        cleanRelativePath = relativePath.substring(1);
+        if (filesStore[cleanRelativePath]) return cleanRelativePath;
+        
+        const extensions = ['.js', '.mjs', '.ts', '.jsx', '.tsx', '/index.js', '/index.mjs'];
+        for (const ext of extensions) {
+          if (filesStore[cleanRelativePath + ext]) return cleanRelativePath + ext;
+        }
+        return cleanRelativePath;
+      }
+
+      const dirParts = fromPath.split('/');
+      dirParts.pop(); // ファイル名を除去
+      const currentDir = dirParts.join('/');
+
+      let resolved = '';
+      if (cleanRelativePath.startsWith('./') || cleanRelativePath.startsWith('../')) {
+        const parts = (currentDir + '/' + cleanRelativePath).split('/');
+        const stack = [];
+        for (const part of parts) {
+          if (part === '.' || part === '') continue;
+          if (part === '..') {
+            stack.pop();
+          } else {
+            stack.push(part);
+          }
+        }
+        resolved = stack.join('/');
+      } else {
+        // 相対記述がないものも同一ディレクトリとして解釈を試みる
+        if (currentDir) {
+          resolved = currentDir + '/' + cleanRelativePath;
+        } else {
+          resolved = cleanRelativePath;
+        }
+      }
+
+      // 拡張子の自動補完試行
+      const extensions = ['.js', '.mjs', '.ts', '.jsx', '.tsx', '/index.js', '/index.mjs', '.css', '.json'];
+      if (filesStore[resolved]) return resolved;
+      
+      for (const ext of extensions) {
+        if (filesStore[resolved + ext]) return resolved + ext;
+      }
+
+      return resolved;
+    }
+
+    // 抽象構文木 (AST) をベースにした依存アセットの確実な走査・抽出
+    function extractDependencies(source) {
+      const deps = new Set();
+      
+      // AST解析用のカスタムBabelビジタープラグイン
+      const dependencyCollectorPlugin = () => {
+        return {
+          visitor: {
+            ImportDeclaration(path) {
+              if (path.node.source && path.node.source.value) {
+                deps.add(path.node.source.value);
+              }
+            },
+            ExportNamedDeclaration(path) {
+              if (path.node.source && path.node.source.value) {
+                deps.add(path.node.source.value);
+              }
+            },
+            ExportAllDeclaration(path) {
+              if (path.node.source && path.node.source.value) {
+                deps.add(path.node.source.value);
+              }
+            },
+            CallExpression(path) {
+              const node = path.node;
+              if (
+                node.callee &&
+                node.callee.type === 'Identifier' &&
+                node.callee.name === 'require' &&
+                node.arguments &&
+                node.arguments.length === 1 &&
+                (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')
+              ) {
+                deps.add(node.arguments[0].value);
+              }
+            }
+          }
+        };
+      };
+
+      try {
+        Babel.transform(source, {
+          plugins: [dependencyCollectorPlugin],
+          parserOpts: {
+            sourceType: 'module',
+            plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy']
+          }
+        });
+      } catch (err) {
+        console.error("Babel ASTパーサーによる依存関係の解析失敗:", err);
+        throw new Error(`構文解析エラーが発生しました。コードにエラーが含まれている可能性があります:\n${err.message}`);
+      }
+
+      return Array.from(deps);
+    }
+
+    // ⛳️ コードゴルフ：console.log系のシュレッダープラグイン (式内展開時のSyntaxError防止構造)
+    const consoleStripperPlugin = () => {
+      return {
+        visitor: {
+          CallExpression(path) {
+            const callee = path.node.callee;
+            if (
+              callee.type === 'MemberExpression' &&
+              callee.object.type === 'Identifier' &&
+              callee.object.name === 'console' &&
+              callee.property.type === 'Identifier' &&
+              ['log', 'debug', 'info', 'warn', 'clear'].includes(callee.property.name)
+            ) {
+              // 単独の式文として存在している場合はASTから物理的に安全削除
+              if (path.parentPath.isExpressionStatement()) {
+                path.remove();
+              } else {
+                // 三項演算子内や代入など、式の文脈の一部として使われている場合は、
+                // 構文木を破壊しないように安全な 'undefined' 変数ノードに置換
+                path.replaceWith({ type: 'Identifier', name: 'undefined' });
+              }
+            }
+          },
+          DebuggerStatement(path) {
+            path.remove(); // debugger 宣言も削り落とす
+          }
+        }
+      };
+    };
+
+    // ⛳️ コードゴルフ：Babel ASTスコープトラバーサーを駆使した安全な変数名マングラー（ローカル1文字化）
+    const astVariableManglerPlugin = () => {
+      // JSの主要な予約語・厳格モードでの禁止語リスト
+      const reservedWords = new Set([
+        'do','if','in','for','let','new','try','var','case','else','with','await',
+        'break','catch','class','const','super','throw','while','yield','delete',
+        'export','import','return','switch','typeof','default','extends','finally',
+        'continue','debugger','function','arguments','null','true','false','NaN'
+      ]);
+
+      return {
+        visitor: {
+          Program(path) {
+            let idCounter = 0;
+            const generateName = () => {
+              const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_';
+              let num = idCounter++;
+              let name = '';
+              while (num >= 0) {
+                name = chars[num % chars.length] + name;
+                num = Math.floor(num / chars.length) - 1;
+              }
+              return name;
+            };
+
+            path.traverse({
+              Scope(scopePath) {
+                // トップレベル（グローバル）変数をリネームすると、別ファイルからのモジュール結合が壊れるため
+                // 関数内、ループブロックなどのローカルスコープ配下に完全に限定する。
+                if (scopePath.scope.parent === null) return;
+
+                const bindings = scopePath.scope.bindings;
+                for (const name in bindings) {
+                  // すでに1文字の場合はスキップ
+                  if (name.length === 1) continue;
+
+                  let newName;
+                  do {
+                    newName = generateName();
+                  } while (
+                    reservedWords.has(newName) || // 💡 予約語との衝突を回避！
+                    scopePath.scope.hasBinding(newName) || 
+                    scopePath.scope.hasGlobal(newName)
+                  );
+
+                  scopePath.scope.rename(name, newName);
+                }
+              }
+            });
+          }
+        }
+      };
+    };
+
+    // ⛳️ コードゴルフ：構文そのものを破壊・短縮するエグいオプティマイザ (超強化版)
+    const extremeGolfPlugin = ({ types: t }) => {
+      return {
+        visitor: {
+          // 1. 真偽値のハッキング (true -> !0, false -> !1)
+          BooleanLiteral(path) {
+            path.replaceWith(t.unaryExpression('!', t.numericLiteral(path.node.value ? 0 : 1)));
+          },
+
+          // 2. 数値の指数表記化 (10000 -> 1e4)
+          NumericLiteral(path) {
+            const val = path.node.value;
+            if (Number.isInteger(val) && val >= 1000 && val.toString().endsWith('000')) {
+              const cleanExp = val.toExponential().replace('+', '');
+              if (cleanExp.length < val.toString().length) {
+                path.node.extra = { raw: cleanExp, rawValue: val };
+              }
+            }
+          },
+
+          // 3. 定数畳み込み (Constant Folding): 静的な計算式を事前に計算して結果に置換
+          BinaryExpression(path) {
+            const { operator, left, right } = path.node;
+            if (t.isNumericLiteral(left) && t.isNumericLiteral(right)) {
+              let res;
+              switch(operator) {
+                case '+': res = left.value + right.value; break;
+                case '-': res = left.value - right.value; break;
+                case '*': res = left.value * right.value; break;
+                case '/': res = left.value / right.value; break;
+              }
+              if (res !== undefined) path.replaceWith(t.numericLiteral(res));
+            }
+          },
+
+          // 4. if文の極限圧縮 (if-else -> 三項演算子, if -> 短絡評価)
+          IfStatement(path) {
+            const { test, consequent, alternate } = path.node;
+            
+            // { } ブロックを取り外して中身を取り出すヘルパー
+            const getSingleStatement = (stmt) => {
+              if (t.isBlockStatement(stmt) && stmt.body.length === 1) return stmt.body[0];
+              if (!t.isBlockStatement(stmt)) return stmt;
+              return null;
+            };
+
+            const consStmt = getSingleStatement(consequent);
+            const altStmt = alternate ? getSingleStatement(alternate) : null;
+
+            // パターンA: if (a) b(); else c();  =>  a ? b() : c();
+            if (consStmt && altStmt) {
+              if (t.isExpressionStatement(consStmt) && t.isExpressionStatement(altStmt)) {
+                path.replaceWith(t.expressionStatement(
+                  t.conditionalExpression(test, consStmt.expression, altStmt.expression)
+                ));
+              } 
+              // パターンB: if (a) return b; else return c; => return a ? b : c;
+              else if (t.isReturnStatement(consStmt) && t.isReturnStatement(altStmt)) {
+                path.replaceWith(t.returnStatement(
+                  t.conditionalExpression(
+                    test, 
+                    consStmt.argument || t.identifier('undefined'), 
+                    altStmt.argument || t.identifier('undefined')
+                  )
+                ));
+              }
+            } 
+            // パターンC: if (a) b(); => a && b();
+            else if (consStmt && !alternate && t.isExpressionStatement(consStmt)) {
+              path.replaceWith(t.expressionStatement(
+                t.logicalExpression('&&', test, consStmt.expression)
+              ));
+            }
+          }
+        }
+      };
+    };
+
+    // AST のトラバースと Babel トランスパイラを組み合わせて、
+    // パス書き換えとESM➔CommonJS変換を同時に100%正確に実行
+    function transformESMtoCJS(source, fromPath, resolvedPaths, keepComments) {
+      const golfEnabled = optGolf.checked;
+      const enableMangle = document.getElementById('golf-mangle').checked;
+      const enableConsoleStrip = document.getElementById('golf-console').checked;
+      const enableExtreme = document.getElementById('golf-extreme').checked;
+
+      // 1. AST上を直接走査して、依存関係のある相対パスを「解決後のパス」に書き換えるカスタムBabelプラグイン
+      const pathRewriterPlugin = () => {
+        return {
+          visitor: {
+            ImportDeclaration(path) {
+              if (path.node.source && path.node.source.value) {
+                const raw = path.node.source.value;
+                if (resolvedPaths[raw]) {
+                  path.node.source.value = resolvedPaths[raw];
+                }
+              }
+            },
+            ExportNamedDeclaration(path) {
+              if (path.node.source && path.node.source.value) {
+                const raw = path.node.source.value;
+                if (resolvedPaths[raw]) {
+                  path.node.source.value = resolvedPaths[raw];
+                }
+              }
+            },
+            ExportAllDeclaration(path) {
+              if (path.node.source && path.node.source.value) {
+                const raw = path.node.source.value;
+                if (resolvedPaths[raw]) {
+                  path.node.source.value = resolvedPaths[raw];
+                }
+              }
+            },
+            CallExpression(path) {
+              const node = path.node;
+              if (
+                node.callee &&
+                node.callee.type === 'Identifier' &&
+                node.callee.name === 'require' &&
+                node.arguments &&
+                node.arguments.length === 1 &&
+                (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')
+              ) {
+                const raw = node.arguments[0].value;
+                if (resolvedPaths[raw]) {
+                  node.arguments[0].value = resolvedPaths[raw];
+                }
+              }
+            }
+          }
+        };
+      };
+
+      // 適用するプラグインの構築
+      const activePlugins = [pathRewriterPlugin];
+      
+      if (golfEnabled) {
+        if (enableConsoleStrip) {
+          activePlugins.push(consoleStripperPlugin);
+        }
+        if (enableMangle) {
+          activePlugins.push(astVariableManglerPlugin);
+        }
+        if (enableExtreme) {
+          activePlugins.push(extremeGolfPlugin);
+        }
+      }
+
+      // transform-modules-commonjs を最後に適用
+      activePlugins.push('transform-modules-commonjs');
+
+      try {
+        const { code } = Babel.transform(source, {
+          plugins: activePlugins,
+          parserOpts: {
+            sourceType: 'module',
+            plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy']
+          },
+          // ⛳️ コードゴルフ時はコメントを完全除去し、ジェネレータで極限まで改行・空白を詰め込む
+          comments: golfEnabled ? false : keepComments,
+          minified: golfEnabled ? true : false,
+          compact: golfEnabled ? true : false
+        });
+
+        return code;
+      } catch (err) {
+        console.error("Babel ASTトランスパイルエラー:", err);
+        throw new Error(`[${fromPath}] のパース・構文変換中にASTコンパイルエラーが発生しました:\n${err.message}`);
+      }
+    }
+
+    // 行番号算出
+    function updateLineNumbers(code) {
+      const lines = code.split('\n').length;
+      let numbersHtml = '';
+      for (let i = 1; i <= Math.max(lines, 1); i++) {
+        numbersHtml += `${i}<br>`;
+      }
+      lineNumbers.innerHTML = numbersHtml;
+    }
+
+    // クリップボード複写 (モダン API + フォールバック)
+    async function copyToClipboard() {
+      const text = outputCode.value;
+      if (!text) return;
+      
+      if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(text);
+          showToast("クリップボードにコピーしました！", "success");
+          return;
+        } catch (err) {
+          console.warn("Clipboard API が制限または失敗したため、フォールバックを実行します", err);
+        }
+      }
+
+      // レガシーな代替手法
+      const tempTextarea = document.createElement('textarea');
+      tempTextarea.value = text;
+      document.body.appendChild(tempTextarea);
+      tempTextarea.select();
+      try {
+        document.execCommand('copy');
+        showToast("クリップボードにコピーしました！", "success");
+      } catch (err) {
+        showToast("コピーに失敗しました", "error");
+      } finally {
+        document.body.removeChild(tempTextarea);
+      }
+    }
+
+    // ダウンロードトリガー
+    function downloadOutput() {
+      const text = outputCode.value;
+      if (!text) return;
+
+      const isHtml = currentMode === 'html';
+      const filename = isHtml ? 'index.html' : 'bundle.js';
+      const mimeType = isHtml ? 'text/html' : 'application/javascript';
+
+      const blob = new Blob([text], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showToast(`${filename} をダウンロードしました！`, "success");
+    }
+
+    // カスタムトースト表示
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      const text = document.getElementById('toast-text');
+      const icon = document.getElementById('toast-icon');
+
+      text.textContent = message;
+
+      if (type === 'success') {
+        icon.innerHTML = '<i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>';
+        toast.className = "fixed bottom-6 right-6 bg-slate-900 border border-emerald-500/30 text-slate-100 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 translate-y-0 opacity-100";
+      } else if (type === 'error') {
+        icon.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4 text-red-400"></i>';
+        toast.className = "fixed bottom-6 right-6 bg-slate-900 border border-red-500/30 text-slate-100 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 translate-y-0 opacity-100";
+      } else {
+        icon.innerHTML = '<i data-lucide="info" class="w-4 h-4 text-brand-400"></i>';
+        toast.className = "fixed bottom-6 right-6 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 translate-y-0 opacity-100";
+      }
+      lucide.createIcons();
+
+      setTimeout(() => {
+        toast.className = "fixed bottom-6 right-6 transform translate-y-10 opacity-0 bg-slate-900 border border-slate-800/80 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 pointer-events-none";
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
