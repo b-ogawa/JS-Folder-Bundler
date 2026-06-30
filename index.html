@@ -1691,9 +1691,8 @@
             };
         };
 
-        // Babel ASTスコープトラバースによる変数名マングラー
+        // Babel ASTスコープトラバースによる変数名マングラー (The Last Stand: モジュールスコープ粉砕版)
         const createManglerPlugin = (extraReserved = []) => {
-            // JSの純粋な標準予約語とグローバルオブジェクトのみを定義。
             const reservedWords = new Set([
                 'do', 'if', 'in', 'for', 'let', 'new', 'try', 'var', 'case', 'else', 'with', 'await',
                 'break', 'catch', 'class', 'const', 'super', 'throw', 'while', 'yield', 'delete',
@@ -1702,7 +1701,6 @@
                 'undefined', 'Math', 'console', 'window', 'document', 'navigator', 'this',
                 'require', 'module', 'exports', '__esModule'
             ]);
-            // 動的に渡されたHTML等のDOM上保護関数リストを完全に統合
             extraReserved.forEach(word => reservedWords.add(word));
 
             return {
@@ -1710,31 +1708,28 @@
                     Program(path) {
                         const localNamesToRename = new Set();
 
-                        // 1. 予約語の収集と、ローカル変数のリストアップ
                         path.traverse({
                             Identifier(p) {
-                                // 変数の宣言または参照である場合のみ評価 (プロパティ名などは除外)
                                 if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
                                     const name = p.node.name;
+                                    // モジュールのトップレベルスコープ（プログラムスコープ）もローカルとみなす
                                     const binding = p.scope.getBinding(name);
+                                    const isGlobal = !binding && !p.scope.hasBinding(name, true);
 
-                                    if (!binding) {
-                                        // スコープに属さない(グローバルや未宣言)ものは保護
+                                    if (isGlobal) {
                                         reservedWords.add(name);
                                     } else if (name.length === 1) {
-                                        // 元から1文字の変数も保護
                                         reservedWords.add(name);
                                     } else if (reservedWords.has(name)) {
-                                        // 既に保護リストに入っている名前ならリネーム対象にしない
+                                        // 既に保護リストに入っている場合はスキップ
                                     } else {
-                                        // 圧縮可能なローカル変数をリストにプール
+                                        // ESMのトップレベル変数も容赦なくリネーム対象に叩き込む！
                                         localNamesToRename.add(name);
                                     }
                                 }
                             }
                         });
 
-                        // 2. リネームマップの生成
                         let idCounter = 0;
                         const generateName = () => {
                             const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$';
@@ -1750,21 +1745,17 @@
                         const renameMap = new Map();
                         localNamesToRename.forEach(oldName => {
                             let newName;
-                            do {
-                                newName = generateName();
-                            } while (reservedWords.has(newName));
-
+                            do { newName = generateName(); } while (reservedWords.has(newName));
                             reservedWords.add(newName);
                             renameMap.set(oldName, newName);
                         });
 
-                        // 3. 一斉書き換え (Babelのスコープバグを完全回避)
                         path.traverse({
                             Identifier(p) {
                                 if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
                                     const name = p.node.name;
-                                    // リネーム対象であり、かつ実際にローカルスコープに属しているか確認して直接置換
-                                    if (renameMap.has(name) && p.scope.getBinding(name)) {
+                                    if (renameMap.has(name)) {
+                                        //  紐付け(binding)の有無に関わらず、マップに登録された名前は強制的に置換
                                         p.node.name = renameMap.get(name);
                                     }
                                 }
@@ -1886,6 +1877,7 @@
                         const callee = path.node.callee;
 
                         // getElementById の抹消 (DOMグローバルハック)
+                        // ※これは安全なので残します
                         if (
                             t.isMemberExpression(callee) &&
                             t.isIdentifier(callee.property, { name: 'getElementById' }) &&
@@ -1897,57 +1889,13 @@
                             return;
                         }
 
-                        // addEventListener の抹消 (強制プロパティ化)
-                        // el.addEventListener('click', fn) ➔ el.onclick = fn
-                        if (
-                            t.isMemberExpression(callee) &&
-                            t.isIdentifier(callee.property, { name: 'addEventListener' }) &&
-                            path.node.arguments.length >= 2 &&
-                            t.isStringLiteral(path.node.arguments[0])
-                        ) {
-                            const eventName = path.node.arguments[0].value;
-                            // DOMContentLoadedなどの特殊イベント以外は on~ に変換！
-                            if (eventName !== 'DOMContentLoaded') {
-                                path.replaceWith(
-                                    t.assignmentExpression(
-                                        '=',
-                                        t.memberExpression(callee.object, t.identifier('on' + eventName)),
-                                        path.node.arguments[1]
-                                    )
-                                );
-                                return;
-                            }
-                        }
-
-                        // setAttribute の抹消 (強制プロパティ代入)
-                        // el.setAttribute('src', val) ➔ el.src = val
-
-                        if (
-                            t.isMemberExpression(callee) &&
-                            t.isIdentifier(callee.property, { name: 'setAttribute' }) &&
-                            path.node.arguments.length === 2 &&
-                            t.isStringLiteral(path.node.arguments[0])
-                        ) {
-                            const attr = path.node.arguments[0].value;
-                            // classやdata-属性など、プロパティと名前が違うものは安全のため除外
-                            if (!attr.includes('-') && attr !== 'class' && attr !== 'for') {
-                                path.replaceWith(
-                                    t.assignmentExpression(
-                                        '=',
-                                        t.memberExpression(callee.object, t.identifier(attr)),
-                                        path.node.arguments[1]
-                                    )
-                                );
-                                return;
-                            }
-                        }
-
                         // parseInt の抹消 (ビット演算化)
                         if (t.isIdentifier(callee, { name: 'parseInt' }) && path.node.arguments.length >= 1) {
                             path.replaceWith(t.binaryExpression('|', path.node.arguments[0], t.numericLiteral(0)));
                             return;
                         }
 
+                        // Math.floor / Math.trunc / Math.round のビット反転ハック
                         if (
                             t.isMemberExpression(callee) &&
                             t.isIdentifier(callee.object, { name: 'Math' }) &&
@@ -1981,38 +1929,13 @@
                         }
                     },
 
-                    // 文字列のミニファイ (GLSL / Worker) はそのまま維持
+                    // 文字列のミニファイ (GLSL / Worker / 数式)
                     "StringLiteral|TemplateElement"(path) {
-                        const enableStringHack = document.getElementById('golf-string-hack') && document.getElementById('golf-string-hack').checked;
-                        if (!enableStringHack) return;
                         const isTemplate = t.isTemplateElement(path.node);
                         let text = isTemplate ? path.node.value.raw : path.node.value;
                         if (!text || text.length < 15) return;
 
-                        const hasGLSLKeywords = /(vec[234]|float\s|void\s+main|#version|gl_Position|layout\s*\(|precision\s+highp)/.test(text);
-                        const isFractalFormula = /return\s+c[A-Z][a-zA-Z0-9_]*\s*\(/.test(text) || text.includes('mix(') || text.includes('atanSafe(');
-
-                        if (hasGLSLKeywords || isFractalFormula) {
-                            text = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-                            const dirs = [];
-                            text = text.replace(/^\s*(#\w+.*)$/gm, (m, p1) => { dirs.push(p1); return `__DIR_${dirs.length - 1}__\n`; });
-                            text = text.replace(/\s+/g, ' ');
-                            text = text.replace(/\s*([;,\{\}\(\)\=\+\-\*\/\<\>\!\|&\[\]\?])\s*/g, '$1');
-                            text = text.replace(/\breturn([a-zA-Z0-9_])/g, 'return $1');
-                            text = text.replace(/\belse([a-zA-Z0-9_])/g, 'else $1');
-                            text = text.replace(/\)(in|out|uniform)\b/g, ') $1');
-                            dirs.forEach((d, i) => { text = text.replace(new RegExp(`__DIR_${i}__\\s*`), d + '\n'); });
-                            text = text.trim();
-
-                            if (isTemplate) {
-                                path.node.value.raw = text;
-                                path.node.value.cooked = text.replace(/\\/g, '\\\\');
-                            } else {
-                                path.node.value = text;
-                            }
-                            return;
-                        }
-
+                        // 1. Web Worker などの純粋なJS文字列の再帰圧縮
                         const isSafeForJsParse = !isTemplate || (path.parentPath.node.expressions && path.parentPath.node.expressions.length === 0);
                         if (isSafeForJsParse && window.Babel) {
                             const isInlineJS = /(postMessage|onmessage|self\.|importScripts|WorkerGlobalScope)/.test(text) &&
@@ -2025,8 +1948,44 @@
                                     if (res && res.code) {
                                         if (isTemplate) { path.node.value.raw = res.code; path.node.value.cooked = res.code.replace(/\\/g, '\\\\'); }
                                         else { path.node.value = res.code; }
+                                        return; // JSならここで終了
                                     }
                                 } catch (e) { }
+                            }
+                        }
+
+                        // 2.GLSLシェーダーや、数式が含まれる文字列の限界空白圧縮
+                        // 短い式も拾い上げるために判定条件を緩和
+                        const hasGLSLKeywords = /(vec[234]|float\s|void\s+main|#version|gl_Position|layout\s*\(|precision\s+highp)/.test(text);
+                        const hasMathOrReturn = /(return\s|mix\(|pow\(|sin\(|cos\(|length\()/.test(text) && /[;\+\-\*\/]/.test(text);
+                        const isNotHtml = !/<[a-z]+[\s>]/i.test(text); // HTMLは別処理なので除外
+
+                        if ((hasGLSLKeywords || hasMathOrReturn) && isNotHtml) {
+                            // コメント除去 (// および /* */)
+                            text = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+
+                            // プリプロセッサディレクティブの退避 (#versionなど)
+                            const dirs = [];
+                            text = text.replace(/^\s*(#\w+.*)$/gm, (m, p1) => { dirs.push(p1); return `__DIR_${dirs.length - 1}__\n`; });
+
+                            // 限界空白圧縮（演算子の間のスペースを消滅させる）
+                            text = text.replace(/\s+/g, ' ');
+                            text = text.replace(/\s*([;,\{\}\(\)\=\+\-\*\/\<\>\!\|&\[\]\?])\s*/g, '$1');
+
+                            // JS/GLSLとして必須のスペースを復元
+                            text = text.replace(/\breturn([a-zA-Z0-9_])/g, 'return $1');
+                            text = text.replace(/\belse([a-zA-Z0-9_])/g, 'else $1');
+                            text = text.replace(/\)(in|out|uniform)\b/g, ') $1');
+
+                            // ディレクティブ復元
+                            dirs.forEach((d, i) => { text = text.replace(new RegExp(`__DIR_${i}__\\s*`), d + '\n'); });
+                            text = text.trim();
+
+                            if (isTemplate) {
+                                path.node.value.raw = text;
+                                path.node.value.cooked = text.replace(/\\/g, '\\\\');
+                            } else {
+                                path.node.value = text;
                             }
                         }
                     }
