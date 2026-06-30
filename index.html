@@ -788,7 +788,7 @@
                 return {
                     visitor: {
                         Program(path) {
-                            const localNamesToRename = new Set();
+                            const nameFrequency = new Map(); // 出現回数を記録するMap
                             path.traverse({
                                 Identifier(p) {
                                     if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
@@ -796,14 +796,10 @@
                                         const binding = p.scope.getBinding(name);
                                         const isGlobal = !binding && !p.scope.hasBinding(name, true);
 
-                                        if (isGlobal) {
-                                            reservedWords.add(name);
-                                        } else if (name.length === 1) {
-                                            reservedWords.add(name);
-                                        } else if (reservedWords.has(name)) {
-                                            // スキップ
+                                        if (isGlobal || name.length === 1 || reservedWords.has(name)) {
+                                            if (isGlobal || name.length === 1) reservedWords.add(name);
                                         } else {
-                                            localNamesToRename.add(name);
+                                            nameFrequency.set(name, (nameFrequency.get(name) || 0) + 1);
                                         }
                                     }
                                 }
@@ -822,7 +818,10 @@
                             };
 
                             const renameMap = new Map();
-                            localNamesToRename.forEach(oldName => {
+                            // 出現頻度の降順で短い名前を割り当て
+                            const sortedNames = Array.from(nameFrequency.keys()).sort((a, b) => nameFrequency.get(b) - nameFrequency.get(a));
+
+                            sortedNames.forEach(oldName => {
                                 let newName;
                                 do { newName = generateName(); } while (reservedWords.has(newName));
                                 reservedWords.add(newName);
@@ -870,20 +869,17 @@
                 };
 
                 const mergeVariablesSafely = (path) => {
-                    const body = path.node.body;
-                    if (!body) return;
-                    for (let i = 0; i < body.length - 1; i++) {
-                        const current = body[i];
-                        const next = body[i + 1];
-                        if (t.isVariableDeclaration(current) && t.isVariableDeclaration(next)) {
-                            if (current.kind !== 'var' && next.kind !== 'var') {
-                                current.kind = 'let';
-                                current.declarations.push(...next.declarations);
-                                body.splice(i + 1, 1);
-                                i--;
-                            } else if (current.kind === 'var' && next.kind === 'var') {
-                                current.declarations.push(...next.declarations);
-                                body.splice(i + 1, 1);
+                    const bodyPath = path.get('body');
+                    if (!Array.isArray(bodyPath)) return;
+                    for (let i = 0; i < bodyPath.length - 1; i++) {
+                        const current = bodyPath[i];
+                        const next = bodyPath[i + 1];
+                        if (current.isVariableDeclaration() && next.isVariableDeclaration()) {
+                            if (current.node.kind === next.node.kind || (current.node.kind !== 'var' && next.node.kind !== 'var')) {
+                                const targetKind = (current.node.kind === 'var' && next.node.kind === 'var') ? 'var' : 'let';
+                                current.node.kind = targetKind;
+                                current.node.declarations.push(...next.node.declarations);
+                                next.remove();
                                 i--;
                             }
                         }
@@ -906,12 +902,34 @@
                         }
                     }
                 };
+                const mergeExpressions = (path) => {
+                    const bodyPath = path.get('body');
+                    if (!Array.isArray(bodyPath)) return;
+                    for (let i = 0; i < bodyPath.length - 1; i++) {
+                        const current = bodyPath[i];
+                        const next = bodyPath[i + 1];
+
+                        if (current.isExpressionStatement() && next.isExpressionStatement()) {
+                            const exprs = [];
+                            if (t.isSequenceExpression(current.node.expression)) exprs.push(...current.node.expression.expressions);
+                            else exprs.push(current.node.expression);
+
+                            if (t.isSequenceExpression(next.node.expression)) exprs.push(...next.node.expression.expressions);
+                            else exprs.push(next.node.expression);
+
+                            current.replaceWith(t.expressionStatement(t.sequenceExpression(exprs)));
+                            next.remove();
+                            i--;
+                        }
+                    }
+                };
 
                 return {
                     visitor: {
                         "Program|BlockStatement"(path) {
                             mergeVariablesSafely(path);
                             mergeReturnAssignment(path);
+                            mergeExpressions(path);
                         },
                         BooleanLiteral(path) {
                             path.replaceWith(t.unaryExpression('!', t.numericLiteral(path.node.value ? 0 : 1)));
@@ -927,15 +945,13 @@
                         },
                         BinaryExpression(path) {
                             const { operator, left, right } = path.node;
-                            if ((operator === '===' || operator === '==') && t.isIdentifier(right, { name: 'undefined' })) {
+                            if (operator === '===' && t.isIdentifier(right, { name: 'undefined' })) {
                                 path.node.operator = '==';
                                 path.node.right = t.nullLiteral();
-                            } else if ((operator === '===' || operator === '==') && t.isIdentifier(left, { name: 'undefined' })) {
+                            } else if (operator === '===' && t.isIdentifier(left, { name: 'undefined' })) {
                                 path.node.operator = '==';
                                 path.node.left = t.nullLiteral();
                             }
-                            if (operator === '===') path.node.operator = '==';
-                            if (operator === '!==') path.node.operator = '!=';
 
                             if (t.isNumericLiteral(left) && t.isNumericLiteral(right)) {
                                 let res;
@@ -971,17 +987,41 @@
                                 return null;
                             };
 
+                            const getAssign = (stmt) => {
+                                if (!stmt) return null;
+                                if (t.isExpressionStatement(stmt) && t.isAssignmentExpression(stmt.expression)) return stmt.expression;
+                                if (t.isBlockStatement(stmt) && stmt.body.length === 1 && t.isExpressionStatement(stmt.body[0]) && t.isAssignmentExpression(stmt.body[0].expression)) return stmt.body[0].expression;
+                                return null;
+                            };
+
                             const consPure = getPureExpression(consequent);
                             const altPure = alternate ? getPureExpression(alternate) : null;
                             const consRet = getReturnExpression(consequent);
                             const altRet = alternate ? getReturnExpression(alternate) : null;
+                            const consAssign = getAssign(consequent);
+                            const altAssign = alternate ? getAssign(alternate) : null;
+
+                            if (consAssign && altAssign && t.isIdentifier(consAssign.left) && t.isIdentifier(altAssign.left) && consAssign.left.name === altAssign.left.name && consAssign.operator === altAssign.operator) {
+                                path.replaceWith(t.expressionStatement(
+                                    t.assignmentExpression(
+                                        consAssign.operator,
+                                        consAssign.left,
+                                        t.conditionalExpression(test, consAssign.right, altAssign.right)
+                                    )
+                                ));
+                                return;
+                            }
 
                             if (consPure && altPure) {
                                 path.replaceWith(t.expressionStatement(t.conditionalExpression(test, consPure, altPure)));
                             } else if (consRet && altRet) {
                                 path.replaceWith(t.returnStatement(t.conditionalExpression(test, consRet, altRet)));
                             } else if (consPure && !alternate) {
-                                path.replaceWith(t.expressionStatement(t.logicalExpression('&&', test, consPure)));
+                                if (t.isUnaryExpression(test, { operator: '!' })) {
+                                    path.replaceWith(t.expressionStatement(t.logicalExpression('||', test.argument, consPure)));
+                                } else {
+                                    path.replaceWith(t.expressionStatement(t.logicalExpression('&&', test, consPure)));
+                                }
                             }
                         },
                         Identifier(path) {
@@ -1009,23 +1049,16 @@
                             });
                             if (!hasThisOrArgs) path.replaceWith(t.arrowFunctionExpression(path.node.params, path.node.body));
                         },
-                        /*
                         CallExpression(path) {
-                            const callee = path.node.callee;
-                            if (t.isIdentifier(callee, { name: 'parseInt' }) && path.node.arguments.length >= 1) {
-                                path.replaceWith(t.binaryExpression('|', path.node.arguments[0], t.numericLiteral(0)));
-                                return;
-                            }
-                            if (t.isMemberExpression(callee) && t.isIdentifier(callee.object, { name: 'Math' }) && path.node.arguments.length === 1) {
-                                const arg = path.node.arguments[0];
-                                if (t.isIdentifier(callee.property, { name: 'floor' }) || t.isIdentifier(callee.property, { name: 'trunc' })) {
-                                    path.replaceWith(t.unaryExpression('~', t.unaryExpression('~', arg)));
-                                } else if (t.isIdentifier(callee.property, { name: 'round' })) {
-                                    path.replaceWith(t.unaryExpression('~', t.unaryExpression('~', t.binaryExpression('+', arg, t.numericLiteral(0.5)))));
+                            const { callee, arguments: args } = path.node;
+                            if (args.length === 1 && t.isIdentifier(callee)) {
+                                // String(x) => ""+x (BigIntでも動作)
+                                if (callee.name === 'String') {
+                                    path.replaceWith(t.binaryExpression('+', t.stringLiteral(""), args[0]));
                                 }
+                                // Number(x) => +x は BigInt と衝突してアプリをクラッシュさせるため削除
                             }
                         },
-                        */
                         WhileStatement(path) {
                             const test = path.node.test;
                             const isTrueLiteral = t.isBooleanLiteral(test, { value: true });
@@ -1153,18 +1186,14 @@
 
             extractDependencies(source, fromPath, store) {
                 const deps = new Set();
-                const dependencyCollectorPlugin = () => {
+                const assets = new Set(); //  アセット依存用のセット
+
+                const dependencyCollectorPlugin = ({ types: t }) => {
                     return {
                         visitor: {
-                            ImportDeclaration(path) {
-                                if (path.node.source && path.node.source.value) deps.add(path.node.source.value);
-                            },
-                            ExportNamedDeclaration(path) {
-                                if (path.node.source && path.node.source.value) deps.add(path.node.source.value);
-                            },
-                            ExportAllDeclaration(path) {
-                                if (path.node.source && path.node.source.value) deps.add(path.node.source.value);
-                            },
+                            ImportDeclaration(path) { if (path.node.source && path.node.source.value) deps.add(path.node.source.value); },
+                            ExportNamedDeclaration(path) { if (path.node.source && path.node.source.value) deps.add(path.node.source.value); },
+                            ExportAllDeclaration(path) { if (path.node.source && path.node.source.value) deps.add(path.node.source.value); },
                             CallExpression(path) {
                                 const node = path.node;
                                 if (node.callee && node.callee.type === 'Identifier' && node.callee.name === 'require' && node.arguments && node.arguments.length === 1 && (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')) {
@@ -1175,6 +1204,25 @@
                                         deps.add(node.arguments[0].value);
                                     }
                                 }
+                            },
+                            // 文字列をアセットとして正規に収集する
+                            StringLiteral(path) {
+                                const parent = path.parent;
+                                if (t.isObjectProperty(parent) && parent.key === path.node) return;
+                                if (t.isImportDeclaration(parent) || t.isExportNamedDeclaration(parent) || t.isExportAllDeclaration(parent)) return;
+                                if (t.isCallExpression(parent)) {
+                                    const callee = parent.callee;
+                                    if (t.isIdentifier(callee, { name: 'require' })) return;
+                                    if (t.isImport(callee)) return;
+                                }
+
+                                const val = path.node.value;
+                                if (!val || val.length < 3 || val.includes('\n')) return;
+                                if (/^https?:\/\//.test(val) || val.startsWith('data:')) return;
+                                if (!/\.[a-zA-Z0-9]+$/.test(val)) return;
+                                if (val.split('/').pop().startsWith('_virtual_')) return;
+
+                                assets.add(val);
                             }
                         }
                     };
@@ -1185,18 +1233,15 @@
                         filename: (fromPath && (fromPath.endsWith('.ts') || fromPath.endsWith('.tsx') || fromPath.endsWith('.jsx'))) ? fromPath : (fromPath ? fromPath + '.tsx' : 'unknown.tsx'),
                         plugins: [dependencyCollectorPlugin],
                         parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] },
-                        ast: false,
-                        code: false
+                        ast: false, code: false
                     };
-
-                    // AST側で自動生成された依存関係（jsx-runtime等）をキャッチするためにルールを適用
                     const configRule = Config.extensionRules.babelConfig.find(r => r.condition(source, fromPath || '', store));
                     if (configRule) configRule.apply(baseOptions);
-
                     Babel.transform(source, baseOptions);
                 } catch (err) { throw new Error(`構文解析エラー:\n${err.message}`); }
 
-                return Array.from(deps);
+                // モジュール依存とアセット依存を明確に分離して返す
+                return { modules: Array.from(deps), assets: Array.from(assets) };
             }
 
             extractReservedFunctionsFromHtml(html) {
@@ -1303,89 +1348,35 @@
                     };
                 };
 
-                //あらゆる文字列リテラルをスキャンし、実在するローカルファイルなら自動で Blob URL / Data URL に置換するプラグイン
+                // 副作用を排除した純粋なデータ駆動の置換プラグイン
                 const assetInlinePlugin = ({ types: t }) => {
                     return {
                         visitor: {
                             StringLiteral: (path) => {
-                                const parent = path.parent;
-                                // オブジェクトのキーとしての文字列はスキップ
-                                if (t.isObjectProperty(parent) && parent.key === path.node) return;
-                                // import/export, require などのモジュール宣言はスキップ
-                                if (t.isImportDeclaration(parent) || t.isExportNamedDeclaration(parent) || t.isExportAllDeclaration(parent)) return;
-                                if (t.isCallExpression(parent)) {
-                                    const callee = parent.callee;
-                                    if (t.isIdentifier(callee, { name: 'require' })) return;
-                                    if (t.isImport(callee)) return;
-                                }
-
                                 const val = path.node.value;
-                                // 空文字や改行を含むもの、明らかにパスではないものを除外
-                                if (!val || val.length < 3 || val.includes('\n')) return;
-                                // すでにHTTPやDataURLのものは除外
-                                if (/^https?:\/\//.test(val) || val.startsWith('data:')) return;
-                                // 拡張子を持つパスっぽい文字列か簡易判定
-                                if (!/\.[a-zA-Z0-9]+$/.test(val)) return;
-
-                                if (options.store && options.scanner) {
-                                    // 文字列がプロジェクト内の実在ファイルかチェック
-                                    const resolvedPath = options.scanner.resolveRelativePath(fromPath, val, options.store);
-                                    if (options.store.hasFile(resolvedPath)) {
-                                        // コンパイラが動的生成した仮想ファイル (_virtual_...) は自己捕食を防ぐため絶対に対象外
-                                        if (resolvedPath.split('/').pop().startsWith('_virtual_')) return;
-
-                                        const file = options.store.getFile(resolvedPath);
-                                        options.store.addUsedFile(resolvedPath);
-
-                                        // バイナリ (画像など) の場合は Base64 / Data URL を直接文字列として埋め込む
-                                        if (file.isBinary) {
-                                            if (logger) logger.info(`バイナリアセットをインライン化: ${val}`);
-                                            path.replaceWith(t.stringLiteral(file.content));
-                                            return;
-                                        }
-
-                                        let content = file.content;
-                                        let mime = 'text/plain';
-                                        const ext = resolvedPath.split('.').pop().toLowerCase();
-
-                                        // JSファイル (Worker等) の場合は再帰的に極限圧縮をかける！
-                                        if (['js', 'mjs'].includes(ext)) {
-                                            mime = 'application/javascript';
-                                            try {
-                                                content = this.transformESMtoCJS(content, resolvedPath, {}, { ...options, skipCjs: true }, logger);
-                                            } catch (e) {
-                                                if (logger) logger.warn(`アセット [${resolvedPath}] の圧縮に失敗: ${e.message}`);
-                                            }
-                                        } else if (ext === 'json') {
-                                            mime = 'application/json';
-                                        } else if (['html', 'htm'].includes(ext)) {
-                                            mime = 'text/html';
-                                        } else if (ext === 'css') {
-                                            mime = 'text/css';
-                                        }
-
-                                        if (logger) logger.info(`テキストアセットを Blob URL にインライン化: ${val}`);
-
-                                        // BlobURLを生成する構文(AST)に置換する: URL.createObjectURL(new Blob(["..."], {type: "..."}))
-                                        const blobArray = t.arrayExpression([t.stringLiteral(content)]);
+                                // Linkerが事前にコンパイル・解決済みのデータ(assetMap)があれば置換するだけ
+                                if (options.assetMap && options.assetMap[val]) {
+                                    const assetData = options.assetMap[val];
+                                    if (assetData.type === 'string') {
+                                        path.replaceWith(t.stringLiteral(assetData.content));
+                                    } else if (assetData.type === 'blob') {
+                                        const blobArray = t.arrayExpression([t.stringLiteral(assetData.content)]);
                                         const blobOptions = t.objectExpression([
-                                            t.objectProperty(t.identifier('type'), t.stringLiteral(mime))
+                                            t.objectProperty(t.identifier('type'), t.stringLiteral(assetData.mime))
                                         ]);
                                         const newBlob = t.newExpression(t.identifier('Blob'), [blobArray, blobOptions]);
                                         const createObjectURL = t.callExpression(
                                             t.memberExpression(t.identifier('URL'), t.identifier('createObjectURL')),
                                             [newBlob]
                                         );
-
                                         path.replaceWith(createObjectURL);
-                                        path.skip(); // 無限ループ防止
                                     }
+                                    path.skip(); // 置換後の無限ループ防止
                                 }
                             }
                         }
                     };
                 };
-
                 const parsePlugins = ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'objectRestSpread', 'exportDefaultFrom', 'dynamicImport'];
 
                 // フェーズ1: 依存解決と CommonJS 変換
@@ -1470,7 +1461,6 @@
                     visited.add(currentPath);
 
                     store.addUsedFile(currentPath);
-
                     const file = store.getFile(currentPath);
                     if (!file) return;
 
@@ -1481,15 +1471,18 @@
 
                     let rawSource = file.content;
                     Config.extensionRules.source.forEach(rule => {
-                        if (rule.condition(rawSource, currentPath)) {
-                            rawSource = rule.apply(rawSource);
-                        }
+                        if (rule.condition(rawSource, currentPath)) rawSource = rule.apply(rawSource);
                     });
 
-                    // 引数に currentPath と store を追加し、Scannerに渡す
-                    const dependencies = scanner.extractDependencies(rawSource, currentPath, store);
-                    const localDependencyPaths = {};
+                    // スキャナーからモジュールとアセットの依存を両方取得
+                    const extracted = scanner.extractDependencies(rawSource, currentPath, store);
+                    const dependencies = Array.isArray(extracted) ? extracted : extracted.modules;
+                    const assets = Array.isArray(extracted) ? [] : extracted.assets;
 
+                    const localDependencyPaths = {};
+                    const assetMap = {}; // Transformerに渡すための辞書
+
+                    // 1. 通常モジュールの解決
                     dependencies.forEach(dep => {
                         const resolvedPath = scanner.resolveRelativePath(currentPath, dep, store);
                         if (resolvedPath && store.hasFile(resolvedPath)) {
@@ -1501,6 +1494,58 @@
                         }
                     });
 
+                    // 2. アセット(Worker等)の Sub-Bundle 独立コンパイル処理
+                    assets.forEach(assetStr => {
+                        const resolvedPath = scanner.resolveRelativePath(currentPath, assetStr, store);
+                        if (resolvedPath && store.hasFile(resolvedPath) && !resolvedPath.split('/').pop().startsWith('_virtual_')) {
+
+                            // 循環参照ガード (無限ループを物理的に遮断)
+                            if (options._subBundleVisited && options._subBundleVisited.has(resolvedPath)) {
+                                logger.warn(`循環アセット参照を検知してスキップしました: ${resolvedPath}`);
+                                return;
+                            }
+
+                            const assetFile = store.getFile(resolvedPath);
+                            store.addUsedFile(resolvedPath);
+
+                            if (assetFile.isBinary) {
+                                assetMap[assetStr] = { type: 'string', content: assetFile.content };
+                                if (logger) logger.info(`バイナリアセットを登録: ${assetStr}`);
+                            } else {
+                                const ext = resolvedPath.split('.').pop().toLowerCase();
+                                let content = assetFile.content;
+                                let mime = 'text/plain';
+
+                                if (['js', 'mjs'].includes(ext)) {
+                                    mime = 'application/javascript';
+                                    if (logger) logger.info(`サブモジュール(Worker等)の独立コンパイル開始: ${resolvedPath}`);
+
+                                    // 経路履歴の汚染を防ぐため、Setをディープコピー（クローン）して独立した探索パスにする
+                                    const subOptions = { ...options };
+                                    subOptions._subBundleVisited = new Set(options._subBundleVisited || []);
+                                    subOptions._subBundleVisited.add(entryPoint); // 親のルートを記録
+                                    subOptions._subBundleVisited.add(resolvedPath); // 自身を記録
+
+                                    try {
+                                        // 独立したバンドルとして再帰コンパイル（完全なCJSランタイムを内包した独立IIFEコードが返る）
+                                        content = this.executeSmartJSBundle(resolvedPath, store, false, false, subOptions, logger, scanner, transformer, utils);
+                                    } catch (e) {
+                                        if (logger) logger.warn(`アセット [${resolvedPath}] のサブコンパイルに失敗: ${e.message}`);
+                                    }
+                                } else if (ext === 'json') {
+                                    mime = 'application/json';
+                                } else if (['html', 'htm'].includes(ext)) {
+                                    mime = 'text/html';
+                                } else if (ext === 'css') {
+                                    mime = 'text/css';
+                                }
+
+                                assetMap[assetStr] = { type: 'blob', content, mime };
+                                if (logger && !['js', 'mjs'].includes(ext)) logger.info(`テキストアセットを登録: ${assetStr}`);
+                            }
+                        }
+                    });
+
                     const transpileOptions = {
                         golfEnabled,
                         enableMangle: options.enableMangle,
@@ -1508,10 +1553,11 @@
                         enableExtreme: options.enableExtreme,
                         golfStringHack: options.golfStringHack,
                         keepComments,
-                        skipCjs: false,
+                        skipCjs: false, // Worker内も通常のバンドルと同じくCJSへ変換し、ESMの仕様違反を防ぐ
                         extraReserved: options.extraReserved,
                         store: store,
-                        scanner: scanner
+                        scanner: scanner,
+                        assetMap: assetMap // 完成した辞書をTransformerに引き渡す
                     };
 
                     const transformedSource = transformer.transformESMtoCJS(rawSource, currentPath, localDependencyPaths, transpileOptions, logger);
@@ -1643,8 +1689,12 @@
                     .replace(/font-weight:normal/gi, 'font-weight:400')
                     .replace(/(border|background|outline):none/gi, '$1:0')
                     .replace(/(^|[:\s])0+(px|em|rem|%|vw|vh|pt)/gi, '$10')
-                    .replace(/#([0-9a-fA-F])\1([0-9a-fA-F])\2([0-9a-fA-F])\3/g, '#$1$2$3')
+                    .replace(/#([0-9a-fA-F])\1([0-9a-fA-F])\2([0-9a-fA-F])\3(?![0-9a-fA-F])/gi, '#$1$2$3')
                     .replace(/#ff0000\b/gi, 'red')
+                    .replace(/transparent/gi, '#0000')
+                    .replace(/rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*0\s*\)/gi, '#0000')
+                    .replace(/(^|[:\s])white(;|}|!|\s)/gi, '$1#fff$2')
+                    .replace(/(^|[:\s])black(;|}|!|\s)/gi, '$1#000$2')
                     .replace(/(^|[:\s])0+\.(\d+)/g, '$1.$2')
                     .replace(/:0 0 0 0(;|}|\s)/g, ':0$1')
                     .replace(/:0 0 0(;|}|\s)/g, ':0$1')
@@ -1723,11 +1773,12 @@
                 if (golfEnabled && options.minifyAssets) {
                     safeHtml = safeHtml
                         .replace(/<!--[\s\S]*?-->/g, '')
-                        .replace(/<!DOCTYPE html>/i, '<!DOCTYPEhtml>')
+                        .replace(/<!DOCTYPE html>/i, '<!doctype html>')
                                 .replace(/\s+type=["']text\/(javascript|css)["']/gi, '')
                                 .replace(/>\s+</g, '><')
                                 .replace(/=(["'])([^"'=<>\s`]+)\1/g, '=$2')
-                                .replace(/<\/(html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, '');
+                                .replace(/<\/(html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, '')
+                                .replace(/\b(checked|disabled|readonly|required|multiple|selected|autofocus|autoplay)=["']?(?:true|1|\1)["']?/gi, '$1');
                 }
 
                 protectedBlocks.forEach((block, index) => {
@@ -1948,7 +1999,9 @@
 
                 let lang = options.directLang;
                 const trimmed = sourceCode.trim();
-                if (trimmed.startsWith('<!DOCTYPE') || /^<[a-z]+[\s>]/i.test(trimmed)) {
+
+                // 大文字小文字を無視し、HTMLコメント (<!--) にも対応する堅牢な正規表現
+                if (/^<(?:!doctype|[a-z]+|!--)/i.test(trimmed)) {
                     if (lang !== 'html') { lang = 'html'; this.logger.success("HTMLを検知。自動で言語を切り替えました。"); }
                 } else if (/^[.#@a-zA-Z0-9_-].*\{/m.test(trimmed) && !trimmed.includes('const ') && !trimmed.includes('let ') && !trimmed.includes('function')) {
                     if (lang === 'js') { lang = 'css'; this.logger.success("CSSを検知。自動で言語を切り替えました。"); }
