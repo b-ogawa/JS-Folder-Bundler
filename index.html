@@ -1766,9 +1766,8 @@
             };
         };
 
-        // 構文短縮オプティマイザ (V7: JS Logic The Abyss + GLSL Float Decimal Hack)
+        // 構文短縮オプティマイザ (V8: The Singularity - 変数結合 & window消滅 & returnインライン化)
         const extremeGolfPlugin = ({ types: t }) => {
-            // ヘルパー: ブロック({})内の複数行の式を、カンマ演算子で1つの式(SequenceExpression)に束ねる
             const getExpressionFromStatement = (stmt) => {
                 if (!stmt) return null;
                 if (t.isExpressionStatement(stmt)) return stmt.expression;
@@ -1780,15 +1779,59 @@
                         const s = stmt.body[i];
                         if (t.isExpressionStatement(s)) exprs.push(s.expression);
                         else if (i === stmt.body.length - 1 && t.isReturnStatement(s)) exprs.push(s.argument || t.identifier('undefined'));
-                        else return null; // let, if, for などの文が含まれる場合は束ねられないため断念
+                        else return null;
                     }
                     return exprs.length === 1 ? exprs[0] : t.sequenceExpression(exprs);
                 }
                 return null;
             };
 
+            // 連続する変数宣言を1つの `let` や `var` に強制的に束ねる
+            const mergeVariablesSafely = (path) => {
+                const body = path.node.body;
+                if (!body) return;
+                for (let i = 0; i < body.length - 1; i++) {
+                    const current = body[i];
+                    const next = body[i + 1];
+                    if (t.isVariableDeclaration(current) && t.isVariableDeclaration(next)) {
+                        if (current.kind !== 'var' && next.kind !== 'var') {
+                            current.kind = 'let'; // constもletにダウングレードして結合
+                            current.declarations.push(...next.declarations);
+                            body.splice(i + 1, 1);
+                            i--;
+                        } else if (current.kind === 'var' && next.kind === 'var') {
+                            current.declarations.push(...next.declarations);
+                            body.splice(i + 1, 1);
+                            i--;
+                        }
+                    }
+                }
+            };
+
+            // a = 1; return a; を return a = 1; に圧縮
+            const mergeReturnAssignment = (path) => {
+                const bodyPath = path.get('body');
+                if (!Array.isArray(bodyPath)) return;
+                for (let i = 0; i < bodyPath.length - 1; i++) {
+                    const p1 = bodyPath[i];
+                    const p2 = bodyPath[i + 1];
+                    if (p1.isExpressionStatement() && t.isAssignmentExpression(p1.node.expression) && p2.isReturnStatement()) {
+                        const assignLeft = p1.node.expression.left;
+                        const retArg = p2.node.argument;
+                        if (t.isIdentifier(assignLeft) && t.isIdentifier(retArg) && assignLeft.name === retArg.name) {
+                            p2.node.argument = p1.node.expression;
+                            p1.remove();
+                        }
+                    }
+                }
+            };
+
             return {
                 visitor: {
+                    "Program|BlockStatement"(path) {
+                        mergeVariablesSafely(path);
+                        mergeReturnAssignment(path);
+                    },
                     BooleanLiteral(path) {
                         path.replaceWith(t.unaryExpression('!', t.numericLiteral(path.node.value ? 0 : 1)));
                     },
@@ -1803,8 +1846,6 @@
                     },
                     BinaryExpression(path) {
                         const { operator, left, right } = path.node;
-
-                        //  === undefined を == null にダウングレードして6バイト削減
                         if ((operator === '===' || operator === '==') && t.isIdentifier(right, { name: 'undefined' })) {
                             path.node.operator = '==';
                             path.node.right = t.nullLiteral();
@@ -1812,12 +1853,9 @@
                             path.node.operator = '==';
                             path.node.left = t.nullLiteral();
                         }
-
-                        // 等価演算子のダウングレード (=== -> ==)
                         if (operator === '===') path.node.operator = '==';
-                        if (operator === '!==' || operator === '!==') path.node.operator = '!=';
+                        if (operator === '!==') path.node.operator = '!=';
 
-                        // 定数畳み込み
                         if (t.isNumericLiteral(left) && t.isNumericLiteral(right)) {
                             let res;
                             switch (operator) {
@@ -1833,10 +1871,8 @@
                     },
                     IfStatement(path) {
                         const { test, consequent, alternate } = path.node;
-                        // 複数行のブロックをカンマ演算子で束ねて三項演算子化する
                         const consExpr = getExpressionFromStatement(consequent);
                         const altExpr = alternate ? getExpressionFromStatement(alternate) : null;
-
                         if (consExpr && altExpr) {
                             if (t.isReturnStatement(consequent) || (t.isBlockStatement(consequent) && consequent.body.some(t.isReturnStatement))) {
                                 path.replaceWith(t.returnStatement(t.conditionalExpression(test, consExpr, altExpr)));
@@ -1845,7 +1881,6 @@
                             }
                         } else if (consExpr && !alternate) {
                             if (t.isReturnStatement(consequent) || (t.isBlockStatement(consequent) && consequent.body.some(t.isReturnStatement))) {
-                                // 戻り値がある if(a) return b; は、安全のため何もしない（論理和にすると戻らなくなるため）
                             } else {
                                 path.replaceWith(t.expressionStatement(t.logicalExpression('&&', test, consExpr)));
                             }
@@ -1861,34 +1896,23 @@
                         }
                     },
                     ArrowFunctionExpression(path) {
-                        // 複数行のアロー関数もカンマ演算子で束ねて波カッコとreturnを粉砕
                         const expr = getExpressionFromStatement(path.node.body);
-                        if (expr) {
-                            path.get('body').replaceWith(expr);
-                        }
+                        if (expr) path.get('body').replaceWith(expr);
                     },
                     FunctionExpression(path) {
                         if (path.node.id || path.node.generator || path.node.async) return;
                         const parent = path.parent;
                         if (t.isNewExpression(parent) || t.isVariableDeclarator(parent) ||
-                            t.isAssignmentExpression(parent) || t.isProperty(parent)) {
-                            return;
-                        }
+                            t.isAssignmentExpression(parent) || t.isProperty(parent)) return;
                         let hasThisOrArgs = false;
                         path.traverse({
                             ThisExpression() { hasThisOrArgs = true; },
                             Identifier(p) { if (p.node.name === 'arguments') hasThisOrArgs = true; }
                         });
-                        if (!hasThisOrArgs) {
-                            path.replaceWith(t.arrowFunctionExpression(path.node.params, path.node.body));
-                        }
+                        if (!hasThisOrArgs) path.replaceWith(t.arrowFunctionExpression(path.node.params, path.node.body));
                     },
                     CallExpression(path) {
                         const callee = path.node.callee;
-                        if (t.isMemberExpression(callee) && t.isIdentifier(callee.property, { name: 'getElementById' }) && path.node.arguments.length === 1 && t.isStringLiteral(path.node.arguments[0])) {
-                            path.replaceWith(t.memberExpression(t.identifier('window'), t.stringLiteral(path.node.arguments[0].value), true));
-                            return;
-                        }
                         if (t.isIdentifier(callee, { name: 'parseInt' }) && path.node.arguments.length >= 1) {
                             path.replaceWith(t.binaryExpression('|', path.node.arguments[0], t.numericLiteral(0)));
                             return;
@@ -1907,12 +1931,18 @@
                         const isTrueLiteral = t.isBooleanLiteral(test, { value: true });
                         const isNumberOne = t.isNumericLiteral(test) && test.value !== 0;
                         const isBangZero = t.isUnaryExpression(test, { operator: '!' }) && t.isNumericLiteral(test.argument, { value: 0 });
-
-                        if (isTrueLiteral || isNumberOne || isBangZero) {
-                            path.replaceWith(t.forStatement(null, null, null, path.node.body));
-                        }
+                        if (isTrueLiteral || isNumberOne || isBangZero) path.replaceWith(t.forStatement(null, null, null, path.node.body));
                     },
                     MemberExpression(path) {
+                        // window.プレフィックスの自動消去
+                        if (t.isIdentifier(path.node.object, { name: 'window' }) && !path.node.computed && t.isIdentifier(path.node.property)) {
+                            const propName = path.node.property.name;
+                            // スコープに同名の変数が無ければ(シャドウイングされていなければ)安全に外せる
+                            if (!path.scope.hasBinding(propName)) {
+                                path.replaceWith(t.identifier(propName));
+                                return;
+                            }
+                        }
                         if (path.node.computed && t.isStringLiteral(path.node.property)) {
                             const propName = path.node.property.value;
                             if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(propName)) {
@@ -1953,10 +1983,9 @@
                             const dirs = [];
                             text = text.replace(/^\s*(#\w+.*)$/gm, (m, p1) => { dirs.push(p1); return `__DIR_${dirs.length - 1}__\n`; });
 
-                            // 浮動小数点の限界圧縮 (1.0 ➔ 1. / 0.5 ➔ .5)
-                            text = text.replace(/\b0+\.0+\b/g, '0.'); // 0.00 ➔ 0.
-                            text = text.replace(/\b(\d+)\.0+\b/g, '$1.'); // 1.0 ➔ 1.
-                            text = text.replace(/\b0+\.(\d+)\b/g, '.$1'); // 0.5 ➔ .5
+                            text = text.replace(/\b0+\.0+\b/g, '0.');
+                            text = text.replace(/\b(\d+)\.0+\b/g, '$1.');
+                            text = text.replace(/\b0+\.(\d+)\b/g, '.$1');
 
                             text = text.replace(/\s+/g, ' ');
                             text = text.replace(/\s*([;,\{\}\(\)\=\+\-\*\/\<\>\!\|&\[\]\?])\s*/g, '$1');
