@@ -1269,11 +1269,12 @@
             if (addStrict) finalBundle += `"use strict";\n`;
 
             if (golfEnabled) {
-                // ⛳️ エグいゴルフ：モジュールランタイム（require関数群）を極小の無名IIFEに圧縮
-                finalBundle += `!function(m,c){function r(i){if(c[i])return c[i].exports;var e=c[i]={exports:{}};if(!m[i])return window[i];m[i](r,e,e.exports);return e.exports}r(${JSON.stringify(entryPoint)})}({\n`;
+                // ⛳️ 極限ゴルフ：モジュールランタイムをアロー関数とカンマ・三項演算子で最小化！
+                finalBundle += `((m,c,r)=>(r=i=>c[i]?c[i].exports:(c[i]={exports:{}},m[i]?m[i](r,c[i],c[i].exports):window[i],c[i].exports),r(${JSON.stringify(entryPoint)})))({\n`;
                 const moduleKeys = Object.keys(bundledModules);
                 moduleKeys.forEach((path, index) => {
-                    finalBundle += `${JSON.stringify(path)}:function(require,module,exports){${bundledModules[path].code}}${index === moduleKeys.length - 1 ? '' : ','}\n`;
+                    // 従来の function(...) をアロー関数 (...) => に圧縮
+                    finalBundle += `${JSON.stringify(path)}:(require,module,exports)=>{${bundledModules[path].code}}${index === moduleKeys.length - 1 ? '' : ','}\n`;
                 });
                 finalBundle += `},{});`;
             } else {
@@ -1556,7 +1557,7 @@
             };
         };
 
-        // ⛳️ コードゴルフ：構文そのものを破壊・短縮するエグいオプティマイザ (超・深淵版)
+        // ⛳️ コードゴルフ：構文そのものを破壊・短縮するエグいオプティマイザ (超・深淵版 V3)
         const extremeGolfPlugin = ({ types: t }) => {
             return {
                 visitor: {
@@ -1648,11 +1649,10 @@
                         }
                     },
 
-                    // ⛳️ 7. 匿名関数を強制的にアロー関数に圧縮 (安全装置付き)
+                    // 7. 匿名関数を強制的にアロー関数に圧縮 (安全装置付き)
                     FunctionExpression(path) {
                         if (path.node.id || path.node.generator || path.node.async) return;
 
-                        // 【安全装置】クラスのメソッドや、newで呼ばれる可能性のある代入式などはスキップ
                         const parent = path.parent;
                         if (t.isNewExpression(parent) || t.isVariableDeclarator(parent) ||
                             t.isAssignmentExpression(parent) || t.isProperty(parent)) {
@@ -1664,7 +1664,6 @@
                             ThisExpression() { hasThisOrArgs = true; },
                             Identifier(p) { if (p.node.name === 'arguments') hasThisOrArgs = true; }
                         });
-                        // 依存がなければ function(a){return a} -> (a)=>a に破壊的変換
                         if (!hasThisOrArgs) {
                             path.replaceWith(t.arrowFunctionExpression(path.node.params, path.node.body));
                         }
@@ -1687,7 +1686,7 @@
                         }
                     },
 
-                    // ⛳️ 9. 無限ループの極小化 (while(true) -> for(;;))
+                    // 9. 無限ループの極小化 (while(true) -> for(;;))
                     WhileStatement(path) {
                         const test = path.node.test;
                         const isTrueLiteral = t.isBooleanLiteral(test, { value: true });
@@ -1699,13 +1698,63 @@
                         }
                     },
 
-                    // ⛳️ 10. プロパティアクセスのドット記法化 ( a['b'] -> a.b )
+                    // 10. プロパティアクセスのドット記法化 ( a['b'] -> a.b )
                     MemberExpression(path) {
                         if (path.node.computed && t.isStringLiteral(path.node.property)) {
                             const propName = path.node.property.value;
                             if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(propName)) {
                                 path.node.computed = false;
                                 path.node.property = t.identifier(propName);
+                            }
+                        }
+                    },
+
+                    // ⛳️ 11. GLSLシェーダー＆巨大文字列の内部ミニファイ (NEW)
+                    "StringLiteral|TemplateElement"(path) {
+                        const isTemplate = t.isTemplateElement(path.node);
+                        let text = isTemplate ? path.node.value.raw : path.node.value;
+                        if (!text || text.length < 5) return;
+
+                        // 🔍 シェーダーのフラグメント（数式、vec2、return文など）かざっくり判定
+                        const hasGLSLKeywords = /(vec[234]|float\s|void\s+main|#version|gl_Position|layout\s*\(|precision\s+highp)/.test(text);
+                        const isFractalFormula = /return\s+c[A-Z][a-zA-Z0-9_]*\s*\(/.test(text) || text.includes('mix(') || text.includes('atanSafe(');
+
+                        if (hasGLSLKeywords || isFractalFormula) {
+                            // ① コメントの完全削除 (// ... と /* ... */)
+                            text = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+                            
+                            // ② #version などのプリプロセッサ行を保護 (改行が必須なため)
+                            const dirs = [];
+                            text = text.replace(/^\s*(#\w+.*)$/gm, (m, p1) => {
+                                dirs.push(p1);
+                                return `__DIR_${dirs.length - 1}__\n`;
+                            });
+
+                            // ③ 連続する空白・改行をすべて単一のスペースに圧殺
+                            text = text.replace(/\s+/g, ' ');
+
+                            // ④ 記号の前後にある空白を根こそぎ剥奪
+                            text = text.replace(/\s*([;,\{\}\(\)\=\+\-\*\/\<\>\!\|&\[\]\?])\s*/g, '$1');
+
+                            // ⑤ 予約語のパースエラー回避（記号除去でくっつきすぎる部分を安全に離す）
+                            text = text.replace(/\breturn([a-zA-Z0-9_])/g, 'return $1'); // returnx -> return x
+                            text = text.replace(/\belse([a-zA-Z0-9_])/g, 'else $1');     // elsex -> else x
+                            text = text.replace(/\)(in|out|uniform)\b/g, ') $1');        // layout(...)in -> layout(...) in
+
+                            // ⑥ 保護していたプリプロセッサ行を復元
+                            dirs.forEach((d, i) => {
+                                text = text.replace(new RegExp(`__DIR_${i}__\\s*`), d + '\n');
+                            });
+
+                            text = text.trim();
+
+                            // ASTノードに書き戻す
+                            if (isTemplate) {
+                                path.node.value.raw = text;
+                                // テンプレート文字列仕様のためのフォールバック
+                                path.node.value.cooked = text.replace(/\\/g, '\\\\'); 
+                            } else {
+                                path.node.value = text;
                             }
                         }
                     }
@@ -1784,8 +1833,9 @@
                 }
             }
 
-            // transform-modules-commonjs を最後に適用
-            activePlugins.push('transform-modules-commonjs');
+            // ⛳️ transform-modules-commonjs を適用 
+            // loose: true と strict: false で Object.defineProperty 等のクソ長い出力を抹消！
+            activePlugins.push(['transform-modules-commonjs', { loose: true, strict: false }]);
 
             try {
                 const { code } = Babel.transform(source, {
