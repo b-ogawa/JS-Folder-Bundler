@@ -1326,6 +1326,18 @@
                 });
             }
 
+            // Tailwind CSS の自動検知 & CDNフォールバック
+            const fullHtmlContent = doc.documentElement.innerHTML;
+            // Tailwind特有のユーティリティクラス出現を正規表現でスキャン
+            const tailwindMatches = fullHtmlContent.match(/\b(flex|grid|text-[a-z]+-\d+|bg-[a-z]+-\d+|p-\d+|m-\d+|w-\d+|h-\d+|rounded-[a-z0-9]*)\b/g);
+            
+            if (tailwindMatches && tailwindMatches.length > 5 && !fullHtmlContent.includes('cdn.tailwindcss.com')) {
+                const tailwindScript = doc.createElement('script');
+                tailwindScript.src = "https://cdn.tailwindcss.com";
+                doc.head.appendChild(tailwindScript);
+                addLog("[Tailwind自動検知] スタイル崩壊防止のため Tailwind CDN を自動注入しました", "success");
+            }
+
             let htmlString = "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
             if (golfEnabled && minifyAssets) {
                 htmlString = minifyHtml(htmlString);
@@ -1419,7 +1431,12 @@
             const extArray = Array.from(externalDependencies);
             if (extArray.length > 0) {
                 extArray.forEach((dep, idx) => {
-                    finalBundle += `import * as __ext_${idx} from ${JSON.stringify(dep)};\n`;
+                    // ブラウザが解釈できない npm のベアモジュールを、自動的に esm.sh CDN に変換！
+                    let depUrl = dep;
+                    if (!/^https?:\/\//.test(dep) && !/^\.?\.\//.test(dep)) {
+                        depUrl = `https://esm.sh/${dep}`;
+                    }
+                    finalBundle += `import * as __ext_${idx} from ${JSON.stringify(depUrl)};\n`;
                     extMapStr += `${JSON.stringify(dep)}:__ext_${idx},`;
                 });
             }
@@ -1556,52 +1573,54 @@
 
         // パス解決ロジック（相対・ルート絶対パス対応）
         function resolveRelativePath(fromPath, relativePath) {
-            let cleanRelativePath = relativePath;
-            if (relativePath.startsWith('/')) {
-                cleanRelativePath = relativePath.substring(1);
-                if (filesStore[cleanRelativePath]) return cleanRelativePath;
-
-                const extensions = ['.js', '.mjs', '.ts', '.jsx', '.tsx', '/index.js', '/index.mjs'];
-                for (const ext of extensions) {
-                    if (filesStore[cleanRelativePath + ext]) return cleanRelativePath + ext;
-                }
-                return cleanRelativePath;
-            }
-
-            const dirParts = fromPath.split('/');
-            dirParts.pop(); // ファイル名を除去
-            const currentDir = dirParts.join('/');
-
             let resolved = '';
-            if (cleanRelativePath.startsWith('./') || cleanRelativePath.startsWith('../')) {
-                const parts = (currentDir + '/' + cleanRelativePath).split('/');
-                const stack = [];
-                for (const part of parts) {
-                    if (part === '.' || part === '') continue;
-                    if (part === '..') {
-                        stack.pop();
-                    } else {
-                        stack.push(part);
-                    }
-                }
-                resolved = stack.join('/');
+
+            // 1. 絶対パス(プロジェクトルート相対)の場合: "/src/main.tsx" -> "src/main.tsx"
+            if (relativePath.startsWith('/')) {
+                resolved = relativePath.substring(1);
             } else {
-                // 相対記述がないものも同一ディレクトリとして解釈を試みる
-                if (currentDir) {
-                    resolved = currentDir + '/' + cleanRelativePath;
+                // 2. 相対パスの場合
+                const dirParts = fromPath.split('/');
+                dirParts.pop(); // ファイル名を除去
+                const currentDir = dirParts.join('/');
+
+                if (relativePath.startsWith('./') || relativePath.startsWith('../')) {
+                    const parts = (currentDir ? currentDir + '/' + relativePath : relativePath).split('/');
+                    const stack = [];
+                    for (const part of parts) {
+                        if (part === '.' || part === '') continue;
+                        if (part === '..') {
+                            stack.pop();
+                        } else {
+                            stack.push(part);
+                        }
+                    }
+                    resolved = stack.join('/');
                 } else {
-                    resolved = cleanRelativePath;
+                    resolved = currentDir ? currentDir + '/' + relativePath : relativePath;
                 }
             }
 
-            // 拡張子の自動補完試行
+            // 拡張子のリスト
             const extensions = ['.js', '.mjs', '.ts', '.jsx', '.tsx', '/index.js', '/index.mjs', '.css', '.json'];
-            if (filesStore[resolved]) return resolved;
 
+            // 3. そのまま、または拡張子補完で存在するかチェック
+            if (filesStore[resolved]) return resolved;
             for (const ext of extensions) {
                 if (filesStore[resolved + ext]) return resolved + ext;
             }
 
+            // 4. (Vite対策) フォルダごとD&Dしたため、ルートに余分なフォルダ名がついている場合の後方一致フォールバック
+            // 例: resolved = "src/main.tsx" だが、ストア内は "silicon-architect/src/main.tsx"
+            const keys = Object.keys(filesStore);
+            for (const key of keys) {
+                if (key.endsWith('/' + resolved) || key === resolved) return key;
+                for (const ext of extensions) {
+                    if (key.endsWith('/' + resolved + ext) || key === resolved + ext) return key;
+                }
+            }
+
+            // 見つからなければ推論したパスをそのまま返す（404扱い）
             return resolved;
         }
 
@@ -2037,9 +2056,32 @@
             // フェーズ1: 依存解決と CommonJS 変換
             let phase1Code = source;
             try {
+                // JSX/TSXでReactのインポート記述が無い場合に自動補完
+                let safeSource = source;
+                if (fromPath && (fromPath.endsWith('.tsx') || fromPath.endsWith('.jsx')) && !safeSource.includes('import React')) {
+                    safeSource = `import React from "react";\n` + safeSource;
+                }
+
                 const phase1Plugins = [pathRewriterPlugin];
                 if (!skipCjs) phase1Plugins.push(['transform-modules-commonjs', { loose: true, strict: false }]);
-                const { code } = Babel.transform(source, { plugins: phase1Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: golfEnabled ? false : keepComments, minified: false, compact: false });
+
+                // TSプリセットを適用し型情報を除去
+                const virtualFilename = (fromPath && (fromPath.endsWith('.ts') || fromPath.endsWith('.tsx') || fromPath.endsWith('.jsx')))
+                    ? fromPath
+                    : fromPath + '.tsx';
+
+                const { code } = Babel.transform(safeSource, {
+                    filename: virtualFilename,
+                    presets: [
+                        'react',
+                        ['typescript', { isTSX: true, allExtensions: true }]
+                    ],
+                    plugins: phase1Plugins,
+                    parserOpts: { sourceType: 'module', plugins: parsePlugins },
+                    comments: golfEnabled ? false : keepComments,
+                    minified: false,
+                    compact: false
+                });
                 phase1Code = code;
             } catch (err) { throw new Error(`[${fromPath}] のモジュール変換(Phase1)エラー:\n${err.message}`); }
 
