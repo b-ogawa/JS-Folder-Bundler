@@ -113,7 +113,7 @@
 
             <!-- ファイル管理・結合設定 -->
             <div id="settings-card"
-                class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-5 hidden">
+                class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-5">
                 <div class="flex items-center justify-between border-b border-slate-800/60 pb-3">
                     <div class="flex items-center gap-2">
                         <i data-lucide="settings" class="w-5 h-5 text-brand-500"></i>
@@ -141,6 +141,11 @@
                         class="flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200"
                         onclick="switchMode('simple')">
                         🔗 JS単純結合
+                    </button>
+                    <button id="mode-direct-btn"
+                        class="flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200"
+                        onclick="switchMode('direct')">
+                        直接コピペ
                     </button>
                 </div>
 
@@ -192,10 +197,10 @@
                             <!-- 動的追加 -->
                         </select>
                         <p class="text-[10px] text-slate-500 mt-1">※ 指定されたJSからimport/require文をたどり、自動で解析します。</p>
-                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ AST（抽象構文木）解析エンジン「Babel
-                            Parser」を搭載！複合インポート、aliasインポート、および名前付き再エクスポートがフルサポートされました！</p>
-                        <p class="text-[10px] text-red-400 mt-0.5 font-medium">※ 制限事項: 1行に複数の変数宣言を並べる `export const a =
-                            1, b = 2;` には対応していません。個別に行を分けてエクスポートしてください。</p>
+                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ AST（抽象構文木）解析エンジン「Babel Parser」を搭載！複合インポート、aliasインポート、名前付き再エクスポートをサポート！</p>
+                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Three.jsなどの外部CDNライブラリや importmap との共存（ネイティブ import フォールバック）に対応！</p>
+                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Web Worker環境（globalThis）での動作に完全対応！</p>
+                        <p class="text-[10px] text-red-400 mt-0.5 font-medium">※ 制限事項: 1行に複数の変数宣言を並べる `export const a = 1, b = 2;` には対応していません。個別に行を分けてエクスポートしてください。</p>
                     </div>
                 </div>
 
@@ -217,6 +222,22 @@
                                 (IIFE) で安全に包む</label>
                             <span class="text-[10px] text-slate-500">各ファイルを変数衝突が起きないように個別の関数に隔離して結合します</span>
                         </div>
+                    </div>
+                </div>
+
+                <!-- 3. ダイレクト入力モードの設定エリア -->
+                <div id="direct-options" class="flex flex-col gap-4 hidden">
+                    <div class="p-4 bg-brand-500/10 border border-brand-500/20 rounded-xl">
+                        <p class="text-xs text-brand-400 mb-2 font-bold">右側のテキストエリアに直接コードを貼り付けてください。</p>
+                        <p class="text-[10px] text-slate-400">ファイルアップロード不要で、単一のコードを極限までゴルフ圧縮します。余計なモジュールラッパーも付与されません。</p>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                        <label class="text-xs text-slate-400 font-medium">対象言語:</label>
+                        <select id="direct-lang-select" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1 text-xs font-mono text-slate-200">
+                            <option value="js">JavaScript (AST圧縮)</option>
+                            <option value="html">HTML (空白・属性圧縮)</option>
+                            <option value="css">CSS (構造圧縮)</option>
+                        </select>
                     </div>
                 </div>
 
@@ -242,9 +263,8 @@
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-mangle"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">変数・関数名の一文字化
-                                    (Mangle)</label>
-                                <span class="text-[9px] text-slate-400">ASTを解析し、ローカルスコープ内のバインディングを安全に圧縮</span>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">変数・関数名の一文字化 (Mangle)</label>
+                                <span class="text-[9px] text-slate-400">スコープ内の変数を安全に圧縮。既存の1文字変数は保護され、2フェーズコンパイルでBabelの衝突を防ぎます</span>
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
@@ -265,16 +285,26 @@
                                 <span class="text-[9px] text-slate-400">属性クォーテーションの最適除去や小数の頭の0、冗長なマージン指定などをクレンジング</span>
                             </div>
                         </div>
-                        <!-- ⛳️ 極限ハックトグル -->
+                        <!-- 極限ハックトグル -->
                         <div class="flex items-center gap-2">
                             <input type="checkbox" id="golf-extreme" checked
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-extreme"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">極限圧縮ハック (Boolean /
-                                    Number / If短縮)</label>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">極限構文ハック (Boolean / Number / If / Loop / アロー化)</label>
                                 <span
-                                    class="text-[9px] text-slate-400">true➔!0、10000➔1e4、単一if文➔&&短絡評価、定数・静的文字列畳み込み、ブロック解体などの過激な最適化</span>
+                                    class="text-[9px] text-slate-400">true➔!0、10000➔1e4、単一if文➔&&短絡評価、定数畳み込み、while(true)➔for(;;)、無名関数のアロー化など</span>
+                            </div>
+                        </div>
+                        <!-- 文字列圧縮ハックトグル -->
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="golf-string-hack" checked
+                                class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+                            <div class="flex flex-col">
+                                <label for="golf-string-hack"
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">GLSL / Web Worker 文字列圧縮ハック</label>
+                                <span
+                                    class="text-[9px] text-slate-400">文字列内のGLSLシェーダーの空白・コメント除去、Web Worker JSの再帰圧縮</span>
                             </div>
                         </div>
                     </div>
@@ -393,24 +423,41 @@
                     <div id="log-content"></div>
                 </div>
 
-                <!-- コード出力エリア -->
-                <div class="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl overflow-hidden flex relative">
-                    <!-- 行番号 -->
-                    <div id="line-numbers"
-                        class="w-12 bg-slate-950 border-r border-slate-800/80 py-4 text-right pr-3 text-xs font-mono text-slate-600 select-none">
-                        1
+                <!-- コード出力エリア（入力・出力タブ分離型） -->
+                <div class="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl overflow-hidden flex flex-col relative">
+                    <!-- エディタタブ -->
+                    <div class="flex bg-slate-900 border-b border-slate-800/80 text-xs font-semibold select-none">
+                        <button id="tab-input" class="px-5 py-2.5 text-brand-400 border-b-2 border-brand-500 bg-slate-800/50 flex items-center gap-2 transition-colors">
+                            <i data-lucide="keyboard" class="w-4 h-4"></i> 入力 (Input)
+                        </button>
+                        <button id="tab-output" class="px-5 py-2.5 text-slate-500 hover:text-slate-300 border-b-2 border-transparent flex items-center gap-2 transition-colors">
+                            <i data-lucide="terminal-square" class="w-4 h-4"></i> 出力 (Output)
+                        </button>
                     </div>
-                    <!-- コード内容 -->
-                    <textarea id="output-code" readonly
-                        class="flex-1 bg-slate-950 p-4 font-mono text-xs text-emerald-400 focus:outline-none resize-none overflow-auto whitespace-pre leading-relaxed"
-                        placeholder="// ここにまとまったソースコードが出力されます。&#10;// 左側のパネルからフォルダをアップロードして「変換」をクリックしてください。"></textarea>
-
-                    <!-- ローディング表示 -->
-                    <div id="loading-overlay"
-                        class="hidden absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
-                        <div class="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin">
+                    
+                    <div class="flex-1 flex relative">
+                        <!-- 行番号 -->
+                        <div id="line-numbers"
+                            class="w-12 bg-slate-950 border-r border-slate-800/80 py-4 text-right pr-3 text-xs font-mono text-slate-600 select-none">
+                            1
                         </div>
-                        <p class="text-sm font-semibold text-slate-300">ファイルを結合して構築中...</p>
+                        
+                        <!-- 入力エリア -->
+                        <textarea id="input-code"
+                            class="flex-1 bg-slate-950 p-4 font-mono text-xs text-slate-200 focus:outline-none resize-none overflow-auto whitespace-pre leading-relaxed"
+                            placeholder="// ここに圧縮したいソースコードを直接貼り付けてください。&#10;// 単一ファイルのアップロードにも対応しています。"></textarea>
+
+                        <!-- 出力エリア -->
+                        <textarea id="output-code" readonly
+                            class="hidden flex-1 bg-slate-950 p-4 font-mono text-xs text-emerald-400 focus:outline-none resize-none overflow-auto whitespace-pre leading-relaxed"
+                            placeholder="// ここに極限圧縮されたコードが出力されます。"></textarea>
+
+                        <!-- ローディング表示 -->
+                        <div id="loading-overlay"
+                            class="hidden absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3 z-10">
+                            <div class="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+                            <p class="text-sm font-semibold text-slate-300">ファイルを結合・圧縮中...</p>
+                        </div>
                     </div>
                 </div>
 
@@ -433,11 +480,14 @@
     <script>
         // グローバルステート
         let filesStore = {}; // { "path/to/file": { content, size, isBinary } }
-        let currentMode = 'html'; // 'html', 'smart', 'simple'
+        let currentMode = 'direct'; // 初期モードは直接コピペ
         let fileOrder = []; // 単純結合用の並び順
         let usedFilesSet = new Set(); // バンドルされたアセットのパス追跡用Set
 
         // DOM要素の参照
+        const tabInput = document.getElementById('tab-input');
+        const tabOutput = document.getElementById('tab-output');
+        const inputCode = document.getElementById('input-code');
         const dropZone = document.getElementById('drop-zone');
         const folderInput = document.getElementById('folder-input');
         const filesInput = document.getElementById('files-input');
@@ -474,6 +524,7 @@
             lucide.createIcons();
             setupDragAndDrop();
             setupEventListeners();
+            switchMode('direct');
         });
 
         // ゴルフUIトグル
@@ -574,9 +625,40 @@
             downloadBtn.addEventListener('click', downloadOutput);
             clearBtn.addEventListener('click', resetAll);
 
-            outputCode.addEventListener('scroll', () => {
-                lineNumbers.scrollTop = outputCode.scrollTop;
-            });
+            // タブ切り替えイベント
+            tabInput.addEventListener('click', () => switchEditorTab('input'));
+            tabOutput.addEventListener('click', () => switchEditorTab('output'));
+
+            // スクロール同期（入力・出力両方対応）
+            inputCode.addEventListener('scroll', () => { lineNumbers.scrollTop = inputCode.scrollTop; });
+            outputCode.addEventListener('scroll', () => { lineNumbers.scrollTop = outputCode.scrollTop; });
+        }
+
+        // エディタのタブ切り替え関数
+        function switchEditorTab(tab) {
+            if (tab === 'input') {
+                tabInput.classList.replace('text-slate-500', 'text-brand-400');
+                tabInput.classList.replace('border-transparent', 'border-brand-500');
+                tabInput.classList.add('bg-slate-800/50');
+                tabOutput.classList.replace('text-brand-400', 'text-slate-500');
+                tabOutput.classList.replace('border-brand-500', 'border-transparent');
+                tabOutput.classList.remove('bg-slate-800/50');
+                
+                inputCode.classList.remove('hidden');
+                outputCode.classList.add('hidden');
+                updateLineNumbers(inputCode.value);
+            } else {
+                tabOutput.classList.replace('text-slate-500', 'text-brand-400');
+                tabOutput.classList.replace('border-transparent', 'border-brand-500');
+                tabOutput.classList.add('bg-slate-800/50');
+                tabInput.classList.replace('text-brand-400', 'text-slate-500');
+                tabInput.classList.replace('border-brand-500', 'border-transparent');
+                tabInput.classList.remove('bg-slate-800/50');
+                
+                outputCode.classList.remove('hidden');
+                inputCode.classList.add('hidden');
+                updateLineNumbers(outputCode.value);
+            }
         }
 
         // ファイル選択処理
@@ -646,24 +728,35 @@
             return ['js', 'mjs', 'jsx', 'ts', 'tsx'].includes(ext);
         }
 
-        // ストア更新時の処理
+        // 単一ファイルアップロード時に入力エリアに流し込む処理
         function onFilesUpdated() {
             const keys = Object.keys(filesStore);
-            if (keys.length === 0) {
-                resetAll();
-                return;
-            }
-
-            settingsCard.classList.remove('hidden');
+            if (keys.length === 0) { resetAll(); return; }
             fileListCard.classList.remove('hidden');
-            dropZone.classList.add('py-4'); // ドロップエリア縮小
-
+            dropZone.classList.add('py-4');
             fileCount.textContent = keys.length;
             fileOrder = keys.filter(path => isJSFile(path)).sort();
+            updateDetectedFilesList(); updateSimpleOrderList(); updateDropdowns();
 
-            updateDetectedFilesList();
-            updateSimpleOrderList();
-            updateDropdowns();
+            if (keys.length === 1) {
+                const singleFile = filesStore[keys[0]];
+                if (!singleFile.isBinary) {
+                    const ext = keys[0].split('.').pop().toLowerCase();
+                    const langSelect = document.getElementById('direct-lang-select');
+                    if (['js', 'mjs', 'ts', 'jsx'].includes(ext)) langSelect.value = 'js';
+                    else if (['html', 'htm'].includes(ext)) langSelect.value = 'html';
+                    else if (ext === 'css') langSelect.value = 'css';
+                    
+                    inputCode.value = singleFile.content;
+                    switchEditorTab('input');
+                    switchMode('direct');
+                    addLog(`単一ファイルを検知。直接圧縮モードの [Input] に展開しました。`, "info");
+                }
+            } else {
+                const jsKeys = keys.filter(k => isJSFile(k));
+                if (jsKeys.length === keys.length) switchMode('smart');
+                else if (currentMode === 'direct') switchMode('html');
+            }
             updatePreviewFilename();
         }
 
@@ -848,26 +941,32 @@
             const htmlBtn = document.getElementById('mode-html-btn');
             const smartBtn = document.getElementById('mode-smart-btn');
             const simpleBtn = document.getElementById('mode-simple-btn');
+            const directBtn = document.getElementById('mode-direct-btn');
 
-            const tabs = [htmlBtn, smartBtn, simpleBtn];
+            const tabs = [htmlBtn, smartBtn, simpleBtn, directBtn];
             tabs.forEach(tab => {
                 tab.className = "flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200";
             });
 
-            const targetBtn = mode === 'html' ? htmlBtn : (mode === 'smart' ? smartBtn : simpleBtn);
+            const targetBtn = mode === 'html' ? htmlBtn : (mode === 'smart' ? smartBtn : (mode === 'simple' ? simpleBtn : directBtn));
             targetBtn.className = "flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-brand-400 bg-slate-900 shadow-sm border border-slate-800";
 
             // オプションパネル表示切り替え
             htmlOptions.classList.add('hidden');
             smartOptions.classList.add('hidden');
             simpleOptions.classList.add('hidden');
+            document.getElementById('direct-options').classList.add('hidden');
 
-            if (mode === 'html') {
-                htmlOptions.classList.remove('hidden');
-            } else if (mode === 'smart') {
-                smartOptions.classList.remove('hidden');
+            if (mode === 'html') htmlOptions.classList.remove('hidden');
+            else if (mode === 'smart') smartOptions.classList.remove('hidden');
+            else if (mode === 'simple') simpleOptions.classList.remove('hidden');
+            else if (mode === 'direct') document.getElementById('direct-options').classList.remove('hidden');
+
+            // 選択したモードに応じてエディタのタブを自動で切り替える
+            if (mode === 'direct') {
+                switchEditorTab('input');
             } else {
-                simpleOptions.classList.remove('hidden');
+                switchEditorTab('output');
             }
 
             updatePreviewFilename();
@@ -879,12 +978,12 @@
             fileOrder = [];
             usedFilesSet.clear();
 
-            settingsCard.classList.add('hidden');
             fileListCard.classList.add('hidden');
             dropZone.classList.remove('py-4');
             folderInput.value = '';
             filesInput.value = '';
 
+            inputCode.value = '';
             outputCode.value = '';
             updateLineNumbers("");
 
@@ -896,6 +995,8 @@
             optGolf.checked = false;
             toggleGolfUI();
 
+            switchEditorTab('input');
+            switchMode('direct');
             showToast("すべてクリアされました", "info");
         }
 
@@ -931,37 +1032,7 @@
             logSection.scrollTop = logSection.scrollHeight;
         }
 
-        // ==========================================
-        // HTML / CSS ミニファイ補助ロジック
-        // ==========================================
 
-        // HTMLの軽量圧縮
-        function minifyHtml(html) {
-            const protectedBlocks = [];
-
-            // 1. <script> と <style> のブロックを一時的に退避（保護）する
-            // 文字クラス <[\/]\1> を使用して誤判定を防止
-            let safeHtml = html.replace(/<(script|style)[^>]*>[\s\S]*?<[\/]\1>/gi, (match) => {
-                protectedBlocks.push(match);
-                return `__PROTECTED_BLOCK_${protectedBlocks.length - 1}__`;
-            });
-
-            // 2. 保護されたHTMLテキストに対してのみ圧縮を適用
-            safeHtml = safeHtml
-                .replace(/<!--[\s\S]*?-->/g, '')  
-                .replace(/<!DOCTYPE html>/i, '<!DOCTYPEhtml>') // DOCTYPEの空白を除去
-                        .replace(/\s+type=["']text\/(javascript|css)["']/gi, '') // 不要なtype属性の削除
-                        .replace(/>\s+</g, '><')           // タグ間の余白を削除
-                        .replace(/=(["'])([^"'=<>\s`]+)\1/g, '=$2') // 属性のクォートを除去
-                        .replace(/<[\/](html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, ''); // 省略可能な閉じタグを削除
-
-            // 3. 退避していたブロックを復元する
-            protectedBlocks.forEach((block, index) => {
-                safeHtml = safeHtml.replace(`__PROTECTED_BLOCK_${index}__`, block);
-            });
-
-            return safeHtml.trim();
-        }
 
         // CSSの圧縮
         function minifyCss(css) {
@@ -1028,38 +1099,34 @@
         // ⚙️ バンドラー実行コアロジック
         // ==========================================
 
+        // バンドル実行 (出力タブへの自動遷移)
         function runBundle() {
             showLoading(true, "ビルド中...");
             logSection.classList.remove('hidden');
             logContent.innerHTML = '';
-            outputCode.value = '';
-            usedFilesSet.clear(); // 毎回バンドル時に、参照されたファイルを追跡するためにクリア
+            outputCode.value = ''; // 出力側はクリア
+            usedFilesSet.clear();
 
             setTimeout(() => {
                 try {
                     const addStrict = document.getElementById('opt-strict').checked;
                     const keepComments = document.getElementById('opt-comments').checked;
                     let finalContent = "";
-
                     addLog("ビルドタスクを開始します...", "info");
 
-                    if (currentMode === 'html') {
-                        finalContent = executeHtmlBundle();
-                    } else if (currentMode === 'smart') {
-                        finalContent = executeSmartJSBundle(entryPointSelect.value, addStrict, keepComments);
-                    } else {
-                        finalContent = executeSimpleJSBundle(addStrict, keepComments);
-                    }
+                    if (currentMode === 'html') finalContent = executeHtmlBundle();
+                    else if (currentMode === 'smart') finalContent = executeSmartJSBundle(entryPointSelect.value, addStrict, keepComments);
+                    else if (currentMode === 'simple') finalContent = executeSimpleJSBundle(addStrict, keepComments);
+                    else if (currentMode === 'direct') finalContent = executeDirectBundle();
 
                     if (finalContent) {
                         outputCode.value = finalContent;
-                        updateLineNumbers(finalContent);
-                        copyBtn.disabled = false;
-                        downloadBtn.disabled = false;
+                        switchEditorTab('output'); // 成功時に自動で Output タブを表示！
+                        
+                        copyBtn.disabled = false; downloadBtn.disabled = false;
                         showToast("バンドル処理が完了しました！", "success");
                         addLog("ビルド成果物が正常に出力されました！", "success");
 
-                        // ゴルフスコア集計（ゴルフ化チェックが入っているときのみ）
                         if (optGolf.checked) {
                             const originalSize = getTotalOriginalBytes();
                             const blob = new Blob([finalContent], { type: currentMode === 'html' ? 'text/html' : 'application/javascript' });
@@ -1265,6 +1332,7 @@
                     } else {
                         // ローカルに見つからない依存は外部モジュールとして登録
                         externalDependencies.add(dep);
+                        addLog(`[INFO] 外部依存モジュール '${dep}' を検知。ネイティブimportにフォールバックします。`, "info");
                     }
                 });
 
@@ -1372,6 +1440,37 @@
                 }
             }
             return output;
+        }
+
+        // ------------------------------------------
+        // ダイレクト(コピペ)モード バンドルロジック
+        // ------------------------------------------
+        function executeDirectBundle() {
+            const sourceCode = inputCode.value;
+            if (!sourceCode.trim()) throw new Error("入力(Input)にコードがありません。");
+
+            let lang = document.getElementById('direct-lang-select').value;
+            const trimmed = sourceCode.trim();
+            if (trimmed.startsWith('<!DOCTYPE') || /^<[a-z]+[\s>]/i.test(trimmed)) {
+                if (lang !== 'html') { lang = 'html'; document.getElementById('direct-lang-select').value = 'html'; addLog("HTMLを検知。自動で言語を切り替えました。", "success"); }
+            } else if (/^[.#@a-zA-Z0-9_-].*\{/m.test(trimmed) && !trimmed.includes('const ') && !trimmed.includes('let ') && !trimmed.includes('function')) {
+                if (lang === 'js') { lang = 'css'; document.getElementById('direct-lang-select').value = 'css'; addLog("CSSを検知。自動で言語を切り替えました。", "success"); }
+            }
+
+            const golfEnabled = optGolf && optGolf.checked;
+            usedFilesSet.add("direct_input");
+            filesStore["direct_input"] = { size: new Blob([sourceCode]).size };
+
+            if (!golfEnabled) { addLog("ゴルフ化無効。そのまま出力します", "info"); return sourceCode; }
+
+            if (lang === 'js') {
+                const addStrict = document.getElementById('opt-strict').checked;
+                return (addStrict ? `"use strict";\n` : "") + transformESMtoCJS(sourceCode, "direct_input.js", {}, false);
+            } else if (lang === 'html') {
+                return document.getElementById('golf-minify-assets').checked ? minifyHtml(sourceCode) : sourceCode;
+            } else if (lang === 'css') {
+                return document.getElementById('golf-minify-assets').checked ? minifyCss(sourceCode) : sourceCode;
+            }
         }
 
         // ------------------------------------------
@@ -1711,11 +1810,14 @@
 
                     // 11. 巨大文字列の内部ミニファイ (GLSL & Web Worker)
                     "StringLiteral|TemplateElement"(path) {
+                        const enableStringHack = document.getElementById('golf-string-hack') && document.getElementById('golf-string-hack').checked;
+                        if (!enableStringHack) return;
+
                         const isTemplate = t.isTemplateElement(path.node);
                         let text = isTemplate ? path.node.value.raw : path.node.value;
                         if (!text || text.length < 15) return;
 
-                        // 🔍 1. GLSLシェーダーの判定
+                        // GLSLシェーダーの判定
                         const hasGLSLKeywords = /(vec[234]|float\s|void\s+main|#version|gl_Position|layout\s*\(|precision\s+highp)/.test(text);
                         const isFractalFormula = /return\s+c[A-Z][a-zA-Z0-9_]*\s*\(/.test(text) || text.includes('mix(') || text.includes('atanSafe(');
 
@@ -1737,10 +1839,11 @@
                             } else {
                                 path.node.value = text;
                             }
+                            addLog(`[GOLF] 文字列内の GLSL シェーダーコードを検知。スペース・コメントを圧縮しました！`, "success");
                             return;
                         }
 
-                        // 🔍 2. Web Worker / インラインJSの判定
+                        // Web Worker / インラインJSの判定
                         // 安全対策: テンプレートリテラルの補間（${...}）がある場合はJS構文が壊れるためスルー
                         const isSafeForJsParse = !isTemplate || (path.parentPath.node.expressions && path.parentPath.node.expressions.length === 0);
                         
@@ -1773,6 +1876,7 @@
                                         } else {
                                             path.node.value = res.code;
                                         }
+                                        addLog(`[GOLF] 文字列内の Web Worker コードを検知。再帰的ゴルフ圧縮を適用しました！`, "success");
                                     }
                                 } catch (e) {
                                     // JSの文法エラー（ただの文章だった場合など）は安全にスルー
@@ -1886,6 +1990,58 @@
                 throw new Error(`[${fromPath}] の極限ゴルフ圧縮(Phase2)中にエラーが発生しました:\n${err.message}`);
             }
         }
+
+        // HTML内インラインJS/CSS の再帰ゴルフ圧縮
+        function minifyHtml(html) {
+            const golfEnabled = optGolf && optGolf.checked;
+            const protectedBlocks = [];
+
+            // 1. script と style を抽出して再帰圧縮
+            let safeHtml = html.replace(/<(script|style)([^>]*)>([\s\S]*?)<\/\1>/gi, (match, tag, attrs, content) => {
+                let compressedContent = content;
+                
+                if (golfEnabled) {
+                    if (tag.toLowerCase() === 'style') {
+                        compressedContent = minifyCss(content);
+                    } else if (tag.toLowerCase() === 'script') {
+                        // JSの場合のみASTで圧縮
+                        const isJS = !attrs.includes('type=') || /type=["']?(text\/javascript|module|application\/javascript)["']?/i.test(attrs);
+                        if (isJS && content.trim().length > 0) {
+                            try {
+                                // JS単体モードと同じ2フェーズ・コンパイルを適用
+                                compressedContent = transformESMtoCJS(content, "inline_script", {}, false);
+                            } catch(e) { 
+                                // エラー時は元コードを維持し警告出力
+                                addLog(`[HTML圧縮] <script> 内のJS圧縮に失敗しました。元コードを維持します: ${e.message}`, "warn");
+                            }
+                        }
+                    }
+                }
+                
+                protectedBlocks.push(`<${tag}${attrs}>${compressedContent}</${tag}>`);
+                return `__PROTECTED_BLOCK_${protectedBlocks.length - 1}__`;
+            });
+
+            // 2. HTMLの圧縮
+            if (golfEnabled && document.getElementById('golf-minify-assets').checked) {
+                safeHtml = safeHtml
+                    .replace(/<!--[\s\S]*?-->/g, '')  
+                    .replace(/<!DOCTYPE html>/i, '<!DOCTYPEhtml>')
+                    .replace(/\s+type=["']text\/(javascript|css)["']/gi, '')
+                    .replace(/>\s+</g, '><')
+                    .replace(/=(["'])([^"'=<>\s`]+)\1/g, '=$2')
+                    .replace(/<\/(html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, '');
+            }
+
+            // 3. 退避ブロックの復元
+            protectedBlocks.forEach((block, index) => {
+                // 特殊変数 $ による誤展開防止のため関数で返す
+                safeHtml = safeHtml.replace(`__PROTECTED_BLOCK_${index}__`, () => block);
+            });
+
+            return safeHtml.trim();
+        }
+
 
         // 行番号算出
         function updateLineNumbers(code) {
