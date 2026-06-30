@@ -435,7 +435,7 @@
         let filesStore = {}; // { "path/to/file": { content, size, isBinary } }
         let currentMode = 'html'; // 'html', 'smart', 'simple'
         let fileOrder = []; // 単純結合用の並び順
-        let usedFilesSet = new Set(); // ⛳️ 実際にバンドルされた（到達した）アセットのみを格納する追跡Set
+        let usedFilesSet = new Set(); // バンドルされたアセットのパス追跡用Set
 
         // DOM要素の参照
         const dropZone = document.getElementById('drop-zone');
@@ -932,30 +932,30 @@
         }
 
         // ==========================================
-        // ⛳️ HTML / CSS ミニファイ補助ロジック (極限ゴルフ強化版)
+        // HTML / CSS ミニファイ補助ロジック
         // ==========================================
 
-        // HTMLの軽量圧縮 (マスキングアーキテクチャによる安全な極限ミニファイ)
+        // HTMLの軽量圧縮
         function minifyHtml(html) {
             const protectedBlocks = [];
 
             // 1. <script> と <style> のブロックを一時的に退避（保護）する
-            // ⚠️ 修正: 空白を除去し、HTMLパーサーを誤認させないための文字クラス <[\/]\1> を使用
+            // 文字クラス <[\/]\1> を使用して誤判定を防止
             let safeHtml = html.replace(/<(script|style)[^>]*>[\s\S]*?<[\/]\1>/gi, (match) => {
                 protectedBlocks.push(match);
                 return `__PROTECTED_BLOCK_${protectedBlocks.length - 1}__`;
             });
 
-            // 2. 保護された安全なHTMLテキストに対してのみ、極限圧縮の正規表現をぶつける
+            // 2. 保護されたHTMLテキストに対してのみ圧縮を適用
             safeHtml = safeHtml
                 .replace(/<!--[\s\S]*?-->/g, '')  
-                .replace(/<!DOCTYPE html>/i, '<!DOCTYPEhtml>') // DOCTYPEの空白すら許さない
-                        .replace(/\s+type=["']text\/(javascript|css)["']/gi, '') // HTML5で不要なtype属性の抹消
-                        .replace(/>\s+</g, '><')           // タグ間の余白を極限まで詰める
-                        .replace(/=(["'])([^"'=<>\s`]+)\1/g, '=$2') // HTML属性のクォート剥奪
-                        .replace(/<[\/](html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, ''); // 省略可能な閉じタグ消滅
+                .replace(/<!DOCTYPE html>/i, '<!DOCTYPEhtml>') // DOCTYPEの空白を除去
+                        .replace(/\s+type=["']text\/(javascript|css)["']/gi, '') // 不要なtype属性の削除
+                        .replace(/>\s+</g, '><')           // タグ間の余白を削除
+                        .replace(/=(["'])([^"'=<>\s`]+)\1/g, '=$2') // 属性のクォートを除去
+                        .replace(/<[\/](html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, ''); // 省略可能な閉じタグを削除
 
-            // 3. 退避していた <script> と <style> を元の位置に復元する
+            // 3. 退避していたブロックを復元する
             protectedBlocks.forEach((block, index) => {
                 safeHtml = safeHtml.replace(`__PROTECTED_BLOCK_${index}__`, block);
             });
@@ -963,20 +963,20 @@
             return safeHtml.trim();
         }
 
-        // CSSの超高密度圧縮（プロパティ値のハック追加版）
+        // CSSの圧縮
         function minifyCss(css) {
             return css
-                .replace(/\/\*[\s\S]*?\*\//g, '')       // コメントの全削除
-                .replace(/\s*([{}~>;:,!])\s*/g, '$1')   // ⚠️ + と - は calc で必須なため除外
-                .replace(/;}/g, '}')                    // 最後の不要なセミコロンを削除
-                .replace(/font-weight:bold/gi, 'font-weight:700') // ⛳️ 文字列の代わりに数値化
+                .replace(/\/\*[\s\S]*?\*\//g, '')       // コメントの削除
+                .replace(/\s*([{}~>;:,!])\s*/g, '$1')   // calc用に + と - は除外
+                .replace(/;}/g, '}')                    // 不要なセミコロンを削除
+                .replace(/font-weight:bold/gi, 'font-weight:700') // 数値化
                 .replace(/font-weight:normal/gi, 'font-weight:400')
-                .replace(/(border|background|outline):none/gi, '$1:0') // ⛳️ noneは0に
-                .replace(/(^|[:\s])0+(px|em|rem|%|vw|vh|pt)/gi, '$10') // 0pxなどを 0 に短縮
-                .replace(/#([0-9a-fA-F])\1([0-9a-fA-F])\2([0-9a-fA-F])\3/g, '#$1$2$3') // #ffffff -> #fff
-                .replace(/#ff0000\b/gi, 'red')          // ⛳️ 極小カラー最適化の例 (7文字 -> 3文字)
-                .replace(/(^|[:\s])0+\.(\d+)/g, '$1.$2') // 少数の頭の0を消去 (0.5s -> .5s)
-                .replace(/:0 0 0 0(;|}|\s)/g, ':0$1')   // 無意味な0の連続を単一の0に圧縮
+                .replace(/(border|background|outline):none/gi, '$1:0') // noneを0に置換
+                .replace(/(^|[:\s])0+(px|em|rem|%|vw|vh|pt)/gi, '$10') // 0の単位を省略
+                .replace(/#([0-9a-fA-F])\1([0-9a-fA-F])\2([0-9a-fA-F])\3/g, '#$1$2$3') // カラーコード短縮
+                .replace(/#ff0000\b/gi, 'red')          // カラーネーム短縮
+                .replace(/(^|[:\s])0+\.(\d+)/g, '$1.$2') // 小数点先頭の0を除去
+                .replace(/:0 0 0 0(;|}|\s)/g, ':0$1')   // 0の重複を圧縮
                 .replace(/:0 0 0(;|}|\s)/g, ':0$1')
                 .replace(/:0 0(;|}|\s)/g, ':0$1')
                 .trim();
@@ -1145,11 +1145,16 @@
                             if (attr.name !== 'src' && attr.name !== 'type') scriptEl.setAttribute(attr.name, attr.value);
                         });
 
-                        const typeAttr = script.getAttribute('type');
-                        if (typeAttr === 'module') scriptEl.setAttribute('type', 'module');
-                        else if (script.hasAttribute('defer')) scriptEl.setAttribute('defer', '');
-
                         const safeJsContent = jsContent.replace(new RegExp('\\x3c/\\\\s*script\\\\s*\\x3e', 'gi'), '\\x3c\\/script\\x3e');
+                        
+                        // トップレベルに外部ESMのimportが生成されている場合は強制的にtype="module"にする
+                        const typeAttr = script.getAttribute('type');
+                        if (typeAttr === 'module' || safeJsContent.includes('import * as __ext_')) {
+                            scriptEl.setAttribute('type', 'module');
+                        } else if (script.hasAttribute('defer')) {
+                            scriptEl.setAttribute('defer', '');
+                        }
+
                         scriptEl.textContent = `\n/* Inlined & Bundled: ${resolvedPath} */\n` + safeJsContent + '\n';
                         script.replaceWith(scriptEl);
                         addLog(`JavaScriptを展開: ${resolvedPath}`, "success");
@@ -1226,12 +1231,13 @@
 
 
         // ------------------------------------------
-        // 📦 JavaScript スマートバンドル処理
+        // JavaScript スマートバンドル処理
         // ------------------------------------------
         function executeSmartJSBundle(entryPoint, addStrict, keepComments) {
             if (!entryPoint || !filesStore[entryPoint]) throw new Error("起点となるJSが見つかりません。");
             const bundledModules = {};
             const visited = new Set();
+            const externalDependencies = new Set(); // 外部ESM依存関係を追跡
             const golfEnabled = optGolf && optGolf.checked;
 
             function buildDependencyTree(currentPath) {
@@ -1256,6 +1262,9 @@
                     if (resolvedPath && filesStore[resolvedPath]) {
                         localDependencyPaths[dep] = resolvedPath;
                         buildDependencyTree(resolvedPath);
+                    } else {
+                        // ローカルに見つからない依存は外部モジュールとして登録
+                        externalDependencies.add(dep);
                     }
                 });
 
@@ -1266,20 +1275,30 @@
             buildDependencyTree(entryPoint);
 
             let finalBundle = "";
+            let extMapStr = "{";
+
+            // 外部モジュールが存在する場合、最上部にインポート文を生成
+            const extArray = Array.from(externalDependencies);
+            if (extArray.length > 0) {
+                extArray.forEach((dep, idx) => {
+                    finalBundle += `import * as __ext_${idx} from ${JSON.stringify(dep)};\n`;
+                    extMapStr += `${JSON.stringify(dep)}:__ext_${idx},`;
+                });
+            }
+            extMapStr += "}";
+
             if (addStrict) finalBundle += `"use strict";\n`;
 
             if (golfEnabled) {
-                // ⛳️ 極限ゴルフ：モジュールランタイムをアロー関数とカンマ・三項演算子で最小化！
-                finalBundle += `((m,c,r)=>(r=i=>c[i]?c[i].exports:(c[i]={exports:{}},m[i]?m[i](r,c[i],c[i].exports):window[i],c[i].exports),r(${JSON.stringify(entryPoint)})))({\n`;
+                // ミニファイ版ランタイム（外部モジュール・グローバル変数取得時に__esModuleをプロトタイプで偽装、Worker・globalThis対応）
+                finalBundle += `((m,c,x,r,w)=>(r=i=>c[i]?c[i].exports:(m[i]?(c[i]={exports:{}},m[i](r,c[i],c[i].exports),c[i].exports):((w=x[i]||(typeof window!=='undefined'?window:globalThis)[i]||(typeof window!=='undefined'?window:globalThis)[i.toUpperCase()])?Object.setPrototypeOf({__esModule:!0},w):w)),r(${JSON.stringify(entryPoint)})))({\n`;
                 const moduleKeys = Object.keys(bundledModules);
                 moduleKeys.forEach((path, index) => {
-                    // 従来の function(...) をアロー関数 (...) => に圧縮
                     finalBundle += `${JSON.stringify(path)}:(require,module,exports)=>{${bundledModules[path].code}}${index === moduleKeys.length - 1 ? '' : ','}\n`;
                 });
-                finalBundle += `},{});`;
+                finalBundle += `},{},${extMapStr});`;
             } else {
-                // 従来の可読性重視ランタイム
-                finalBundle += `(function() {\n  /* Web Asset Bundler - Modules Container */\n  const modules = {\n`;
+                finalBundle += `(function(externals) {\n  /* Web Asset Bundler - Modules Container */\n  const modules = {\n`;
                 const moduleKeys = Object.keys(bundledModules);
                 moduleKeys.forEach((path, index) => {
                     if (keepComments) finalBundle += `    /* --- Module Boundary: ${path} --- */\n`;
@@ -1287,14 +1306,18 @@
                     finalBundle += bundledModules[path].code.split('\n').map(line => '      ' + line).join('\n') + `\n`;
                     finalBundle += `    }${index === moduleKeys.length - 1 ? '' : ','}\n\n`;
                 });
+                
+                // 通常版ランタイム（キャッシュ順序の修正とWorker対応）
                 finalBundle += `  };\n  const cache = {};\n  function require(moduleId) {\n`;
                 finalBundle += `    if (cache[moduleId]) return cache[moduleId].exports;\n`;
-                finalBundle += `    const module = cache[moduleId] = { exports: {} };\n`;
                 finalBundle += `    if (!modules[moduleId]) {\n`;
-                finalBundle += `      if (typeof window !== 'undefined' && window[moduleId]) return window[moduleId];\n`;
+                finalBundle += `      let glob = typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : globalThis);\n`;
+                finalBundle += `      let w = externals[moduleId] || glob[moduleId] || glob[moduleId.toUpperCase()];\n`;
+                finalBundle += `      if (w) return Object.setPrototypeOf({__esModule:true}, w);\n`;
                 finalBundle += `      throw new Error("Cannot find module '" + moduleId + "' in dynamic bundle");\n    }\n`;
+                finalBundle += `    const module = cache[moduleId] = { exports: {} };\n`;
                 finalBundle += `    modules[moduleId](require, module, module.exports);\n    return module.exports;\n  }\n`;
-                finalBundle += `  return require(${JSON.stringify(entryPoint)});\n})();\n`;
+                finalBundle += `  return require(${JSON.stringify(entryPoint)});\n})(${extMapStr});\n`;
             }
 
             return finalBundle;
@@ -1492,7 +1515,7 @@
             };
         };
 
-        // ⛳️ コードゴルフ：Babel ASTスコープトラバーサーを駆使した安全な変数名マングラー
+        // Babel ASTスコープトラバースによる変数名マングラー
         const astVariableManglerPlugin = () => {
             // JSの予約語や組み込みオブジェクト
             const reservedWords = new Set([
@@ -1500,13 +1523,15 @@
                 'break', 'catch', 'class', 'const', 'super', 'throw', 'while', 'yield', 'delete',
                 'export', 'import', 'return', 'switch', 'typeof', 'default', 'extends', 'finally',
                 'continue', 'debugger', 'function', 'arguments', 'null', 'true', 'false', 'NaN',
-                'undefined', 'Math', 'console', 'window', 'document', 'navigator', 'this'
+                'undefined', 'Math', 'console', 'window', 'document', 'navigator', 'this',
+                // バンドルランタイムの保護
+                'require', 'module', 'exports', '__esModule'
             ]);
 
             return {
                 visitor: {
                     Program(path) {
-                        // 【安全対策1】元のソースコードで既に使われている1文字の識別子をすべて収集し、上書きを禁止する
+                        // 【安全対策1】元のソースコードで既に使われている1文字の識別子を保護
                         path.traverse({
                             Identifier(p) {
                                 if (p.node.name.length === 1) {
@@ -1517,7 +1542,6 @@
 
                         let idCounter = 0;
                         const generateName = () => {
-                            // ⛳️ 「$」を追加し、1文字で表現できる変数を54個に増強！
                             const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$';
                             let num = idCounter++;
                             let name = '';
@@ -1530,10 +1554,9 @@
 
                         path.traverse({
                             Scope(scopePath) {
-                                if (scopePath.scope.parent === null) return; // グローバルスコープの変数は破壊しない
+                                if (scopePath.scope.parent === null) return;
                                 const bindings = scopePath.scope.bindings;
                                 for (const name in bindings) {
-                                    // 既に1文字の変数はリネームしない (元の 'e' などを保護)
                                     if (name.length === 1) continue;
 
                                     let newName;
@@ -1546,7 +1569,6 @@
                                         scopePath.scope.hasReference(newName)
                                     );
 
-                                    // 【安全対策2】生成した新しい変数名も予約リストに追加し、スコープ階層による衝突(シャドウイング)を完全に防ぐ
                                     reservedWords.add(newName);
                                     scopePath.scope.rename(name, newName);
                                 }
@@ -1557,16 +1579,13 @@
             };
         };
 
-        // ⛳️ コードゴルフ：構文そのものを破壊・短縮するエグいオプティマイザ (超・深淵版 V3)
+        // 構文短縮オプティマイザ (V4)
         const extremeGolfPlugin = ({ types: t }) => {
             return {
                 visitor: {
-                    // 1. 真偽値のハッキング (true -> !0, false -> !1)
                     BooleanLiteral(path) {
                         path.replaceWith(t.unaryExpression('!', t.numericLiteral(path.node.value ? 0 : 1)));
                     },
-
-                    // 2. 数値の指数表記化 (10000 -> 1e4)
                     NumericLiteral(path) {
                         const val = path.node.value;
                         if (Number.isInteger(val) && val >= 1000 && val.toString().endsWith('000')) {
@@ -1576,8 +1595,6 @@
                             }
                         }
                     },
-
-                    // 3. 定数畳み込み (Constant Folding) ＆ ⛳️ 文字列結合の最適化
                     BinaryExpression(path) {
                         const { operator, left, right } = path.node;
                         if (t.isNumericLiteral(left) && t.isNumericLiteral(right)) {
@@ -1590,12 +1607,9 @@
                             }
                             if (res !== undefined) path.replaceWith(t.numericLiteral(res));
                         } else if (operator === '+' && t.isStringLiteral(left) && t.isStringLiteral(right)) {
-                            // "a" + "b" -> "ab"
                             path.replaceWith(t.stringLiteral(left.value + right.value));
                         }
                     },
-
-                    // 4. if文の極限圧縮 (if-else -> 三項演算子, if -> 短絡評価)
                     IfStatement(path) {
                         const { test, consequent, alternate } = path.node;
                         const getSingleStatement = (stmt) => {
@@ -1628,8 +1642,6 @@
                             ));
                         }
                     },
-
-                    //  5. Identifier ハック (undefined -> void 0, Infinity -> 1/0)
                     Identifier(path) {
                         if (path.node.name === 'undefined' && !path.scope.hasBinding('undefined')) {
                             path.replaceWith(t.unaryExpression('void', t.numericLiteral(0)));
@@ -1638,8 +1650,6 @@
                             path.replaceWith(t.binaryExpression('/', t.numericLiteral(1), t.numericLiteral(0)));
                         }
                     },
-
-                    //  6. アロー関数のブロックとreturnの剥奪 (() => { return x; } -> () => x)
                     ArrowFunctionExpression(path) {
                         if (t.isBlockStatement(path.node.body) && path.node.body.body.length === 1) {
                             const stmt = path.node.body.body[0];
@@ -1648,17 +1658,13 @@
                             }
                         }
                     },
-
-                    // 7. 匿名関数を強制的にアロー関数に圧縮 (安全装置付き)
                     FunctionExpression(path) {
                         if (path.node.id || path.node.generator || path.node.async) return;
-
                         const parent = path.parent;
                         if (t.isNewExpression(parent) || t.isVariableDeclarator(parent) ||
                             t.isAssignmentExpression(parent) || t.isProperty(parent)) {
                             return;
                         }
-
                         let hasThisOrArgs = false;
                         path.traverse({
                             ThisExpression() { hasThisOrArgs = true; },
@@ -1668,8 +1674,6 @@
                             path.replaceWith(t.arrowFunctionExpression(path.node.params, path.node.body));
                         }
                     },
-
-                    //  8. Mathメソッド of ビット演算化 ＆ Math.round追加
                     CallExpression(path) {
                         const callee = path.node.callee;
                         if (
@@ -1685,8 +1689,6 @@
                             }
                         }
                     },
-
-                    // 9. 無限ループの極小化 (while(true) -> for(;;))
                     WhileStatement(path) {
                         const test = path.node.test;
                         const isTrueLiteral = t.isBooleanLiteral(test, { value: true });
@@ -1697,8 +1699,6 @@
                             path.replaceWith(t.forStatement(null, null, null, path.node.body));
                         }
                     },
-
-                    // 10. プロパティアクセスのドット記法化 ( a['b'] -> a.b )
                     MemberExpression(path) {
                         if (path.node.computed && t.isStringLiteral(path.node.property)) {
                             const propName = path.node.property.value;
@@ -1709,52 +1709,74 @@
                         }
                     },
 
-                    // ⛳️ 11. GLSLシェーダー＆巨大文字列の内部ミニファイ (NEW)
+                    // 11. 巨大文字列の内部ミニファイ (GLSL & Web Worker)
                     "StringLiteral|TemplateElement"(path) {
                         const isTemplate = t.isTemplateElement(path.node);
                         let text = isTemplate ? path.node.value.raw : path.node.value;
-                        if (!text || text.length < 5) return;
+                        if (!text || text.length < 15) return;
 
-                        // 🔍 シェーダーのフラグメント（数式、vec2、return文など）かざっくり判定
+                        // 🔍 1. GLSLシェーダーの判定
                         const hasGLSLKeywords = /(vec[234]|float\s|void\s+main|#version|gl_Position|layout\s*\(|precision\s+highp)/.test(text);
                         const isFractalFormula = /return\s+c[A-Z][a-zA-Z0-9_]*\s*\(/.test(text) || text.includes('mix(') || text.includes('atanSafe(');
 
                         if (hasGLSLKeywords || isFractalFormula) {
-                            // ① コメントの完全削除 (// ... と /* ... */)
                             text = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-                            
-                            // ② #version などのプリプロセッサ行を保護 (改行が必須なため)
                             const dirs = [];
-                            text = text.replace(/^\s*(#\w+.*)$/gm, (m, p1) => {
-                                dirs.push(p1);
-                                return `__DIR_${dirs.length - 1}__\n`;
-                            });
-
-                            // ③ 連続する空白・改行をすべて単一のスペースに圧殺
+                            text = text.replace(/^\s*(#\w+.*)$/gm, (m, p1) => { dirs.push(p1); return `__DIR_${dirs.length - 1}__\n`; });
                             text = text.replace(/\s+/g, ' ');
-
-                            // ④ 記号の前後にある空白を根こそぎ剥奪
                             text = text.replace(/\s*([;,\{\}\(\)\=\+\-\*\/\<\>\!\|&\[\]\?])\s*/g, '$1');
-
-                            // ⑤ 予約語のパースエラー回避（記号除去でくっつきすぎる部分を安全に離す）
-                            text = text.replace(/\breturn([a-zA-Z0-9_])/g, 'return $1'); // returnx -> return x
-                            text = text.replace(/\belse([a-zA-Z0-9_])/g, 'else $1');     // elsex -> else x
-                            text = text.replace(/\)(in|out|uniform)\b/g, ') $1');        // layout(...)in -> layout(...) in
-
-                            // ⑥ 保護していたプリプロセッサ行を復元
-                            dirs.forEach((d, i) => {
-                                text = text.replace(new RegExp(`__DIR_${i}__\\s*`), d + '\n');
-                            });
-
+                            text = text.replace(/\breturn([a-zA-Z0-9_])/g, 'return $1');
+                            text = text.replace(/\belse([a-zA-Z0-9_])/g, 'else $1');
+                            text = text.replace(/\)(in|out|uniform)\b/g, ') $1');
+                            dirs.forEach((d, i) => { text = text.replace(new RegExp(`__DIR_${i}__\\s*`), d + '\n'); });
                             text = text.trim();
 
-                            // ASTノードに書き戻す
                             if (isTemplate) {
                                 path.node.value.raw = text;
-                                // テンプレート文字列仕様のためのフォールバック
                                 path.node.value.cooked = text.replace(/\\/g, '\\\\'); 
                             } else {
                                 path.node.value = text;
+                            }
+                            return;
+                        }
+
+                        // 🔍 2. Web Worker / インラインJSの判定
+                        // 安全対策: テンプレートリテラルの補間（${...}）がある場合はJS構文が壊れるためスルー
+                        const isSafeForJsParse = !isTemplate || (path.parentPath.node.expressions && path.parentPath.node.expressions.length === 0);
+                        
+                        if (isSafeForJsParse && window.Babel) {
+                            // Workerによく使われるキーワードとJSの宣言文が含まれているかヒューリスティックに判定
+                            const isInlineJS = /(postMessage|onmessage|self\.|importScripts|WorkerGlobalScope)/.test(text) && 
+                                               /(const|let|var|function|=>)\s/.test(text);
+
+                            if (isInlineJS) {
+                                try {
+                                    // 文字列内のJSコードに対してBabelを再帰適用し変数圧縮
+                                    const activePlugins = [];
+                                    if (typeof astVariableManglerPlugin !== 'undefined') {
+                                        activePlugins.push(astVariableManglerPlugin);
+                                    }
+
+                                    const res = window.Babel.transform(text, {
+                                        plugins: activePlugins,
+                                        parserOpts: { sourceType: 'module' },
+                                        comments: false,
+                                        minified: true,
+                                        compact: true
+                                    });
+
+                                    // パースに成功した場合のみ文字列を上書き
+                                    if (res && res.code) {
+                                        if (isTemplate) {
+                                            path.node.value.raw = res.code;
+                                            path.node.value.cooked = res.code.replace(/\\/g, '\\\\');
+                                        } else {
+                                            path.node.value = res.code;
+                                        }
+                                    }
+                                } catch (e) {
+                                    // JSの文法エラー（ただの文章だった場合など）は安全にスルー
+                                }
                             }
                         }
                     }
@@ -1762,106 +1784,106 @@
             };
         };
 
-        // AST のトラバースと Babel トランスパイラを組み合わせて、
-        // パス書き換えとESM➔CommonJS変換を同時に100%正確に実行
+        // 2フェーズ・コンパイルによるトランスパイラ本体
         function transformESMtoCJS(source, fromPath, resolvedPaths, keepComments) {
             const golfEnabled = optGolf.checked;
             const enableMangle = document.getElementById('golf-mangle').checked;
             const enableConsoleStrip = document.getElementById('golf-console').checked;
             const enableExtreme = document.getElementById('golf-extreme').checked;
 
-            // 1. AST上を直接走査して、依存関係のある相対パスを「解決後のパス」に書き換えるカスタムBabelプラグイン
+            // 1. パス書き換えプラグイン
             const pathRewriterPlugin = () => {
                 return {
                     visitor: {
                         ImportDeclaration(path) {
                             if (path.node.source && path.node.source.value) {
                                 const raw = path.node.source.value;
-                                if (resolvedPaths[raw]) {
-                                    path.node.source.value = resolvedPaths[raw];
-                                }
+                                if (resolvedPaths[raw]) path.node.source.value = resolvedPaths[raw];
                             }
                         },
                         ExportNamedDeclaration(path) {
                             if (path.node.source && path.node.source.value) {
                                 const raw = path.node.source.value;
-                                if (resolvedPaths[raw]) {
-                                    path.node.source.value = resolvedPaths[raw];
-                                }
+                                if (resolvedPaths[raw]) path.node.source.value = resolvedPaths[raw];
                             }
                         },
                         ExportAllDeclaration(path) {
                             if (path.node.source && path.node.source.value) {
                                 const raw = path.node.source.value;
-                                if (resolvedPaths[raw]) {
-                                    path.node.source.value = resolvedPaths[raw];
-                                }
+                                if (resolvedPaths[raw]) path.node.source.value = resolvedPaths[raw];
                             }
                         },
                         CallExpression(path) {
                             const node = path.node;
                             if (
-                                node.callee &&
-                                node.callee.type === 'Identifier' &&
-                                node.callee.name === 'require' &&
-                                node.arguments &&
+                                node.callee && node.callee.type === 'Identifier' &&
+                                node.callee.name === 'require' && node.arguments &&
                                 node.arguments.length === 1 &&
                                 (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')
                             ) {
                                 const raw = node.arguments[0].value;
-                                if (resolvedPaths[raw]) {
-                                    node.arguments[0].value = resolvedPaths[raw];
-                                }
+                                if (resolvedPaths[raw]) node.arguments[0].value = resolvedPaths[raw];
                             }
                         }
                     }
                 };
             };
 
-            // 適用するプラグインの構築
-            const activePlugins = [pathRewriterPlugin];
+            const parsePlugins = [
+                'jsx', 'typescript', 'classProperties',
+                'decorators-legacy', 'objectRestSpread',
+                'exportDefaultFrom', 'dynamicImport'
+            ];
 
-            if (golfEnabled) {
-                if (enableConsoleStrip) {
-                    activePlugins.push(consoleStripperPlugin);
-                }
-                if (enableMangle) {
-                    activePlugins.push(astVariableManglerPlugin);
-                }
-                if (enableExtreme) {
-                    activePlugins.push(extremeGolfPlugin);
-                }
-            }
-
-            // ⛳️ transform-modules-commonjs を適用 
-            // loose: true と strict: false で Object.defineProperty 等のクソ長い出力を抹消！
-            activePlugins.push(['transform-modules-commonjs', { loose: true, strict: false }]);
-
+            // フェーズ1: 依存解決と CommonJS (CJS) への変換
+            let phase1Code = source;
             try {
                 const { code } = Babel.transform(source, {
-                    plugins: activePlugins,
+                    plugins: [
+                        pathRewriterPlugin,
+                        ['transform-modules-commonjs', { loose: true, strict: false }]
+                    ],
                     parserOpts: {
                         sourceType: 'module',
-                        plugins: [
-                            'jsx',
-                            'typescript',
-                            'classProperties',
-                            'decorators-legacy',
-                            'objectRestSpread',
-                            'exportDefaultFrom',
-                            'dynamicImport'
-                        ]
+                        plugins: parsePlugins
                     },
-                    // ⛳️ コードゴルフ時はコメントを完全除去し、ジェネレータで極限まで改行・空白を詰め込む
                     comments: golfEnabled ? false : keepComments,
-                    minified: golfEnabled ? true : false,
-                    compact: golfEnabled ? true : false
+                    minified: false,
+                    compact: false
                 });
+                phase1Code = code;
+            } catch (err) {
+                console.error("Babel ASTフェーズ1 エラー:", err);
+                throw new Error(`[${fromPath}] のモジュール変換(Phase1)中にエラーが発生しました:\n${err.message}`);
+            }
 
+            if (!golfEnabled) {
+                return phase1Code;
+            }
+
+            // フェーズ2: 圧縮処理
+            const activeGolfPlugins = [];
+            if (enableConsoleStrip) activeGolfPlugins.push(consoleStripperPlugin);
+            if (enableMangle) activeGolfPlugins.push(astVariableManglerPlugin);
+            if (enableExtreme) activeGolfPlugins.push(extremeGolfPlugin);
+
+            if (activeGolfPlugins.length === 0) return phase1Code;
+
+            try {
+                const { code } = Babel.transform(phase1Code, {
+                    plugins: activeGolfPlugins,
+                    parserOpts: {
+                        sourceType: 'module',
+                        plugins: parsePlugins
+                    },
+                    comments: false,
+                    minified: true,
+                    compact: true
+                });
                 return code;
             } catch (err) {
-                console.error("Babel ASTトランスパイルエラー:", err);
-                throw new Error(`[${fromPath}] のパース・構文変換中にASTコンパイルエラーが発生しました:\n${err.message}`);
+                console.error("Babel ASTフェーズ2 エラー:", err);
+                throw new Error(`[${fromPath}] の極限ゴルフ圧縮(Phase2)中にエラーが発生しました:\n${err.message}`);
             }
         }
 
