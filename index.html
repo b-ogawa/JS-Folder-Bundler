@@ -1897,7 +1897,52 @@
                             return;
                         }
 
-                        // parseInt のビット演算化
+                        // addEventListener の抹消 (強制プロパティ化)
+                        // el.addEventListener('click', fn) ➔ el.onclick = fn
+                        if (
+                            t.isMemberExpression(callee) &&
+                            t.isIdentifier(callee.property, { name: 'addEventListener' }) &&
+                            path.node.arguments.length >= 2 &&
+                            t.isStringLiteral(path.node.arguments[0])
+                        ) {
+                            const eventName = path.node.arguments[0].value;
+                            // DOMContentLoadedなどの特殊イベント以外は on~ に変換！
+                            if (eventName !== 'DOMContentLoaded') {
+                                path.replaceWith(
+                                    t.assignmentExpression(
+                                        '=',
+                                        t.memberExpression(callee.object, t.identifier('on' + eventName)),
+                                        path.node.arguments[1]
+                                    )
+                                );
+                                return;
+                            }
+                        }
+
+                        // setAttribute の抹消 (強制プロパティ代入)
+                        // el.setAttribute('src', val) ➔ el.src = val
+
+                        if (
+                            t.isMemberExpression(callee) &&
+                            t.isIdentifier(callee.property, { name: 'setAttribute' }) &&
+                            path.node.arguments.length === 2 &&
+                            t.isStringLiteral(path.node.arguments[0])
+                        ) {
+                            const attr = path.node.arguments[0].value;
+                            // classやdata-属性など、プロパティと名前が違うものは安全のため除外
+                            if (!attr.includes('-') && attr !== 'class' && attr !== 'for') {
+                                path.replaceWith(
+                                    t.assignmentExpression(
+                                        '=',
+                                        t.memberExpression(callee.object, t.identifier(attr)),
+                                        path.node.arguments[1]
+                                    )
+                                );
+                                return;
+                            }
+                        }
+
+                        // parseInt の抹消 (ビット演算化)
                         if (t.isIdentifier(callee, { name: 'parseInt' }) && path.node.arguments.length >= 1) {
                             path.replaceWith(t.binaryExpression('|', path.node.arguments[0], t.numericLiteral(0)));
                             return;
