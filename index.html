@@ -137,11 +137,6 @@
                         onclick="switchMode('smart')">
                         📦 JSスマート解析
                     </button>
-                    <button id="mode-simple-btn"
-                        class="flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200"
-                        onclick="switchMode('simple')">
-                        🔗 JS単純結合
-                    </button>
                     <button id="mode-direct-btn"
                         class="flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200"
                         onclick="switchMode('direct')">
@@ -955,15 +950,14 @@
             currentMode = mode;
             const htmlBtn = document.getElementById('mode-html-btn');
             const smartBtn = document.getElementById('mode-smart-btn');
-            const simpleBtn = document.getElementById('mode-simple-btn');
             const directBtn = document.getElementById('mode-direct-btn');
 
-            const tabs = [htmlBtn, smartBtn, simpleBtn, directBtn];
+            const tabs = [htmlBtn, smartBtn, directBtn];
             tabs.forEach(tab => {
                 tab.className = "flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200";
             });
 
-            const targetBtn = mode === 'html' ? htmlBtn : (mode === 'smart' ? smartBtn : (mode === 'simple' ? simpleBtn : directBtn));
+            const targetBtn = mode === 'html' ? htmlBtn : (mode === 'smart' ? smartBtn : directBtn);
             targetBtn.className = "flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-brand-400 bg-slate-900 shadow-sm border border-slate-800";
 
             // オプションパネル表示切り替え
@@ -974,7 +968,6 @@
 
             if (mode === 'html') htmlOptions.classList.remove('hidden');
             else if (mode === 'smart') smartOptions.classList.remove('hidden');
-            else if (mode === 'simple') simpleOptions.classList.remove('hidden');
             else if (mode === 'direct') document.getElementById('direct-options').classList.remove('hidden');
 
             // 選択したモードに応じてエディタのタブを自動で切り替える
@@ -1119,7 +1112,9 @@
             showLoading(true, "ビルド中...");
             logSection.classList.remove('hidden');
             logContent.innerHTML = '';
-            outputCode.value = ''; // 出力側はクリア
+
+            // ダイレクトモード以外は出力をクリア
+            if (currentMode !== 'direct') outputCode.value = '';
             usedFilesSet.clear();
 
             setTimeout(() => {
@@ -1129,14 +1124,37 @@
                     let finalContent = "";
                     addLog("ビルドタスクを開始します...", "info");
 
-                    if (currentMode === 'html') finalContent = executeHtmlBundle();
-                    else if (currentMode === 'smart') finalContent = executeSmartJSBundle(entryPointSelect.value, addStrict, keepComments);
-                    else if (currentMode === 'simple') finalContent = executeSimpleJSBundle(addStrict, keepComments);
-                    else if (currentMode === 'direct') finalContent = executeDirectBundle();
+                    if (currentMode === 'html') {
+                        finalContent = executeHtmlBundle();
+                    }
+                    else if (currentMode === 'smart') {
+                        // 自動判別ロジック: JSファイル内に import/export/require が存在するかスキャンする
+                        let hasModuleSyntax = false;
+                        const jsFiles = Object.keys(filesStore).filter(isJSFile);
+                        for (const path of jsFiles) {
+                            const code = filesStore[path].content;
+                            if (/(?:^|\s)(import|export)\s+[\w*{]/.test(code) || /require\s*\(/.test(code) || /module\.exports/.test(code)) {
+                                hasModuleSyntax = true;
+                                break;
+                            }
+                        }
+
+                        if (hasModuleSyntax || jsFiles.length === 1) {
+                            addLog("[自動判別] ESモジュール構文を検知しました。スマート結合(AST解析)を実行します。", "success");
+                            finalContent = executeSmartJSBundle(entryPointSelect.value, addStrict, keepComments);
+                        } else {
+                            addLog("[自動判別] モジュール構文がありません。レガシーコードと判定し、グローバル順次結合を実行します。", "warn");
+                            // 既存のレガシー結合関数を裏側で自動呼び出し
+                            finalContent = executeSimpleJSBundle(addStrict, keepComments);
+                        }
+                    }
+                    else if (currentMode === 'direct') {
+                        finalContent = executeDirectBundle();
+                    }
 
                     if (finalContent) {
                         outputCode.value = finalContent;
-                        switchEditorTab('output'); // 成功時に自動で Output タブを表示！
+                        switchEditorTab('output');
 
                         copyBtn.disabled = false; downloadBtn.disabled = false;
                         showToast("バンドル処理が完了しました！", "success");
@@ -1160,6 +1178,34 @@
             }, 400);
         }
 
+        // 起点HTMLから動的に関数名を抽出するスキャンエンジン（クォート無し圧縮属性にも完全対応！）
+        function extractReservedFunctionsFromHtml(html) {
+            const reserved = [];
+
+            // 抽出1: onclick="..." や onclick=... などの内部のJSロジックから関数呼び出しをスキャン
+            // (?:(["'])(.*?)\1|([^\s>]+)) によって、クォートあり・なし両方に対応！
+            html.replace(/on[a-z]+\s*=\s*(?:(["'])(.*?)\1|([^\s>]+))/gi, (match, quote, quoted, unquoted) => {
+                const code = (quoted !== undefined ? quoted : unquoted) || "";
+                code.replace(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g, (m, funcName) => {
+                    reserved.push(funcName);
+                    return m;
+                });
+                return match;
+            });
+
+            // 抽出2: href="javascript:foo()" や href=javascript:foo() からスキャン
+            html.replace(/href\s*=\s*(?:(["'])javascript:(.*?)\1|javascript:([^\s>]+))/gi, (match, quote, quoted, unquoted) => {
+                const code = (quoted !== undefined ? quoted : unquoted) || "";
+                code.replace(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g, (m, funcName) => {
+                    reserved.push(funcName);
+                    return m;
+                });
+                return match;
+            });
+
+            return Array.from(new Set(reserved));
+        }
+
         // ------------------------------------------
         // 🌐 HTML単一化 バンドルロジック
         // ------------------------------------------
@@ -1180,6 +1226,13 @@
             const minifyAssets = document.getElementById('golf-minify-assets') && document.getElementById('golf-minify-assets').checked;
 
             const rawHtml = filesStore[entryHtmlPath].content;
+
+            // HTML全体から外部呼び出しされているJS関数名を事前全自動抽出
+            const globalHtmlReserved = extractReservedFunctionsFromHtml(rawHtml);
+            if (golfEnabled && globalHtmlReserved.length > 0) {
+                addLog(`[データ駆動] HTMLのDOM内イベントから保護関数を自動抽出しました: ${globalHtmlReserved.join(', ')}`, "success");
+            }
+
             const parser = new DOMParser();
             const doc = parser.parseFromString(rawHtml, 'text/html');
 
@@ -1216,7 +1269,8 @@
                     if (filesStore[resolvedPath]) {
                         let jsContent = "";
                         try {
-                            jsContent = executeSmartJSBundle(resolvedPath, false, !golfEnabled);
+                            // スマートバンドラー側にもHTMLの保護予約語リストを引き回してマングルを防ぐ
+                            jsContent = executeSmartJSBundle(resolvedPath, false, !golfEnabled, globalHtmlReserved);
                         } catch (err) {
                             usedFilesSet.add(resolvedPath);
                             jsContent = filesStore[resolvedPath].content;
@@ -1315,7 +1369,7 @@
         // ------------------------------------------
         // JavaScript スマートバンドル処理
         // ------------------------------------------
-        function executeSmartJSBundle(entryPoint, addStrict, keepComments) {
+        function executeSmartJSBundle(entryPoint, addStrict, keepComments, extraReserved = []) {
             if (!entryPoint || !filesStore[entryPoint]) throw new Error("起点となるJSが見つかりません。");
             const bundledModules = {};
             const visited = new Set();
@@ -1351,7 +1405,8 @@
                     }
                 });
 
-                const transformedSource = transformESMtoCJS(rawSource, currentPath, localDependencyPaths, keepComments);
+                // dynamicReserved リスト(extraReserved)をマングラーに伝播させる
+                const transformedSource = transformESMtoCJS(rawSource, currentPath, localDependencyPaths, keepComments, false, extraReserved);
                 bundledModules[currentPath] = { code: transformedSource, path: currentPath };
             }
 
@@ -1453,7 +1508,7 @@
 
                     // フェーズ3: マングル
                     const phase3Plugins = [];
-                    if (enableMangle) phase3Plugins.push(astVariableManglerPlugin);
+                    if (enableMangle) phase3Plugins.push(createManglerPlugin());
                     const { code } = Babel.transform(phase2Code, { plugins: phase3Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: true, compact: true });
                     output = code;
 
@@ -1636,8 +1691,9 @@
             };
         };
 
-        // Babel ASTスコープトラバースによる変数名マングラー (究極安全・統合版)
-        const astVariableManglerPlugin = () => {
+        // Babel ASTスコープトラバースによる変数名マングラー
+        const createManglerPlugin = (extraReserved = []) => {
+            // JSの純粋な標準予約語とグローバルオブジェクトのみを定義。
             const reservedWords = new Set([
                 'do', 'if', 'in', 'for', 'let', 'new', 'try', 'var', 'case', 'else', 'with', 'await',
                 'break', 'catch', 'class', 'const', 'super', 'throw', 'while', 'yield', 'delete',
@@ -1646,6 +1702,8 @@
                 'undefined', 'Math', 'console', 'window', 'document', 'navigator', 'this',
                 'require', 'module', 'exports', '__esModule'
             ]);
+            // 動的に渡されたHTML等のDOM上保護関数リストを完全に統合
+            extraReserved.forEach(word => reservedWords.add(word));
 
             return {
                 visitor: {
@@ -1666,6 +1724,8 @@
                                     } else if (name.length === 1) {
                                         // 元から1文字の変数も保護
                                         reservedWords.add(name);
+                                    } else if (reservedWords.has(name)) {
+                                        // 既に保護リストに入っている名前ならリネーム対象にしない
                                     } else {
                                         // 圧縮可能なローカル変数をリストにプール
                                         localNamesToRename.add(name);
@@ -1736,6 +1796,7 @@
 
                         // 等価演算子のダウングレード (=== -> ==)
                         if (operator === '===') path.node.operator = '==';
+                        if (operator === '!--') path.node.operator = '!=';
                         if (operator === '!--') path.node.operator = '!=';
                         if (operator === '!==') path.node.operator = '!=';
 
@@ -1914,7 +1975,7 @@
                             if (isInlineJS) {
                                 try {
                                     const activePlugins = [];
-                                    if (typeof astVariableManglerPlugin !== 'undefined') activePlugins.push(astVariableManglerPlugin);
+                                    if (typeof createManglerPlugin !== 'undefined') activePlugins.push(createManglerPlugin());
                                     const res = window.Babel.transform(text, { plugins: activePlugins, parserOpts: { sourceType: 'module' }, comments: false, minified: true, compact: true });
                                     if (res && res.code) {
                                         if (isTemplate) { path.node.value.raw = res.code; path.node.value.cooked = res.code.replace(/\\/g, '\\\\'); }
@@ -1929,7 +1990,7 @@
         };
 
         // 3フェーズ・コンパイルによるトランスパイラ本体
-        function transformESMtoCJS(source, fromPath, resolvedPaths, keepComments, skipCjs = false) {
+        function transformESMtoCJS(source, fromPath, resolvedPaths, keepComments, skipCjs = false, extraReserved = []) {
             const golfEnabled = optGolf.checked;
             const enableMangle = document.getElementById('golf-mangle').checked;
             const enableConsoleStrip = document.getElementById('golf-console').checked;
@@ -1981,17 +2042,19 @@
             // フェーズ3: 変数名マングル & 最終出力
             try {
                 const phase3Plugins = [];
-                if (enableMangle) phase3Plugins.push(astVariableManglerPlugin);
-                // マングラーだけを実行するため安全に圧縮可能
+                if (enableMangle) phase3Plugins.push(createManglerPlugin(extraReserved));
                 const { code } = Babel.transform(phase2Code, { plugins: phase3Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: true, compact: true });
                 return code;
             } catch (err) { throw new Error(`[${fromPath}] の変数マングル(Phase3)エラー:\n${err.message}`); }
         }
 
-        // HTML内インラインJS/CSS の再帰ゴルフ圧縮
+        // HTML内インラインJS/CSS の再帰ゴルフ圧縮 (完全データ駆動版)
         function minifyHtml(html) {
             const golfEnabled = optGolf && optGolf.checked;
             const protectedBlocks = [];
+
+            // HTML内から「外部呼び出しされる関数名」を全自動抽出
+            const dynamicReserved = extractReservedFunctionsFromHtml(html);
 
             // 1. script と style を抽出して再帰圧縮
             let safeHtml = html.replace(/<(script|style)([^>]*)>([\s\S]*?)<\/\1>/gi, (match, tag, attrs, content) => {
@@ -2005,10 +2068,9 @@
                         const isJS = !attrs.includes('type=') || /type=["']?(text\/javascript|module|application\/javascript|text\/worklet)["']?/i.test(attrs);
                         if (isJS && content.trim().length > 0) {
                             try {
-                                // JS単体モードと同じ2フェーズ・コンパイルを適用 (モジュール変換はスキップ)
-                                compressedContent = transformESMtoCJS(content, "inline_script", {}, false, true);
+                                // 抽出したイベント参照の保護リスト (dynamicReserved) をマングラーに渡す
+                                compressedContent = transformESMtoCJS(content, "inline_script", {}, false, true, dynamicReserved);
                             } catch (e) {
-                                // エラー時は元コードを維持し警告出力
                                 addLog(`[HTML圧縮] <script> 内のJS圧縮に失敗しました。元コードを維持します: ${e.message}`, "warn");
                             }
                         }
