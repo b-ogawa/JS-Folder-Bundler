@@ -2005,7 +2005,7 @@
                         compressedContent = minifyCss(content);
                     } else if (tag.toLowerCase() === 'script') {
                         // JSの場合のみASTで圧縮
-                        const isJS = !attrs.includes('type=') || /type=["']?(text\/javascript|module|application\/javascript)["']?/i.test(attrs);
+                        const isJS = !attrs.includes('type=') || /type=["']?(text\/javascript|module|application\/javascript|text\/worklet)["']?/i.test(attrs);
                         if (isJS && content.trim().length > 0) {
                             try {
                                 // JS単体モードと同じ2フェーズ・コンパイルを適用
