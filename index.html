@@ -197,10 +197,14 @@
                             <!-- 動的追加 -->
                         </select>
                         <p class="text-[10px] text-slate-500 mt-1">※ 指定されたJSからimport/require文をたどり、自動で解析します。</p>
-                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ AST（抽象構文木）解析エンジン「Babel Parser」を搭載！複合インポート、aliasインポート、名前付き再エクスポートをサポート！</p>
-                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Three.jsなどの外部CDNライブラリや importmap との共存（ネイティブ import フォールバック）に対応！</p>
-                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Web Worker環境（globalThis）での動作に完全対応！</p>
-                        <p class="text-[10px] text-red-400 mt-0.5 font-medium">※ 制限事項: 1行に複数の変数宣言を並べる `export const a = 1, b = 2;` には対応していません。個別に行を分けてエクスポートしてください。</p>
+                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ AST（抽象構文木）解析エンジン「Babel
+                            Parser」を搭載！複合インポート、aliasインポート、名前付き再エクスポートをサポート！</p>
+                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Three.jsなどの外部CDNライブラリや importmap
+                            との共存（ネイティブ import フォールバック）に対応！</p>
+                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Web Worker環境（globalThis）での動作に完全対応！
+                        </p>
+                        <p class="text-[10px] text-red-400 mt-0.5 font-medium">※ 制限事項: 1行に複数の変数宣言を並べる `export const a =
+                            1, b = 2;` には対応していません。個別に行を分けてエクスポートしてください。</p>
                     </div>
                 </div>
 
@@ -229,11 +233,13 @@
                 <div id="direct-options" class="flex flex-col gap-4 hidden">
                     <div class="p-4 bg-brand-500/10 border border-brand-500/20 rounded-xl">
                         <p class="text-xs text-brand-400 mb-2 font-bold">右側のテキストエリアに直接コードを貼り付けてください。</p>
-                        <p class="text-[10px] text-slate-400">ファイルアップロード不要で、単一のコードを極限までゴルフ圧縮します。余計なモジュールラッパーも付与されません。</p>
+                        <p class="text-[10px] text-slate-400">ファイルアップロード不要で、単一のコードを極限までゴルフ圧縮します。余計なモジュールラッパーも付与されません。
+                        </p>
                     </div>
                     <div class="flex items-center gap-2 mt-2">
                         <label class="text-xs text-slate-400 font-medium">対象言語:</label>
-                        <select id="direct-lang-select" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1 text-xs font-mono text-slate-200">
+                        <select id="direct-lang-select"
+                            class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1 text-xs font-mono text-slate-200">
                             <option value="js">JavaScript (AST圧縮)</option>
                             <option value="html">HTML (空白・属性圧縮)</option>
                             <option value="css">CSS (構造圧縮)</option>
@@ -263,8 +269,10 @@
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-mangle"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">変数・関数名の一文字化 (Mangle)</label>
-                                <span class="text-[9px] text-slate-400">スコープ内の変数を安全に圧縮。既存の1文字変数は保護され、2フェーズコンパイルでBabelの衝突を防ぎます</span>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">変数・関数名の一文字化
+                                    (Mangle)</label>
+                                <span
+                                    class="text-[9px] text-slate-400">スコープ内の変数を安全に圧縮。既存の1文字変数は保護され、2フェーズコンパイルでBabelの衝突を防ぎます</span>
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
@@ -291,7 +299,8 @@
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-extreme"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">極限構文ハック (Boolean / Number / If / Loop / アロー化)</label>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">極限構文ハック (Boolean /
+                                    Number / If / Loop / アロー化)</label>
                                 <span
                                     class="text-[9px] text-slate-400">true➔!0、10000➔1e4、単一if文➔&&短絡評価、定数畳み込み、while(true)➔for(;;)、無名関数のアロー化など</span>
                             </div>
@@ -302,9 +311,10 @@
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-string-hack"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">GLSL / Web Worker 文字列圧縮ハック</label>
-                                <span
-                                    class="text-[9px] text-slate-400">文字列内のGLSLシェーダーの空白・コメント除去、Web Worker JSの再帰圧縮</span>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">GLSL / Web Worker
+                                    文字列圧縮ハック</label>
+                                <span class="text-[9px] text-slate-400">文字列内のGLSLシェーダーの空白・コメント除去、Web Worker
+                                    JSの再帰圧縮</span>
                             </div>
                         </div>
                     </div>
@@ -424,24 +434,27 @@
                 </div>
 
                 <!-- コード出力エリア（入力・出力タブ分離型） -->
-                <div class="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl overflow-hidden flex flex-col relative">
+                <div
+                    class="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl overflow-hidden flex flex-col relative">
                     <!-- エディタタブ -->
                     <div class="flex bg-slate-900 border-b border-slate-800/80 text-xs font-semibold select-none">
-                        <button id="tab-input" class="px-5 py-2.5 text-brand-400 border-b-2 border-brand-500 bg-slate-800/50 flex items-center gap-2 transition-colors">
+                        <button id="tab-input"
+                            class="px-5 py-2.5 text-brand-400 border-b-2 border-brand-500 bg-slate-800/50 flex items-center gap-2 transition-colors">
                             <i data-lucide="keyboard" class="w-4 h-4"></i> 入力 (Input)
                         </button>
-                        <button id="tab-output" class="px-5 py-2.5 text-slate-500 hover:text-slate-300 border-b-2 border-transparent flex items-center gap-2 transition-colors">
+                        <button id="tab-output"
+                            class="px-5 py-2.5 text-slate-500 hover:text-slate-300 border-b-2 border-transparent flex items-center gap-2 transition-colors">
                             <i data-lucide="terminal-square" class="w-4 h-4"></i> 出力 (Output)
                         </button>
                     </div>
-                    
+
                     <div class="flex-1 flex relative">
                         <!-- 行番号 -->
                         <div id="line-numbers"
                             class="w-12 bg-slate-950 border-r border-slate-800/80 py-4 text-right pr-3 text-xs font-mono text-slate-600 select-none">
                             1
                         </div>
-                        
+
                         <!-- 入力エリア -->
                         <textarea id="input-code"
                             class="flex-1 bg-slate-950 p-4 font-mono text-xs text-slate-200 focus:outline-none resize-none overflow-auto whitespace-pre leading-relaxed"
@@ -455,7 +468,9 @@
                         <!-- ローディング表示 -->
                         <div id="loading-overlay"
                             class="hidden absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3 z-10">
-                            <div class="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+                            <div
+                                class="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin">
+                            </div>
                             <p class="text-sm font-semibold text-slate-300">ファイルを結合・圧縮中...</p>
                         </div>
                     </div>
@@ -643,7 +658,7 @@
                 tabOutput.classList.replace('text-brand-400', 'text-slate-500');
                 tabOutput.classList.replace('border-brand-500', 'border-transparent');
                 tabOutput.classList.remove('bg-slate-800/50');
-                
+
                 inputCode.classList.remove('hidden');
                 outputCode.classList.add('hidden');
                 updateLineNumbers(inputCode.value);
@@ -654,7 +669,7 @@
                 tabInput.classList.replace('text-brand-400', 'text-slate-500');
                 tabInput.classList.replace('border-brand-500', 'border-transparent');
                 tabInput.classList.remove('bg-slate-800/50');
-                
+
                 outputCode.classList.remove('hidden');
                 inputCode.classList.add('hidden');
                 updateLineNumbers(outputCode.value);
@@ -746,7 +761,7 @@
                     if (['js', 'mjs', 'ts', 'jsx'].includes(ext)) langSelect.value = 'js';
                     else if (['html', 'htm'].includes(ext)) langSelect.value = 'html';
                     else if (ext === 'css') langSelect.value = 'css';
-                    
+
                     inputCode.value = singleFile.content;
                     switchEditorTab('input');
                     switchMode('direct');
@@ -1122,7 +1137,7 @@
                     if (finalContent) {
                         outputCode.value = finalContent;
                         switchEditorTab('output'); // 成功時に自動で Output タブを表示！
-                        
+
                         copyBtn.disabled = false; downloadBtn.disabled = false;
                         showToast("バンドル処理が完了しました！", "success");
                         addLog("ビルド成果物が正常に出力されました！", "success");
@@ -1213,7 +1228,7 @@
                         });
 
                         const safeJsContent = jsContent.replace(new RegExp('\\x3c/\\\\s*script\\\\s*\\x3e', 'gi'), '\\x3c\\/script\\x3e');
-                        
+
                         // トップレベルに外部ESMのimportが生成されている場合は強制的にtype="module"にする
                         const typeAttr = script.getAttribute('type');
                         if (typeAttr === 'module' || safeJsContent.includes('import * as __ext_')) {
@@ -1374,7 +1389,7 @@
                     finalBundle += bundledModules[path].code.split('\n').map(line => '      ' + line).join('\n') + `\n`;
                     finalBundle += `    }${index === moduleKeys.length - 1 ? '' : ','}\n\n`;
                 });
-                
+
                 // 通常版ランタイム（キャッシュ順序の修正とWorker対応）
                 finalBundle += `  };\n  const cache = {};\n  function require(moduleId) {\n`;
                 finalBundle += `    if (cache[moduleId]) return cache[moduleId].exports;\n`;
@@ -1422,19 +1437,26 @@
                 try {
                     const enableMangle = document.getElementById('golf-mangle').checked;
                     const enableConsoleStrip = document.getElementById('golf-console').checked;
-                    const activePlugins = [];
-                    if (enableConsoleStrip) activePlugins.push(consoleStripperPlugin);
-                    if (enableMangle) activePlugins.push(astVariableManglerPlugin);
-
                     const enableExtreme = document.getElementById('golf-extreme') && document.getElementById('golf-extreme').checked;
-                    if (enableExtreme) activePlugins.push(extremeGolfPlugin);
+                    const parsePlugins = ['jsx', 'typescript', 'classProperties', 'decorators-legacy'];
 
-                    const { code } = Babel.transform(output, {
-                        plugins: activePlugins,
-                        parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy'] },
-                        comments: false, minified: true, compact: true
-                    });
+                    // フェーズ2: 構造圧縮
+                    let phase2Code = output;
+                    const phase2Plugins = [];
+                    if (enableConsoleStrip) phase2Plugins.push(consoleStripperPlugin);
+                    if (enableExtreme) phase2Plugins.push(extremeGolfPlugin);
+
+                    if (phase2Plugins.length > 0) {
+                        const { code } = Babel.transform(phase2Code, { plugins: phase2Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: false, compact: false });
+                        phase2Code = code;
+                    }
+
+                    // フェーズ3: マングル
+                    const phase3Plugins = [];
+                    if (enableMangle) phase3Plugins.push(astVariableManglerPlugin);
+                    const { code } = Babel.transform(phase2Code, { plugins: phase3Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: true, compact: true });
                     output = code;
+
                 } catch (err) {
                     addLog(`コードゴルフ処理中にエラー: ${err.message}`, "warn");
                 }
@@ -1465,7 +1487,7 @@
 
             if (lang === 'js') {
                 const addStrict = document.getElementById('opt-strict').checked;
-                return (addStrict ? `"use strict";\n` : "") + transformESMtoCJS(sourceCode, "direct_input.js", {}, false);
+                return (addStrict ? `"use strict";\n` : "") + transformESMtoCJS(sourceCode, "direct_input.js", {}, false, true);
             } else if (lang === 'html') {
                 return document.getElementById('golf-minify-assets').checked ? minifyHtml(sourceCode) : sourceCode;
             } else if (lang === 'css') {
@@ -1614,31 +1636,45 @@
             };
         };
 
-        // Babel ASTスコープトラバースによる変数名マングラー
+        // Babel ASTスコープトラバースによる変数名マングラー (究極安全・統合版)
         const astVariableManglerPlugin = () => {
-            // JSの予約語や組み込みオブジェクト
             const reservedWords = new Set([
                 'do', 'if', 'in', 'for', 'let', 'new', 'try', 'var', 'case', 'else', 'with', 'await',
                 'break', 'catch', 'class', 'const', 'super', 'throw', 'while', 'yield', 'delete',
                 'export', 'import', 'return', 'switch', 'typeof', 'default', 'extends', 'finally',
                 'continue', 'debugger', 'function', 'arguments', 'null', 'true', 'false', 'NaN',
                 'undefined', 'Math', 'console', 'window', 'document', 'navigator', 'this',
-                // バンドルランタイムの保護
                 'require', 'module', 'exports', '__esModule'
             ]);
 
             return {
                 visitor: {
                     Program(path) {
-                        // 【安全対策1】元のソースコードで既に使われている1文字の識別子を保護
+                        const localNamesToRename = new Set();
+
+                        // 1. 予約語の収集と、ローカル変数のリストアップ
                         path.traverse({
                             Identifier(p) {
-                                if (p.node.name.length === 1) {
-                                    reservedWords.add(p.node.name);
+                                // 変数の宣言または参照である場合のみ評価 (プロパティ名などは除外)
+                                if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
+                                    const name = p.node.name;
+                                    const binding = p.scope.getBinding(name);
+
+                                    if (!binding) {
+                                        // スコープに属さない(グローバルや未宣言)ものは保護
+                                        reservedWords.add(name);
+                                    } else if (name.length === 1) {
+                                        // 元から1文字の変数も保護
+                                        reservedWords.add(name);
+                                    } else {
+                                        // 圧縮可能なローカル変数をリストにプール
+                                        localNamesToRename.add(name);
+                                    }
                                 }
                             }
                         });
 
+                        // 2. リネームマップの生成
                         let idCounter = 0;
                         const generateName = () => {
                             const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$';
@@ -1651,25 +1687,26 @@
                             return name;
                         };
 
+                        const renameMap = new Map();
+                        localNamesToRename.forEach(oldName => {
+                            let newName;
+                            do {
+                                newName = generateName();
+                            } while (reservedWords.has(newName));
+
+                            reservedWords.add(newName);
+                            renameMap.set(oldName, newName);
+                        });
+
+                        // 3. 一斉書き換え (Babelのスコープバグを完全回避)
                         path.traverse({
-                            Scope(scopePath) {
-                                if (scopePath.scope.parent === null) return;
-                                const bindings = scopePath.scope.bindings;
-                                for (const name in bindings) {
-                                    if (name.length === 1) continue;
-
-                                    let newName;
-                                    do {
-                                        newName = generateName();
-                                    } while (
-                                        reservedWords.has(newName) ||
-                                        scopePath.scope.hasBinding(newName) ||
-                                        scopePath.scope.hasGlobal(newName) ||
-                                        scopePath.scope.hasReference(newName)
-                                    );
-
-                                    reservedWords.add(newName);
-                                    scopePath.scope.rename(name, newName);
+                            Identifier(p) {
+                                if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
+                                    const name = p.node.name;
+                                    // リネーム対象であり、かつ実際にローカルスコープに属しているか確認して直接置換
+                                    if (renameMap.has(name) && p.scope.getBinding(name)) {
+                                        p.node.name = renameMap.get(name);
+                                    }
                                 }
                             }
                         });
@@ -1678,7 +1715,7 @@
             };
         };
 
-        // 構文短縮オプティマイザ (V4)
+        // 構文短縮オプティマイザ (V5)
         const extremeGolfPlugin = ({ types: t }) => {
             return {
                 visitor: {
@@ -1696,6 +1733,13 @@
                     },
                     BinaryExpression(path) {
                         const { operator, left, right } = path.node;
+
+                        // 等価演算子のダウングレード (=== -> ==)
+                        if (operator === '===') path.node.operator = '==';
+                        if (operator === '!--') path.node.operator = '!=';
+                        if (operator === '!==') path.node.operator = '!=';
+
+                        // 定数畳み込み
                         if (t.isNumericLiteral(left) && t.isNumericLiteral(right)) {
                             let res;
                             switch (operator) {
@@ -1746,7 +1790,11 @@
                             path.replaceWith(t.unaryExpression('void', t.numericLiteral(0)));
                         }
                         else if (path.node.name === 'Infinity' && !path.scope.hasBinding('Infinity')) {
-                            path.replaceWith(t.binaryExpression('/', t.numericLiteral(1), t.numericLiteral(0)));
+                            path.replaceWith(
+                                t.binaryExpression('/', t.numericLiteral(1), t.numericLiteral(0))
+                            );
+                            // ※さらに安全を期すため、変換後に不要な走査が走らないようスキップ
+                            path.skip();
                         }
                     },
                     ArrowFunctionExpression(path) {
@@ -1775,6 +1823,25 @@
                     },
                     CallExpression(path) {
                         const callee = path.node.callee;
+
+                        // getElementById の抹消 (DOMグローバルハック)
+                        if (
+                            t.isMemberExpression(callee) &&
+                            t.isIdentifier(callee.property, { name: 'getElementById' }) &&
+                            path.node.arguments.length === 1 &&
+                            t.isStringLiteral(path.node.arguments[0])
+                        ) {
+                            const idString = path.node.arguments[0].value;
+                            path.replaceWith(t.memberExpression(t.identifier('window'), t.stringLiteral(idString), true));
+                            return;
+                        }
+
+                        // parseInt のビット演算化
+                        if (t.isIdentifier(callee, { name: 'parseInt' }) && path.node.arguments.length >= 1) {
+                            path.replaceWith(t.binaryExpression('|', path.node.arguments[0], t.numericLiteral(0)));
+                            return;
+                        }
+
                         if (
                             t.isMemberExpression(callee) &&
                             t.isIdentifier(callee.object, { name: 'Math' }) &&
@@ -1808,16 +1875,14 @@
                         }
                     },
 
-                    // 11. 巨大文字列の内部ミニファイ (GLSL & Web Worker)
+                    // 文字列のミニファイ (GLSL / Worker) はそのまま維持
                     "StringLiteral|TemplateElement"(path) {
                         const enableStringHack = document.getElementById('golf-string-hack') && document.getElementById('golf-string-hack').checked;
                         if (!enableStringHack) return;
-
                         const isTemplate = t.isTemplateElement(path.node);
                         let text = isTemplate ? path.node.value.raw : path.node.value;
                         if (!text || text.length < 15) return;
 
-                        // GLSLシェーダーの判定
                         const hasGLSLKeywords = /(vec[234]|float\s|void\s+main|#version|gl_Position|layout\s*\(|precision\s+highp)/.test(text);
                         const isFractalFormula = /return\s+c[A-Z][a-zA-Z0-9_]*\s*\(/.test(text) || text.includes('mix(') || text.includes('atanSafe(');
 
@@ -1835,52 +1900,27 @@
 
                             if (isTemplate) {
                                 path.node.value.raw = text;
-                                path.node.value.cooked = text.replace(/\\/g, '\\\\'); 
+                                path.node.value.cooked = text.replace(/\\/g, '\\\\');
                             } else {
                                 path.node.value = text;
                             }
-                            addLog(`[GOLF] 文字列内の GLSL シェーダーコードを検知。スペース・コメントを圧縮しました！`, "success");
                             return;
                         }
 
-                        // Web Worker / インラインJSの判定
-                        // 安全対策: テンプレートリテラルの補間（${...}）がある場合はJS構文が壊れるためスルー
                         const isSafeForJsParse = !isTemplate || (path.parentPath.node.expressions && path.parentPath.node.expressions.length === 0);
-                        
                         if (isSafeForJsParse && window.Babel) {
-                            // Workerによく使われるキーワードとJSの宣言文が含まれているかヒューリスティックに判定
-                            const isInlineJS = /(postMessage|onmessage|self\.|importScripts|WorkerGlobalScope)/.test(text) && 
-                                               /(const|let|var|function|=>)\s/.test(text);
-
+                            const isInlineJS = /(postMessage|onmessage|self\.|importScripts|WorkerGlobalScope)/.test(text) &&
+                                /(const|let|var|function|=>)\s/.test(text);
                             if (isInlineJS) {
                                 try {
-                                    // 文字列内のJSコードに対してBabelを再帰適用し変数圧縮
                                     const activePlugins = [];
-                                    if (typeof astVariableManglerPlugin !== 'undefined') {
-                                        activePlugins.push(astVariableManglerPlugin);
-                                    }
-
-                                    const res = window.Babel.transform(text, {
-                                        plugins: activePlugins,
-                                        parserOpts: { sourceType: 'module' },
-                                        comments: false,
-                                        minified: true,
-                                        compact: true
-                                    });
-
-                                    // パースに成功した場合のみ文字列を上書き
+                                    if (typeof astVariableManglerPlugin !== 'undefined') activePlugins.push(astVariableManglerPlugin);
+                                    const res = window.Babel.transform(text, { plugins: activePlugins, parserOpts: { sourceType: 'module' }, comments: false, minified: true, compact: true });
                                     if (res && res.code) {
-                                        if (isTemplate) {
-                                            path.node.value.raw = res.code;
-                                            path.node.value.cooked = res.code.replace(/\\/g, '\\\\');
-                                        } else {
-                                            path.node.value = res.code;
-                                        }
-                                        addLog(`[GOLF] 文字列内の Web Worker コードを検知。再帰的ゴルフ圧縮を適用しました！`, "success");
+                                        if (isTemplate) { path.node.value.raw = res.code; path.node.value.cooked = res.code.replace(/\\/g, '\\\\'); }
+                                        else { path.node.value = res.code; }
                                     }
-                                } catch (e) {
-                                    // JSの文法エラー（ただの文章だった場合など）は安全にスルー
-                                }
+                                } catch (e) { }
                             }
                         }
                     }
@@ -1888,107 +1928,64 @@
             };
         };
 
-        // 2フェーズ・コンパイルによるトランスパイラ本体
-        function transformESMtoCJS(source, fromPath, resolvedPaths, keepComments) {
+        // 3フェーズ・コンパイルによるトランスパイラ本体
+        function transformESMtoCJS(source, fromPath, resolvedPaths, keepComments, skipCjs = false) {
             const golfEnabled = optGolf.checked;
             const enableMangle = document.getElementById('golf-mangle').checked;
             const enableConsoleStrip = document.getElementById('golf-console').checked;
             const enableExtreme = document.getElementById('golf-extreme').checked;
 
-            // 1. パス書き換えプラグイン
             const pathRewriterPlugin = () => {
                 return {
                     visitor: {
-                        ImportDeclaration(path) {
-                            if (path.node.source && path.node.source.value) {
-                                const raw = path.node.source.value;
-                                if (resolvedPaths[raw]) path.node.source.value = resolvedPaths[raw];
-                            }
-                        },
-                        ExportNamedDeclaration(path) {
-                            if (path.node.source && path.node.source.value) {
-                                const raw = path.node.source.value;
-                                if (resolvedPaths[raw]) path.node.source.value = resolvedPaths[raw];
-                            }
-                        },
-                        ExportAllDeclaration(path) {
-                            if (path.node.source && path.node.source.value) {
-                                const raw = path.node.source.value;
-                                if (resolvedPaths[raw]) path.node.source.value = resolvedPaths[raw];
-                            }
-                        },
+                        ImportDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
+                        ExportNamedDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
+                        ExportAllDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
                         CallExpression(path) {
                             const node = path.node;
-                            if (
-                                node.callee && node.callee.type === 'Identifier' &&
-                                node.callee.name === 'require' && node.arguments &&
-                                node.arguments.length === 1 &&
-                                (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')
-                            ) {
-                                const raw = node.arguments[0].value;
-                                if (resolvedPaths[raw]) node.arguments[0].value = resolvedPaths[raw];
+                            if (node.callee && node.callee.type === 'Identifier' && node.callee.name === 'require' && node.arguments && node.arguments.length === 1 && (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')) {
+                                if (resolvedPaths[node.arguments[0].value]) node.arguments[0].value = resolvedPaths[node.arguments[0].value];
                             }
                         }
                     }
                 };
             };
 
-            const parsePlugins = [
-                'jsx', 'typescript', 'classProperties',
-                'decorators-legacy', 'objectRestSpread',
-                'exportDefaultFrom', 'dynamicImport'
-            ];
+            const parsePlugins = ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'objectRestSpread', 'exportDefaultFrom', 'dynamicImport'];
 
-            // フェーズ1: 依存解決と CommonJS (CJS) への変換
+            // フェーズ1: 依存解決と CommonJS 変換
             let phase1Code = source;
             try {
-                const { code } = Babel.transform(source, {
-                    plugins: [
-                        pathRewriterPlugin,
-                        ['transform-modules-commonjs', { loose: true, strict: false }]
-                    ],
-                    parserOpts: {
-                        sourceType: 'module',
-                        plugins: parsePlugins
-                    },
-                    comments: golfEnabled ? false : keepComments,
-                    minified: false,
-                    compact: false
-                });
+                const phase1Plugins = [pathRewriterPlugin];
+                if (!skipCjs) phase1Plugins.push(['transform-modules-commonjs', { loose: true, strict: false }]);
+                const { code } = Babel.transform(source, { plugins: phase1Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: golfEnabled ? false : keepComments, minified: false, compact: false });
                 phase1Code = code;
-            } catch (err) {
-                console.error("Babel ASTフェーズ1 エラー:", err);
-                throw new Error(`[${fromPath}] のモジュール変換(Phase1)中にエラーが発生しました:\n${err.message}`);
+            } catch (err) { throw new Error(`[${fromPath}] のモジュール変換(Phase1)エラー:\n${err.message}`); }
+
+            if (!golfEnabled) return phase1Code;
+
+            // フェーズ2: 構造の極限圧縮 (Extreme & Console)
+            let phase2Code = phase1Code;
+            const phase2Plugins = [];
+            if (enableConsoleStrip) phase2Plugins.push(consoleStripperPlugin);
+            if (enableExtreme) phase2Plugins.push(extremeGolfPlugin);
+
+            if (phase2Plugins.length > 0) {
+                try {
+                    // 文字列に戻してBabelの追跡バグをリセット
+                    const { code } = Babel.transform(phase2Code, { plugins: phase2Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: false, compact: false });
+                    phase2Code = code;
+                } catch (err) { throw new Error(`[${fromPath}] の極限ゴルフ圧縮(Phase2)エラー:\n${err.message}`); }
             }
 
-            if (!golfEnabled) {
-                return phase1Code;
-            }
-
-            // フェーズ2: 圧縮処理
-            const activeGolfPlugins = [];
-            if (enableConsoleStrip) activeGolfPlugins.push(consoleStripperPlugin);
-            if (enableMangle) activeGolfPlugins.push(astVariableManglerPlugin);
-            if (enableExtreme) activeGolfPlugins.push(extremeGolfPlugin);
-
-            if (activeGolfPlugins.length === 0) return phase1Code;
-
+            // フェーズ3: 変数名マングル & 最終出力
             try {
-                const { code } = Babel.transform(phase1Code, {
-                    plugins: activeGolfPlugins,
-                    parserOpts: {
-                        sourceType: 'module',
-                        plugins: parsePlugins
-                    },
-                    comments: false,
-                    minified: true,
-                    compact: true
-                });
+                const phase3Plugins = [];
+                if (enableMangle) phase3Plugins.push(astVariableManglerPlugin);
+                // マングラーだけを実行するため安全に圧縮可能
+                const { code } = Babel.transform(phase2Code, { plugins: phase3Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: true, compact: true });
                 return code;
-            } catch (err) {
-                console.error("Babel ASTフェーズ2 エラー:", err);
-                throw new Error(`[${fromPath}] の極限ゴルフ圧縮(Phase2)中にエラーが発生しました:\n${err.message}`);
-            }
+            } catch (err) { throw new Error(`[${fromPath}] の変数マングル(Phase3)エラー:\n${err.message}`); }
         }
 
         // HTML内インラインJS/CSS の再帰ゴルフ圧縮
@@ -1999,7 +1996,7 @@
             // 1. script と style を抽出して再帰圧縮
             let safeHtml = html.replace(/<(script|style)([^>]*)>([\s\S]*?)<\/\1>/gi, (match, tag, attrs, content) => {
                 let compressedContent = content;
-                
+
                 if (golfEnabled) {
                     if (tag.toLowerCase() === 'style') {
                         compressedContent = minifyCss(content);
@@ -2008,16 +2005,16 @@
                         const isJS = !attrs.includes('type=') || /type=["']?(text\/javascript|module|application\/javascript|text\/worklet)["']?/i.test(attrs);
                         if (isJS && content.trim().length > 0) {
                             try {
-                                // JS単体モードと同じ2フェーズ・コンパイルを適用
-                                compressedContent = transformESMtoCJS(content, "inline_script", {}, false);
-                            } catch(e) { 
+                                // JS単体モードと同じ2フェーズ・コンパイルを適用 (モジュール変換はスキップ)
+                                compressedContent = transformESMtoCJS(content, "inline_script", {}, false, true);
+                            } catch (e) {
                                 // エラー時は元コードを維持し警告出力
                                 addLog(`[HTML圧縮] <script> 内のJS圧縮に失敗しました。元コードを維持します: ${e.message}`, "warn");
                             }
                         }
                     }
                 }
-                
+
                 protectedBlocks.push(`<${tag}${attrs}>${compressedContent}</${tag}>`);
                 return `__PROTECTED_BLOCK_${protectedBlocks.length - 1}__`;
             });
@@ -2027,10 +2024,10 @@
                 safeHtml = safeHtml
                     .replace(/<!--[\s\S]*?-->/g, '')  
                     .replace(/<!DOCTYPE html>/i, '<!DOCTYPEhtml>')
-                    .replace(/\s+type=["']text\/(javascript|css)["']/gi, '')
-                    .replace(/>\s+</g, '><')
-                    .replace(/=(["'])([^"'=<>\s`]+)\1/g, '=$2')
-                    .replace(/<\/(html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, '');
+                            .replace(/\s+type=["']text\/(javascript|css)["']/gi, '')
+                            .replace(/>\s+</g, '><')
+                            .replace(/=(["'])([^"'=<>\s`]+)\1/g, '=$2')
+                            .replace(/<\/(html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, '');
             }
 
             // 3. 退避ブロックの復元
