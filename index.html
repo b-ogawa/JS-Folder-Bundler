@@ -1089,7 +1089,7 @@
             addLog(`[⛳️ ゴルフコンパイラ] 実参照されたアセット合計 ${originalBytes} バイト ➔ ${finalBytes} バイトに圧縮完了。削減率 -${reduction}% !`, "success");
         }
 
-        // ⛳️ 実際にバンドルプロセスで参照された（usedFilesSetに登録された）アセットのみの合計サイズ算出
+        // 実際にバンドルプロセスで参照された（usedFilesSetに登録された）アセットのみの合計サイズ算出
         function getTotalOriginalBytes() {
             if (optGolf.checked && usedFilesSet.size > 0) {
                 let sum = 0;
@@ -1178,12 +1178,12 @@
             }, 400);
         }
 
-        // 起点HTMLから動的に関数名を抽出するスキャンエンジン（クォート無し圧縮属性にも完全対応！）
+        // 起点HTMLから動的に関数名を抽出するスキャンエンジン（クォート無し圧縮属性にも完全対応）
         function extractReservedFunctionsFromHtml(html) {
             const reserved = [];
 
             // 抽出1: onclick="..." や onclick=... などの内部のJSロジックから関数呼び出しをスキャン
-            // (?:(["'])(.*?)\1|([^\s>]+)) によって、クォートあり・なし両方に対応！
+            // (?:(["'])(.*?)\1|([^\s>]+)) によって、クォートあり・なし両方に対応
             html.replace(/on[a-z]+\s*=\s*(?:(["'])(.*?)\1|([^\s>]+))/gi, (match, quote, quoted, unquoted) => {
                 const code = (quoted !== undefined ? quoted : unquoted) || "";
                 code.replace(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g, (m, funcName) => {
@@ -1345,7 +1345,7 @@
                 const resolvedImagePath = resolveRelativePath(cssPath, urlPath);
                 if (filesStore[resolvedImagePath]) {
                     const file = filesStore[resolvedImagePath];
-                    usedFilesSet.add(resolvedImagePath); // ⛳️ CSS内から読み出されたローカル画像を記録
+                    usedFilesSet.add(resolvedImagePath); // CSS内から読み出されたローカル画像を記録
 
                     if (file.isBinary) {
                         addLog(`CSS内画像のBase64変換: ${resolvedImagePath}`, "success");
@@ -1428,8 +1428,8 @@
             if (addStrict) finalBundle += `"use strict";\n`;
 
             if (golfEnabled) {
-                // ミニファイ版ランタイム（外部モジュール・グローバル変数取得時に__esModuleをプロトタイプで偽装、Worker・globalThis対応）
-                finalBundle += `((m,c,x,r,w)=>(r=i=>c[i]?c[i].exports:(m[i]?(c[i]={exports:{}},m[i](r,c[i],c[i].exports),c[i].exports):((w=x[i]||(typeof window!=='undefined'?window:globalThis)[i]||(typeof window!=='undefined'?window:globalThis)[i.toUpperCase()])?Object.setPrototypeOf({__esModule:!0},w):w)),r(${JSON.stringify(entryPoint)})))({\n`;
+                // ランタイムのモダン化極小化 (globalThis一本化)
+                finalBundle += `((m,c,x,r,w)=>(r=i=>c[i]?c[i].exports:(m[i]?(c[i]={exports:{}},m[i](r,c[i],c[i].exports),c[i].exports):((w=x[i]||globalThis[i]||globalThis[i.toUpperCase()])?Object.setPrototypeOf({__esModule:!0},w):w)),r(${JSON.stringify(entryPoint)})))({\n`;
                 const moduleKeys = Object.keys(bundledModules);
                 moduleKeys.forEach((path, index) => {
                     finalBundle += `${JSON.stringify(path)}:(require,module,exports)=>{${bundledModules[path].code}}${index === moduleKeys.length - 1 ? '' : ','}\n`;
@@ -1661,7 +1661,7 @@
             return Array.from(deps);
         }
 
-        // ⛳️ コードゴルフ：console.log系のシュレッダープラグイン (式内展開時のSyntaxError防止構造)
+        // コードゴルフ：console.log系のシュレッダープラグイン (式内展開時のSyntaxError防止構造)
         const consoleStripperPlugin = () => {
             return {
                 visitor: {
@@ -1723,7 +1723,7 @@
                                     } else if (reservedWords.has(name)) {
                                         // 既に保護リストに入っている場合はスキップ
                                     } else {
-                                        // ESMのトップレベル変数も容赦なくリネーム対象に叩き込む！
+                                        // ESMのトップレベル変数も容赦なくリネーム対象に叩き込む
                                         localNamesToRename.add(name);
                                     }
                                 }
@@ -1755,7 +1755,7 @@
                                 if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
                                     const name = p.node.name;
                                     if (renameMap.has(name)) {
-                                        //  紐付け(binding)の有無に関わらず、マップに登録された名前は強制的に置換
+                                        // 紐付け(binding)の有無に関わらず、マップに登録された名前は強制的に置換
                                         p.node.name = renameMap.get(name);
                                     }
                                 }
@@ -1766,8 +1766,27 @@
             };
         };
 
-        // 構文短縮オプティマイザ (V5)
+        // 構文短縮オプティマイザ (V7: JS Logic The Abyss + GLSL Float Decimal Hack)
         const extremeGolfPlugin = ({ types: t }) => {
+            // ヘルパー: ブロック({})内の複数行の式を、カンマ演算子で1つの式(SequenceExpression)に束ねる
+            const getExpressionFromStatement = (stmt) => {
+                if (!stmt) return null;
+                if (t.isExpressionStatement(stmt)) return stmt.expression;
+                if (t.isReturnStatement(stmt)) return stmt.argument || t.identifier('undefined');
+                if (t.isBlockStatement(stmt)) {
+                    if (stmt.body.length === 0) return t.identifier('undefined');
+                    const exprs = [];
+                    for (let i = 0; i < stmt.body.length; i++) {
+                        const s = stmt.body[i];
+                        if (t.isExpressionStatement(s)) exprs.push(s.expression);
+                        else if (i === stmt.body.length - 1 && t.isReturnStatement(s)) exprs.push(s.argument || t.identifier('undefined'));
+                        else return null; // let, if, for などの文が含まれる場合は束ねられないため断念
+                    }
+                    return exprs.length === 1 ? exprs[0] : t.sequenceExpression(exprs);
+                }
+                return null;
+            };
+
             return {
                 visitor: {
                     BooleanLiteral(path) {
@@ -1785,11 +1804,18 @@
                     BinaryExpression(path) {
                         const { operator, left, right } = path.node;
 
+                        //  === undefined を == null にダウングレードして6バイト削減
+                        if ((operator === '===' || operator === '==') && t.isIdentifier(right, { name: 'undefined' })) {
+                            path.node.operator = '==';
+                            path.node.right = t.nullLiteral();
+                        } else if ((operator === '===' || operator === '==') && t.isIdentifier(left, { name: 'undefined' })) {
+                            path.node.operator = '==';
+                            path.node.left = t.nullLiteral();
+                        }
+
                         // 等価演算子のダウングレード (=== -> ==)
                         if (operator === '===') path.node.operator = '==';
-                        if (operator === '!--') path.node.operator = '!=';
-                        if (operator === '!--') path.node.operator = '!=';
-                        if (operator === '!==') path.node.operator = '!=';
+                        if (operator === '!==' || operator === '!==') path.node.operator = '!=';
 
                         // 定数畳み込み
                         if (t.isNumericLiteral(left) && t.isNumericLiteral(right)) {
@@ -1807,34 +1833,22 @@
                     },
                     IfStatement(path) {
                         const { test, consequent, alternate } = path.node;
-                        const getSingleStatement = (stmt) => {
-                            if (t.isBlockStatement(stmt) && stmt.body.length === 1) return stmt.body[0];
-                            if (!t.isBlockStatement(stmt)) return stmt;
-                            return null;
-                        };
-                        const consStmt = getSingleStatement(consequent);
-                        const altStmt = alternate ? getSingleStatement(alternate) : null;
+                        // 複数行のブロックをカンマ演算子で束ねて三項演算子化する
+                        const consExpr = getExpressionFromStatement(consequent);
+                        const altExpr = alternate ? getExpressionFromStatement(alternate) : null;
 
-                        if (consStmt && altStmt) {
-                            if (t.isExpressionStatement(consStmt) && t.isExpressionStatement(altStmt)) {
-                                path.replaceWith(t.expressionStatement(
-                                    t.conditionalExpression(test, consStmt.expression, altStmt.expression)
-                                ));
+                        if (consExpr && altExpr) {
+                            if (t.isReturnStatement(consequent) || (t.isBlockStatement(consequent) && consequent.body.some(t.isReturnStatement))) {
+                                path.replaceWith(t.returnStatement(t.conditionalExpression(test, consExpr, altExpr)));
+                            } else {
+                                path.replaceWith(t.expressionStatement(t.conditionalExpression(test, consExpr, altExpr)));
                             }
-                            else if (t.isReturnStatement(consStmt) && t.isReturnStatement(altStmt)) {
-                                path.replaceWith(t.returnStatement(
-                                    t.conditionalExpression(
-                                        test,
-                                        consStmt.argument || t.identifier('undefined'),
-                                        altStmt.argument || t.identifier('undefined')
-                                    )
-                                ));
+                        } else if (consExpr && !alternate) {
+                            if (t.isReturnStatement(consequent) || (t.isBlockStatement(consequent) && consequent.body.some(t.isReturnStatement))) {
+                                // 戻り値がある if(a) return b; は、安全のため何もしない（論理和にすると戻らなくなるため）
+                            } else {
+                                path.replaceWith(t.expressionStatement(t.logicalExpression('&&', test, consExpr)));
                             }
-                        }
-                        else if (consStmt && !alternate && t.isExpressionStatement(consStmt)) {
-                            path.replaceWith(t.expressionStatement(
-                                t.logicalExpression('&&', test, consStmt.expression)
-                            ));
                         }
                     },
                     Identifier(path) {
@@ -1842,19 +1856,15 @@
                             path.replaceWith(t.unaryExpression('void', t.numericLiteral(0)));
                         }
                         else if (path.node.name === 'Infinity' && !path.scope.hasBinding('Infinity')) {
-                            path.replaceWith(
-                                t.binaryExpression('/', t.numericLiteral(1), t.numericLiteral(0))
-                            );
-                            // ※さらに安全を期すため、変換後に不要な走査が走らないようスキップ
+                            path.replaceWith(t.binaryExpression('/', t.numericLiteral(1), t.numericLiteral(0)));
                             path.skip();
                         }
                     },
                     ArrowFunctionExpression(path) {
-                        if (t.isBlockStatement(path.node.body) && path.node.body.body.length === 1) {
-                            const stmt = path.node.body.body[0];
-                            if (t.isReturnStatement(stmt) && stmt.argument) {
-                                path.get('body').replaceWith(stmt.argument);
-                            }
+                        // 複数行のアロー関数もカンマ演算子で束ねて波カッコとreturnを粉砕
+                        const expr = getExpressionFromStatement(path.node.body);
+                        if (expr) {
+                            path.get('body').replaceWith(expr);
                         }
                     },
                     FunctionExpression(path) {
@@ -1875,32 +1885,15 @@
                     },
                     CallExpression(path) {
                         const callee = path.node.callee;
-
-                        // getElementById の抹消 (DOMグローバルハック)
-                        // ※これは安全なので残します
-                        if (
-                            t.isMemberExpression(callee) &&
-                            t.isIdentifier(callee.property, { name: 'getElementById' }) &&
-                            path.node.arguments.length === 1 &&
-                            t.isStringLiteral(path.node.arguments[0])
-                        ) {
-                            const idString = path.node.arguments[0].value;
-                            path.replaceWith(t.memberExpression(t.identifier('window'), t.stringLiteral(idString), true));
+                        if (t.isMemberExpression(callee) && t.isIdentifier(callee.property, { name: 'getElementById' }) && path.node.arguments.length === 1 && t.isStringLiteral(path.node.arguments[0])) {
+                            path.replaceWith(t.memberExpression(t.identifier('window'), t.stringLiteral(path.node.arguments[0].value), true));
                             return;
                         }
-
-                        // parseInt の抹消 (ビット演算化)
                         if (t.isIdentifier(callee, { name: 'parseInt' }) && path.node.arguments.length >= 1) {
                             path.replaceWith(t.binaryExpression('|', path.node.arguments[0], t.numericLiteral(0)));
                             return;
                         }
-
-                        // Math.floor / Math.trunc / Math.round のビット反転ハック
-                        if (
-                            t.isMemberExpression(callee) &&
-                            t.isIdentifier(callee.object, { name: 'Math' }) &&
-                            path.node.arguments.length === 1
-                        ) {
+                        if (t.isMemberExpression(callee) && t.isIdentifier(callee.object, { name: 'Math' }) && path.node.arguments.length === 1) {
                             const arg = path.node.arguments[0];
                             if (t.isIdentifier(callee.property, { name: 'floor' }) || t.isIdentifier(callee.property, { name: 'trunc' })) {
                                 path.replaceWith(t.unaryExpression('~', t.unaryExpression('~', arg)));
@@ -1928,14 +1921,11 @@
                             }
                         }
                     },
-
-                    // 文字列のミニファイ (GLSL / Worker / 数式)
                     "StringLiteral|TemplateElement"(path) {
                         const isTemplate = t.isTemplateElement(path.node);
                         let text = isTemplate ? path.node.value.raw : path.node.value;
                         if (!text || text.length < 15) return;
 
-                        // 1. Web Worker などの純粋なJS文字列の再帰圧縮
                         const isSafeForJsParse = !isTemplate || (path.parentPath.node.expressions && path.parentPath.node.expressions.length === 0);
                         if (isSafeForJsParse && window.Babel) {
                             const isInlineJS = /(postMessage|onmessage|self\.|importScripts|WorkerGlobalScope)/.test(text) &&
@@ -1948,36 +1938,33 @@
                                     if (res && res.code) {
                                         if (isTemplate) { path.node.value.raw = res.code; path.node.value.cooked = res.code.replace(/\\/g, '\\\\'); }
                                         else { path.node.value = res.code; }
-                                        return; // JSならここで終了
+                                        return;
                                     }
                                 } catch (e) { }
                             }
                         }
 
-                        // 2.GLSLシェーダーや、数式が含まれる文字列の限界空白圧縮
-                        // 短い式も拾い上げるために判定条件を緩和
                         const hasGLSLKeywords = /(vec[234]|float\s|void\s+main|#version|gl_Position|layout\s*\(|precision\s+highp)/.test(text);
                         const hasMathOrReturn = /(return\s|mix\(|pow\(|sin\(|cos\(|length\()/.test(text) && /[;\+\-\*\/]/.test(text);
-                        const isNotHtml = !/<[a-z]+[\s>]/i.test(text); // HTMLは別処理なので除外
+                        const isNotHtml = !/<[a-z]+[\s>]/i.test(text);
 
                         if ((hasGLSLKeywords || hasMathOrReturn) && isNotHtml) {
-                            // コメント除去 (// および /* */)
                             text = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-
-                            // プリプロセッサディレクティブの退避 (#versionなど)
                             const dirs = [];
                             text = text.replace(/^\s*(#\w+.*)$/gm, (m, p1) => { dirs.push(p1); return `__DIR_${dirs.length - 1}__\n`; });
 
-                            // 限界空白圧縮（演算子の間のスペースを消滅させる）
+                            // 浮動小数点の限界圧縮 (1.0 ➔ 1. / 0.5 ➔ .5)
+                            text = text.replace(/\b0+\.0+\b/g, '0.'); // 0.00 ➔ 0.
+                            text = text.replace(/\b(\d+)\.0+\b/g, '$1.'); // 1.0 ➔ 1.
+                            text = text.replace(/\b0+\.(\d+)\b/g, '.$1'); // 0.5 ➔ .5
+
                             text = text.replace(/\s+/g, ' ');
                             text = text.replace(/\s*([;,\{\}\(\)\=\+\-\*\/\<\>\!\|&\[\]\?])\s*/g, '$1');
 
-                            // JS/GLSLとして必須のスペースを復元
                             text = text.replace(/\breturn([a-zA-Z0-9_])/g, 'return $1');
                             text = text.replace(/\belse([a-zA-Z0-9_])/g, 'else $1');
                             text = text.replace(/\)(in|out|uniform)\b/g, ') $1');
 
-                            // ディレクティブ復元
                             dirs.forEach((d, i) => { text = text.replace(new RegExp(`__DIR_${i}__\\s*`), d + '\n'); });
                             text = text.trim();
 
@@ -2047,7 +2034,15 @@
             try {
                 const phase3Plugins = [];
                 if (enableMangle) phase3Plugins.push(createManglerPlugin(extraReserved));
-                const { code } = Babel.transform(phase2Code, { plugins: phase3Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: true, compact: true });
+                let { code } = Babel.transform(phase2Code, { plugins: phase3Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: true, compact: true });
+
+                // ポストプロセス・ハック (Babelがどうしても残すスペースを物理破壊)
+                if (enableExtreme) {
+                    code = code.replace(/\breturn\s+([\{\["'`!~])/g, 'return$1');
+                    code = code.replace(/\bthrow\s+([\{\["'`!~])/g, 'throw$1');
+                    code = code.replace(/\btypeof\s+([\{\["'`!~])/g, 'typeof$1');
+                }
+
                 return code;
             } catch (err) { throw new Error(`[${fromPath}] の変数マングル(Phase3)エラー:\n${err.message}`); }
         }
