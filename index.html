@@ -216,15 +216,15 @@
               <input type="checkbox" id="golf-minify-assets" checked class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
               <div class="flex flex-col">
                 <label for="golf-minify-assets" class="text-xs font-semibold text-slate-200 cursor-pointer">HTMLとCSSも徹底圧縮</label>
-                <span class="text-[9px] text-slate-400">タグ間の余白を極限まで縮小し、CSSのcalc内の演算子スペースは安全に保護</span>
+                <span class="text-[9px] text-slate-400">属性クォーテーションの最適除去や小数の頭の0、冗長なマージン指定などをクレンジング</span>
               </div>
             </div>
-            <!-- ⛳️ 新設：極限ハックトグル -->
+            <!-- ⛳️ 極限ハックトグル -->
             <div class="flex items-center gap-2">
               <input type="checkbox" id="golf-extreme" checked class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
               <div class="flex flex-col">
                 <label for="golf-extreme" class="text-xs font-semibold text-slate-200 cursor-pointer">極限圧縮ハック (Boolean / Number / If短縮)</label>
-                <span class="text-[9px] text-slate-400">true➔!0、10000➔1e4、単一if文➔&&短絡評価、定数畳み込みなどの過激な最適化</span>
+                <span class="text-[9px] text-slate-400">true➔!0、10000➔1e4、単一if文➔&&短絡評価、定数・静的文字列畳み込み、ブロック解体などの過激な最適化</span>
               </div>
             </div>
           </div>
@@ -860,18 +860,21 @@
     }
 
     // ==========================================
-    // ⛳️ HTML / CSS ミニファイ補助ロジック (修正版)
+    // ⛳️ HTML / CSS ミニファイ補助ロジック (究極版)
     // ==========================================
     
     // HTMLの軽量圧縮 (JSを破壊しない安全なミニファイ)
     function minifyHtml(html) {
       return html
-        .replace(/<!--[\s\S]*?-->/g, '')  // HTMLコメントの安全な削除
+        .replace(new RegExp('\\x3c!--[\\\\s\\\\S]*?--\\x3e', 'g'), '')  // HTMLコメントの安全な削除
         .replace(/>\s+</g, '><')          // タグ間の余白を極限まで詰める（内部のJSや改行は保護）
+        // 💀 究極ハック：HTML5仕様を悪用し、スペースを含まない属性の「"」と「'」を強制剥奪
+        // 例: id="app" -> id=app, type="text" -> type=text
+        .replace(/=(["'])([^"'=<>\s`]+)\1/g, '=$2')
         .trim();
     }
 
-    // CSSの超高密度圧縮（calc破損バグを修正）
+    // CSSの超高密度圧縮（calc破損バグを修正 ＆ ゼロ・小数抹殺ハック）
     function minifyCss(css) {
       return css
         .replace(/\/\*[\s\S]*?\*\//g, '')       // コメントの全削除
@@ -880,6 +883,12 @@
         .replace(/;}/g, '}')                    // 最後の不要なセミコロンを削除
         .replace(/(^|[:\s])0+(px|em|rem|%|vw|vh|pt)/gi, '$10') // 0pxなどを 0 に短縮
         .replace(/#([0-9a-fA-F])\1([0-9a-fA-F])\2([0-9a-fA-F])\3/g, '#$1$2$3') // #ffffff -> #fff
+        // 💀 究極ハック：少数の頭の0を消去 (0.5s -> .5s)
+        .replace(/(^|[:\s])0+\.(\d+)/g, '$1.$2')
+        // 💀 究極ハック：無意味な0の連続を単一の0に圧縮 (margin:0 0 0 0 -> margin:0)
+        .replace(/:0 0 0 0(;|}|\s)/g, ':0$1')
+        .replace(/:0 0 0(;|}|\s)/g, ':0$1')
+        .replace(/:0 0(;|}|\s)/g, ':0$1')
         .trim();
     }
 
@@ -1017,7 +1026,6 @@
             if (golfEnabled && minifyAssets) cssContent = minifyCss(cssContent);
 
             const styleEl = doc.createElement('style');
-            // 🐛修正: 行コメント // をブロックコメント /* */ に変更
             styleEl.textContent = `\n/* Inlined: ${resolvedPath} */\n` + cssContent + '\n';
             link.replaceWith(styleEl);
             addLog(`CSSファイルをスタイルブロックに展開: ${resolvedPath}`, "success");
@@ -1052,7 +1060,6 @@
             else if (script.hasAttribute('defer')) scriptEl.setAttribute('defer', '');
 
             const safeJsContent = jsContent.replace(new RegExp('\\x3c/\\\\s*script\\\\s*\\x3e', 'gi'), '\\x3c\\/script\\x3e');
-            // 🐛修正: 行コメント // をブロックコメント /* */ に変更
             scriptEl.textContent = `\n/* Inlined & Bundled: ${resolvedPath} */\n` + safeJsContent + '\n';
             script.replaceWith(scriptEl);
             addLog(`JavaScriptを展開: ${resolvedPath}`, "success");
@@ -1180,7 +1187,7 @@
         });
         finalBundle += `},{});`;
       } else {
-        // 従来の可読性重視ランタイム（🐛 行コメント // を /* */ に修正）
+        // 従来の可読性重視ランタイム
         finalBundle += `(function() {\n  /* Web Asset Bundler - Modules Container */\n  const modules = {\n`;
         const moduleKeys = Object.keys(bundledModules);
         moduleKeys.forEach((path, index) => {
@@ -1216,7 +1223,6 @@
         if (!file) return;
         usedFilesSet.add(path);
 
-        // 🐛修正: 行コメント // をブロックコメント /* */ に変更
         if (keepComments) {
           output += `/* ========================================== */\n`;
           output += `/* FILE: ${path} */\n`;
@@ -1237,7 +1243,7 @@
           const activePlugins = [];
           if (enableConsoleStrip) activePlugins.push(consoleStripperPlugin);
           if (enableMangle) activePlugins.push(astVariableManglerPlugin);
-          // 極限圧縮も有効なら追加
+          
           const enableExtreme = document.getElementById('golf-extreme') && document.getElementById('golf-extreme').checked;
           if (enableExtreme) activePlugins.push(extremeGolfPlugin);
 
@@ -1449,7 +1455,7 @@
       };
     };
 
-    // ⛳️ コードゴルフ：構文そのものを破壊・短縮するエグいオプティマイザ (超強化版)
+    // ⛳️ コードゴルフ：構文そのものを破壊・短縮するエグいオプティマイザ (究極版)
     const extremeGolfPlugin = ({ types: t }) => {
       return {
         visitor: {
@@ -1606,7 +1612,15 @@
           plugins: activePlugins,
           parserOpts: {
             sourceType: 'module',
-            plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy']
+            plugins: [
+              'jsx',
+              'typescript',
+              'classProperties',
+              'decorators-legacy',
+              'objectRestSpread',
+              'exportDefaultFrom',
+              'dynamicImport'
+            ]
           },
           // ⛳️ コードゴルフ時はコメントを完全除去し、ジェネレータで極限まで改行・空白を詰め込む
           comments: golfEnabled ? false : keepComments,
