@@ -30,6 +30,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- //#region Styles (エディタ折りたたみ対応 CSS領域) -->
     <style>
         /* 簡易コード表示用のカスタムスクロールバー */
         ::-webkit-scrollbar {
@@ -50,6 +52,7 @@
             background: #64748b;
         }
     </style>
+    <!-- //#endregion Styles -->
 </head>
 
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased">
@@ -246,7 +249,7 @@
                             <i data-lucide="award" class="w-4 h-4"></i>
                             コードゴルフ化オプション
                         </div>
-                        <label class="relative inline-flex inline-flex items-center cursor-pointer">
+                        <label class="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" id="opt-golf" class="sr-only peer">
                             <div
                                 class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600 peer-checked:after:bg-white">
@@ -519,32 +522,98 @@
         <span id="toast-text" class="font-medium">メッセージ</span>
     </div>
 
-    <script>
-        /* ==========================================================================
-           TABLE OF CONTENTS (目次)
-           ==========================================================================
-           1. CONFIG & RULES (環境設定・データ駆動ルール)
-           2. STORE (ES6 Classベース・グローバル状態管理モジュール)
-           3. AST PLUGINS & PASSES (Babel/AST用コードゴルフ拡張パスモジュール群)
-           4. COMPILER CORE (ビルドオーケストレーション、解決、バンドル、リンク処理)
-           5. UTILS (共通ユーティリティ)
-           6. UI MANAGER (DOM操作、D&D、イベント委譲、レンダリング、一括リスナー)
-           7. BOOTSTRAPPER (初期化、Lucideライフサイクル統合)
-           ========================================================================== */
+    <!-- //#region HTML Templates (マークアップとロジックの分離用テンプレート領域) -->
+    <template id="template-detected-file">
+        <div
+            class="flex items-center justify-between p-2 hover:bg-slate-800/40 rounded-lg group border border-transparent hover:border-slate-800 transition-all">
+            <div class="flex items-center gap-2 truncate">
+                <i data-template-icon class="w-3.5 h-3.5 shrink-0"></i>
+                <span data-template-path class="truncate text-slate-300"></span>
+            </div>
+            <div class="flex items-center gap-3 shrink-0">
+                <span data-template-size class="text-[10px] text-slate-500"></span>
+                <button data-action="deleteFile"
+                    class="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-0.5">
+                    <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                </button>
+            </div>
+        </div>
+    </template>
 
-        // ==========================================================================
-        // 1. CONFIG & RULES (環境設定・データ駆動ルール)
-        // ==========================================================================
+    <template id="template-simple-file">
+        <div class="flex items-center justify-between p-2 bg-slate-900 border border-slate-800/60 rounded-lg">
+            <div class="flex items-center gap-2 truncate">
+                <span data-template-idx class="text-[10px] text-slate-500 font-mono w-4 text-right"></span>
+                <span data-template-name class="truncate text-slate-300"></span>
+                <span data-template-fullname class="text-[9px] text-slate-600 truncate max-w-[120px]"></span>
+            </div>
+            <div class="flex gap-1">
+                <button data-action="moveOrder" data-dir="-1"
+                    class="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-30">
+                    <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
+                </button>
+                <button data-action="moveOrder" data-dir="1"
+                    class="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-30">
+                    <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                </button>
+            </div>
+        </div>
+    </template>
+    <!-- //#endregion HTML Templates -->
+
+
+    <!-- ==========================================================================
+       MODULE SCRIPTS AREA
+       ========================================================================== -->
+
+    <!-- Global App Namespace Initialization -->
+    <script>
+        window.App = {
+            Config: null, Utils: null, Store: null, BabelHelper: null,
+            Passes: {}, Compiler: {}, UI: null,
+            // グローバルログハブ（UI未初期化時もコンソールにフォールバック）
+            log: function (message, type = 'info') {
+                if (window.App.UIInstance && window.App.UIInstance.addLog) {
+                    window.App.UIInstance.addLog(message, type);
+                } else {
+                    console[type === 'error' ? 'error' : (type === 'warn' ? 'warn' : 'log')](`[${type.toUpperCase()}] ${message}`);
+                }
+            },
+            // フェイルファスト（早期失敗）のためのアサーション
+            assert: function (condition, message, context = "App") {
+                if (!condition) {
+                    const fullMsg = `[アサーション失敗: ${context}] ${message}`;
+                    window.App.log(fullMsg, 'error');
+                    throw new Error(fullMsg);
+                }
+            }
+        };
+    </script>
+
+    <!-- 1. Configuration & Rules Module -->
+    <script type="module">
+        //#region Configuration Block
         const Config = {
             compilerEnv: { importMap: {}, cdnBaseUrl: "https://esm.sh/", globalAliases: {} },
             crossAssetDictionary: null,
+            hasDependency: (store, packageName) => {
+                if (!store) return false;
+                const pkgPath = store.getFilePaths().find(p => p.endsWith('package.json'));
+                if (!pkgPath) return false;
+                try {
+                    const pkg = JSON.parse(store.getFile(pkgPath).content);
+                    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+                    return !!deps[packageName];
+                } catch (e) {
+                    window.App.log(`[Config] package.json の解析に失敗しました。依存関係チェック(${packageName})をスキップします。原因: ${e.message}`, 'warn');
+                    return false;
+                }
+            },
             extensionRules: {
-                // コアエンジンから特定のライブラリ依存を切り離すためのバイパス判定ルール
                 manglingBypass: [
                     {
                         id: 'detect-dynamic-css-engines',
                         condition: (paths, store) => {
-                            // ここにTailwindなどの「実行時にクラス名を動的生成する」系の検知ロジックを隔離する
                             for (const p of paths) {
                                 const ext = p.split('.').pop().toLowerCase();
                                 const content = store.getFile(p).content || "";
@@ -556,30 +625,21 @@
                         },
                         message: "[ルール適用] 実行時CSSジェネレータを検知したため、UI保護のためにクラス名圧縮をバイパスします。"
                     }
-                    // 将来的にVueやReactの動的クラスバインディング検知ルールなどもここに追加可能
                 ],
                 dom: [
                     {
                         id: 'tailwind-cdn-injector',
                         condition: (html, store) => {
                             if (html.includes('tailwindcss.com')) return false;
-                            if (!store) return false;
-
-                            const paths = store.getFilePaths();
-                            for (const path of paths) {
-                                if (/tailwind\.config\.(js|cjs|mjs|ts)$/i.test(path)) return true;
-
-                                if (path.endsWith('.css')) {
-                                    const content = store.getFile(path).content || "";
-                                    if (/@tailwind\s+(base|components|utilities)/.test(content)) return true;
-                                }
-
-                                if (path.endsWith('package.json')) {
-                                    try {
-                                        const pkg = JSON.parse(store.getFile(path).content);
-                                        const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-                                        if (deps['tailwindcss']) return true;
-                                    } catch (e) { }
+                            if (Config.hasDependency(store, 'tailwindcss')) return true;
+                            if (store) {
+                                const paths = store.getFilePaths();
+                                for (const path of paths) {
+                                    if (/tailwind\.config\.(js|cjs|mjs|ts)$/i.test(path)) return true;
+                                    if (path.endsWith('.css')) {
+                                        const content = store.getFile(path).content || "";
+                                        if (/@tailwind\s+(base|components|utilities)/.test(content)) return true;
+                                    }
                                 }
                             }
                             return false;
@@ -601,7 +661,10 @@
                             try {
                                 const res = context.Babel.transform(text, { plugins: context.plugins, parserOpts: { sourceType: 'module' }, comments: false, minified: true, compact: true });
                                 return res && res.code ? res.code : text;
-                            } catch (e) { return text; }
+                            } catch (e) {
+                                window.App.log(`[Web Worker圧縮警告] インラインWorker内のJS構文解析に失敗しました。圧縮をスキップし元の文字列を維持します。\n原因: ${e.message}`, 'warn');
+                                return text;
+                            }
                         }
                     },
                     {
@@ -639,19 +702,7 @@
                         condition: (source, path, store) => {
                             if (!path || (!path.endsWith('.tsx') && !path.endsWith('.jsx'))) return false;
                             if (/import\s+.*?from\s+['"]react['"]/.test(source) || /require\(['"]react['"]\)/.test(source)) return true;
-                            if (store) {
-                                const paths = store.getFilePaths();
-                                for (const p of paths) {
-                                    if (p.endsWith('package.json')) {
-                                        try {
-                                            const pkg = JSON.parse(store.getFile(p).content);
-                                            const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-                                            if (deps['react']) return true;
-                                        } catch (e) { }
-                                    }
-                                }
-                            }
-                            return false;
+                            return Config.hasDependency(store, 'react');
                         },
                         apply: (options) => {
                             options.presets = [
@@ -681,20 +732,106 @@
                         try {
                             const parsed = JSON.parse(match[1]);
                             if (parsed.imports) Object.assign(this.compilerEnv.importMap, parsed.imports);
-                        } catch (e) { }
+                        } catch (e) {
+                            window.App.log(`[環境解析] importmap のJSONパースに失敗しました。スキップします。原因: ${e.message}`, 'warn');
+                        }
                     }
                 });
             }
         };
 
-        // ==========================================================================
-        // 2. STORE (ES6 Classベース・グローバル状態管理モジュール)
-        // ==========================================================================
+        window.App.Config = Config;
+        //#endregion
+    </script>
+
+    <!-- 2. Utils Module -->
+    <script type="module">
+        //#region Common Utils Block
+        class UtilsManager {
+            textExts = ['js', 'mjs', 'jsx', 'ts', 'tsx', 'html', 'htm', 'css', 'json', 'svg'];
+            binaryExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico'];
+            jsExts = ['js', 'mjs', 'jsx', 'ts', 'tsx'];
+
+            isSupportedFile(filename) {
+                const ext = filename.split('.').pop().toLowerCase();
+                return this.textExts.includes(ext) || this.binaryExts.includes(ext);
+            }
+
+            isBinaryFile(filename) {
+                const ext = filename.split('.').pop().toLowerCase();
+                return this.binaryExts.includes(ext);
+            }
+
+            isJSFile(filename) {
+                const ext = filename.split('.').pop().toLowerCase();
+                return this.jsExts.includes(ext);
+            }
+
+            readFileAsDataURL(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            getGolfRank(reductionPercent) {
+                if (reductionPercent >= 85) return { rank: "🏆 SSS", color: "bg-red-600" };
+                if (reductionPercent >= 70) return { rank: "💎 SS", color: "bg-orange-500" };
+                if (reductionPercent >= 50) return { rank: "🔥 S", color: "bg-amber-500" };
+                if (reductionPercent >= 30) return { rank: "⭐ A", color: "bg-emerald-500" };
+                if (reductionPercent >= 15) return { rank: "⚡ B", color: "bg-brand-500" };
+                return { rank: "⛳️ C", color: "bg-slate-500" };
+            }
+
+            inlineCssImages(cssPath, cssContent, store, logger, scanner) {
+                const urlRegex = /url\s*\(\s*['"`]?([^'"`\)]+)['"`]?\s*\)/gi;
+                return cssContent.replace(urlRegex, (match, urlPath) => {
+                    if (urlPath.startsWith('http://') || urlPath.startsWith('https://') || urlPath.startsWith('data:') || urlPath.startsWith('//')) {
+                        return match;
+                    }
+                    const resolvedImagePath = scanner.resolveRelativePath(cssPath, urlPath, store);
+                    if (store.hasFile(resolvedImagePath)) {
+                        const file = store.getFile(resolvedImagePath);
+                        store.addUsedFile(resolvedImagePath);
+                        if (file.isBinary) {
+                            logger.success(`CSS内画像のBase64変換: ${resolvedImagePath}`);
+                            return `url("${file.content}")`;
+                        } else if (resolvedImagePath.toLowerCase().endsWith('.svg')) {
+                            logger.success(`CSS内SVG画像のData URLインライン変換: ${resolvedImagePath}`);
+                            const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(file.content)}`;
+                            return `url("${dataUrl}")`;
+                        } else {
+                            logger.success(`CSS内アセットを展開: ${resolvedImagePath}`);
+                            return `url("${file.content}")`;
+                        }
+                    } else {
+                        logger.warn(`警告: CSSから参照される画像 [${urlPath}] がフォルダ内に見つかりません。`);
+                        return match;
+                    }
+                });
+            }
+        }
+
+        window.App.Utils = new UtilsManager();
+        //#endregion
+    </script>
+
+    <!-- 3. Store Module (イベント駆動型Pub/Sub状態管理) -->
+    <script type="module">
+        //#region StoreManager Block
         class StoreManager {
             #filesStore = {};
             #currentMode = 'direct';
             #fileOrder = [];
             #usedFilesSet = new Set();
+
+            // 内部イベント発行用ハブ (UIに直接触れず、windowを通じてルーズに通知する)
+            _dispatchEvent(eventName, detail = {}) {
+                const customEvt = new CustomEvent(eventName, { detail });
+                window.dispatchEvent(customEvt);
+            }
 
             get filesStore() {
                 const copy = {};
@@ -717,20 +854,48 @@
             }
 
             setMode(mode) {
-                this.#currentMode = mode;
+                if (this.#currentMode !== mode) {
+                    this.#currentMode = mode;
+                    this._dispatchEvent('app:mode-changed', { mode });
+                }
             }
 
             addFile(path, content, size, isBinary) {
-                this.#filesStore[path] = { content, size, isBinary };
-                if (Utils.isJSFile(path) && !this.#fileOrder.includes(path)) {
+                // アサーション: 入力データの健全性チェック
+                if (!path || typeof path !== 'string') {
+                    console.error("[Store] 無効なファイルパスが渡されました", path);
+                    return;
+                }
+                if (!isBinary && typeof content !== 'string') {
+                    console.warn(`[Store] ${path} のテキストコンテンツが不正(非文字列)です。空文字列として扱います。`);
+                    content = "";
+                }
+
+                this.#filesStore[path] = { content, size: size || 0, isBinary: !!isBinary };
+
+                let orderChanged = false;
+                if (window.App.Utils.isJSFile(path) && !this.#fileOrder.includes(path)) {
                     this.#fileOrder.push(path);
                     this.#fileOrder.sort();
+                    orderChanged = true;
+                }
+
+                this._dispatchEvent('app:files-updated', { path, action: 'add' });
+                if (orderChanged) {
+                    this._dispatchEvent('app:order-changed', { order: this.#fileOrder });
                 }
             }
 
             deleteFile(path) {
-                delete this.#filesStore[path];
-                this.#fileOrder = this.#fileOrder.filter(p => p !== path);
+                if (this.#filesStore[path]) {
+                    delete this.#filesStore[path];
+                    const prevLen = this.#fileOrder.length;
+                    this.#fileOrder = this.#fileOrder.filter(p => p !== path);
+                    this._dispatchEvent('app:files-updated', { path, action: 'delete' });
+                    if (this.#fileOrder.length !== prevLen) {
+                        this._dispatchEvent('app:order-changed', { order: this.#fileOrder });
+                    }
+                }
             }
 
             moveOrder(index, direction) {
@@ -739,20 +904,22 @@
                 const temp = this.#fileOrder[index];
                 this.#fileOrder[index] = this.#fileOrder[targetIdx];
                 this.#fileOrder[targetIdx] = temp;
+                this._dispatchEvent('app:order-changed', { order: this.#fileOrder });
             }
 
             addUsedFile(path) {
                 this.#usedFilesSet.add(path);
+                this._dispatchEvent('app:used-files-updated', { usedFiles: Array.from(this.#usedFilesSet) });
             }
 
             clearUsedFiles() {
                 this.#usedFilesSet.clear();
+                this._dispatchEvent('app:used-files-updated', { usedFiles: [] });
             }
 
             getFile(path) {
                 const file = this.#filesStore[path];
-                if (!file) return null;
-                return { ...file };
+                return file ? { ...file } : null;
             }
 
             hasFile(path) {
@@ -768,14 +935,100 @@
                 this.#fileOrder = [];
                 this.#usedFilesSet.clear();
                 this.#currentMode = 'direct';
+                this._dispatchEvent('app:reset');
             }
         }
-        const Store = new StoreManager();
 
-        // ==========================================================================
-        // 3. AST PLUGINS & PASSES (Babel/AST用コードゴルフ拡張パスモジュール群)
-        // ==========================================================================
+        window.App.Store = new StoreManager();
+        //#endregion
+    </script>
 
+    <!-- 4. Babel & AST Helpers Module (Babelユーティリティ共通化) -->
+    <script type="module">
+        //#region BabelHelper Block
+        class BabelHelper {
+            static getContext() {
+                // 1. 依存ライブラリのロード確認アサーション
+                if (typeof Babel === 'undefined') {
+                    throw new Error("Babelモジュールがロードされていません。ネットワーク接続を確認してください。");
+                }
+                let babelCtx = null;
+                try {
+                    Babel.transform("()=>{}", {
+                        plugins: [function (api) { babelCtx = api; return { visitor: {} }; }]
+                    });
+                } catch (e) {
+                    throw new Error(`Babel初期化エラー: ${e.message}`);
+                }
+                if (!babelCtx || !babelCtx.types || !babelCtx.traverse) {
+                    throw new Error("Babelコンテキスト(types/traverse)の抽出に失敗しました。Babelのバージョンが非互換の可能性があります。");
+                }
+                return babelCtx;
+            }
+
+            static parse(code) {
+                if (typeof code !== 'string') throw new TypeError("パース対象のコードが文字列ではありません。");
+                if (!code.trim()) return { type: "File", program: { type: "Program", body: [], directives: [] } };
+
+                try {
+                    const res = Babel.transform(code, {
+                        ast: true, code: false,
+                        parserOpts: {
+                            sourceType: 'module',
+                            plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport', 'objectRestSpread', 'exportDefaultFrom']
+                        }
+                    });
+
+                    window.App.assert(res && res.ast && res.ast.program, "Babelが有効なASTを返しませんでした。構文が破綻しています。", "BabelHelper:parse");
+                    return res.ast;
+
+                } catch (err) {
+                    // パースエラー時に、該当行の周辺コード（コンテキスト）を抽出して出力する
+                    let errorMsg = err.message;
+                    const match = errorMsg.match(/\((\d+):(\d+)\)/);
+                    if (match) {
+                        const line = parseInt(match[1], 10);
+                        const lines = code.split('\n');
+                        const start = Math.max(0, line - 3);
+                        const end = Math.min(lines.length, line + 2);
+                        const snippet = lines.slice(start, end).map((l, i) => `${start + i + 1 === line ? '>>' : '  '} ${start + i + 1} | ${l}`).join('\n');
+                        errorMsg += `\n\n[エラー周辺コード]\n${snippet}\n`;
+                    }
+                    window.App.log(`ASTパースエラー: ${errorMsg}`, 'error');
+                    throw new Error(`構文解析に失敗しました。詳細はログを確認してください。`);
+                }
+            }
+
+            static runOptimizationLoop(ast, visitors, options, traverse, loopState, maxIterations = 60) {
+                let isAstChanged = true;
+                let iteration = 0;
+
+                while (isAstChanged && iteration < maxIterations) {
+                    loopState.changed = false;
+                    traverse(ast, visitors);
+                    if (loopState.changed) {
+                        isAstChanged = true;
+                        traverse(ast, { Program(path) { path.scope.crawl(); } });
+                    } else {
+                        isAstChanged = false;
+                    }
+                    iteration++;
+                }
+
+                // 4. 無限ループ（収束未到達）の警告
+                if (iteration >= maxIterations) {
+                    window.App.log(`[AST最適化] 最適化ループが上限(${maxIterations}回)に達しました。パス間で循環変更が起きている可能性があります。`, 'warn');
+                }
+                return { iteration, globalAliases: loopState.globalAliases };
+            }
+        }
+        window.App.BabelHelper = BabelHelper;
+        //#endregion
+    </script>
+
+    <!-- 5. AST Passes Module -->
+    <script type="module">
+        //#region AST Passes Block
         class ExtremeGolfPass {
             getVisitor(t, state, options) {
                 return {
@@ -791,13 +1044,10 @@
                             stmts.forEach(stmtPath => {
                                 if (stmtPath.isVariableDeclaration()) {
                                     const declarations = stmtPath.node.declarations;
-                                    // 分割代入 (let {x} = obj;) など特殊な宣言が混ざっている場合は安全のためスキップ
                                     if (declarations.some(decl => !t.isIdentifier(decl.id))) return;
-
                                     const assignments = [];
                                     declarations.forEach(decl => {
                                         path.node.params.push(t.identifier(decl.id.name));
-                                        // 初期化式(decl.init)をそのまま使い回さずクローンする
                                         if (decl.init) assignments.push(t.assignmentExpression('=', t.identifier(decl.id.name), t.cloneNode(decl.init, true)));
                                     });
                                     if (assignments.length > 0) {
@@ -814,7 +1064,6 @@
                         if (!options.enableExtreme || !path.isArrowFunctionExpression()) return;
                         const body = path.node.body;
                         if (t.isBlockStatement(body) && body.body && body.body.length === 1 && t.isReturnStatement(body.body[0])) {
-                            // 戻り値もクローンして安全に置換
                             const retArg = body.body[0].argument ? t.cloneNode(body.body[0].argument, true) : t.identifier('undefined');
                             path.get('body').replaceWith(retArg); state.changed = true;
                         }
@@ -825,7 +1074,6 @@
                         const parent = path.parent; if (t.isNewExpression(parent) || t.isVariableDeclarator(parent) || t.isAssignmentExpression(parent) || t.isProperty(parent)) return;
                         let hasThisOrArgs = false; path.traverse({ ThisExpression() { hasThisOrArgs = true; }, Identifier(p) { if (p.node.name === 'arguments') hasThisOrArgs = true; } });
                         if (!hasThisOrArgs) {
-                            // パラメータとボディをクローン
                             path.replaceWith(t.arrowFunctionExpression(path.node.params.map(p => t.cloneNode(p, true)), t.cloneNode(path.node.body, true)));
                             state.changed = true;
                         }
@@ -834,7 +1082,6 @@
                         if (!options.enableExtreme || !path.isWhileStatement()) return;
                         const test = path.node.test;
                         if (t.isBooleanLiteral(test, { value: true }) || (t.isNumericLiteral(test) && test.value !== 0) || (t.isUnaryExpression(test, { operator: '!' }) && t.isNumericLiteral(test.argument, { value: 0 }))) {
-                            // ループのボディをクローン
                             path.replaceWith(t.forStatement(null, null, null, t.cloneNode(path.node.body, true))); state.changed = true;
                         }
                     },
@@ -863,51 +1110,46 @@
                 return {
                     "Program|BlockStatement"(path) {
                         if (!path.node || (!path.isProgram() && !path.isBlockStatement())) return;
-                        const bodyPath = path.get('body'); if (!Array.isArray(bodyPath)) return;
+                        const bodyPath = path.get('body');
+                        if (!Array.isArray(bodyPath)) return;
 
                         for (let i = 0; i < bodyPath.length - 1; i++) {
-                            const current = bodyPath[i]; if (!current.node) continue;
-                            let nextIdx = i + 1; while (nextIdx < bodyPath.length && !bodyPath[nextIdx].node) nextIdx++;
+                            const current = bodyPath[i];
+                            if (!current.node) continue;
+
+                            let nextIdx = i + 1;
+                            while (nextIdx < bodyPath.length && !bodyPath[nextIdx].node) nextIdx++;
                             if (nextIdx >= bodyPath.length) break;
+
                             const next = bodyPath[nextIdx];
 
+                            // パターン1: 変数宣言の統合 (let x=1; let y=2; -> let x=1,y=2;)
                             if (current.isVariableDeclaration() && next.isVariableDeclaration()) {
                                 if (current.node.kind === next.node.kind || (current.node.kind !== 'var' && next.node.kind !== 'var')) {
                                     current.node.kind = (current.node.kind === 'var' && next.node.kind === 'var') ? 'var' : 'let';
-                                    // 宣言の統合時に必ずクローンする
                                     const clonedDecls = next.node.declarations.map(d => t.cloneNode(d, true));
                                     current.node.declarations.push(...clonedDecls);
                                     next.remove(); state.changed = true; i--;
+                                    continue; // 変更があったら次の処理へ
                                 }
                             }
-                        }
-                        for (let i = 0; i < bodyPath.length - 1; i++) {
-                            const current = bodyPath[i]; if (!current.node) continue;
-                            let nextIdx = i + 1; while (nextIdx < bodyPath.length && !bodyPath[nextIdx].node) nextIdx++;
-                            if (nextIdx >= bodyPath.length) break;
-                            const next = bodyPath[nextIdx];
 
+                            // パターン2: 代入とReturnの統合 (x = 1; return x; -> return x = 1;)
                             if (current.isExpressionStatement() && t.isAssignmentExpression(current.node.expression) && next.isReturnStatement()) {
-                                const assignLeft = current.node.expression.left; const retArg = next.node.argument;
+                                const assignLeft = current.node.expression.left;
+                                const retArg = next.node.argument;
                                 if (t.isIdentifier(assignLeft) && t.isIdentifier(retArg) && assignLeft.name === retArg.name) {
-                                    // 代入式をクローンして渡す
                                     next.node.argument = t.cloneNode(current.node.expression, true);
                                     current.remove(); state.changed = true;
+                                    continue;
                                 }
                             }
-                        }
-                        for (let i = 0; i < bodyPath.length - 1; i++) {
-                            const current = bodyPath[i]; if (!current.node) continue;
-                            let nextIdx = i + 1; while (nextIdx < bodyPath.length && !bodyPath[nextIdx].node) nextIdx++;
-                            if (nextIdx >= bodyPath.length) break;
-                            const next = bodyPath[nextIdx];
 
+                            // パターン3: 連続する式ステートメントの統合 (a(); b(); -> a(), b();)
                             if (current.isExpressionStatement() && next.isExpressionStatement()) {
                                 const exprs = [];
-                                // 全ての式要素を安全にディープコピーしてAST汚染を防ぐ
                                 if (t.isSequenceExpression(current.node.expression)) exprs.push(...current.node.expression.expressions.map(e => t.cloneNode(e, true)));
                                 else exprs.push(t.cloneNode(current.node.expression, true));
-
                                 if (t.isSequenceExpression(next.node.expression)) exprs.push(...next.node.expression.expressions.map(e => t.cloneNode(e, true)));
                                 else exprs.push(t.cloneNode(next.node.expression, true));
 
@@ -935,8 +1177,6 @@
                         const consExpr = getSingleExpr(consequent); const altExpr = alternate ? getSingleExpr(alternate) : null;
                         const consRet = getReturnExpr(consequent); const altRet = alternate ? getReturnExpr(alternate) : null;
                         const consAssign = getAssignExpr(consequent); const altAssign = alternate ? getAssignExpr(alternate) : null;
-
-                        // if文を三項演算子などに崩す時、元のパーツを全てクローンする
                         if (consAssign && altAssign && t.isIdentifier(consAssign.left) && t.isIdentifier(altAssign.left) && consAssign.left.name === altAssign.left.name && consAssign.operator === altAssign.operator) {
                             path.replaceWith(t.expressionStatement(t.assignmentExpression(consAssign.operator, t.cloneNode(consAssign.left, true), t.conditionalExpression(t.cloneNode(test, true), t.cloneNode(consAssign.right, true), t.cloneNode(altAssign.right, true))))); state.changed = true; return;
                         }
@@ -952,7 +1192,6 @@
             }
         }
 
-        // 厳格な不要コード排除 (DCE) パス
         class DeadCodeEliminationPass {
             getVisitor(t, state, options) {
                 return {
@@ -988,13 +1227,7 @@
                     CallExpression(path) {
                         if (!options.enableConsoleStrip) return;
                         const callee = path.node.callee;
-                        if (
-                            callee.type === 'MemberExpression' &&
-                            callee.object.type === 'Identifier' &&
-                            callee.object.name === 'console' &&
-                            callee.property.type === 'Identifier' &&
-                            ['log', 'debug', 'info', 'warn', 'clear'].includes(callee.property.name)
-                        ) {
+                        if (callee.type === 'MemberExpression' && callee.object.type === 'Identifier' && callee.object.name === 'console' && callee.property.type === 'Identifier' && ['log', 'debug', 'info', 'warn', 'clear'].includes(callee.property.name)) {
                             if (path.parentPath.isExpressionStatement()) {
                                 path.remove();
                             } else {
@@ -1007,7 +1240,6 @@
             }
         }
 
-        // 定数畳み込み＆軽量化パス
         class ConstantFoldingPass {
             getVisitor(t, state, options) {
                 return {
@@ -1064,18 +1296,15 @@
             }
         }
 
-        // 文字列シェーダー・Worker・同期アセットゴルフ圧縮パス
         class StringCompressorPass {
             getVisitor(t, state, options) {
+                const { Config } = window.App;
                 return {
                     "StringLiteral|TemplateElement"(path) {
                         const isTemplate = t.isTemplateElement(path.node);
                         let text = isTemplate ? path.node.value.raw : path.node.value;
                         if (!text || text.length < 2) return;
-
                         let modified = false;
-
-                        // 3. クロスアセット同期辞書の適用
                         if (options.crossAssetEnabled && Config.crossAssetDictionary) {
                             const dict = Config.crossAssetDictionary;
                             if (dict[text]) {
@@ -1104,7 +1333,6 @@
                                 }
                             }
                         }
-
                         if (options.golfStringHack) {
                             for (const rule of Config.extensionRules.strings) {
                                 if (rule.condition(text)) {
@@ -1117,7 +1345,6 @@
                                 }
                             }
                         }
-
                         if (modified) {
                             if (isTemplate) {
                                 path.node.value.raw = text;
@@ -1132,14 +1359,10 @@
             }
         }
 
-        // コスト計算付き GlobalAliasingPass の新設
         class GlobalAliasingPass {
             constructor() {
-                // 一般的なビルトインAPIとDOMアクセスを検出対象とする
                 this.targets = [
                     'document', 'window', 'console', 'Math', 'Object', 'Array', 'String', 'Number',
-                    // 'document.getElementById' などは外し、代わりに 'document' 自体を 'd' にエイリアス化して
-                    // d.getElementById('...') とさせる方が、最終的な文字数効率と安全性のバランスが良い。
                     'Math.floor', 'Math.random', 'Math.ceil', 'Math.round', 'Math.abs', 'Math.max', 'Math.min',
                     'Object.keys', 'Object.values', 'Object.assign', 'Array.isArray'
                 ];
@@ -1151,64 +1374,49 @@
                         return `${node.object.name}.${node.property.name}`;
                     } else if (node.object.type === 'MemberExpression') {
                         const parentStr = this.getStaticMemberExpressionStr(node.object);
-                        if (parentStr) {
-                            return `${parentStr}.${node.property.name}`;
-                        }
+                        if (parentStr) return `${parentStr}.${node.property.name}`;
                     }
                 }
                 return null;
             }
 
             getVisitor(t, state, options) {
-                const self = this;
                 return {
                     Program: {
-                        enter(path) {
+                        enter: (path) => {
                             if (!options.globalAliasingEnabled) return;
                             const counts = new Map();
-
-                            // AST全体から対象APIの出現回数をカウント
                             path.traverse({
-                                MemberExpression(p) {
-                                    const exprStr = self.getStaticMemberExpressionStr(p.node);
-                                    if (exprStr && self.targets.includes(exprStr)) {
+                                MemberExpression: (p) => {
+                                    const exprStr = this.getStaticMemberExpressionStr(p.node);
+                                    if (exprStr && this.targets.includes(exprStr)) {
                                         counts.set(exprStr, (counts.get(exprStr) || 0) + 1);
                                     }
                                 },
-                                Identifier(p) {
+                                Identifier: (p) => {
                                     const name = p.node.name;
-                                    if (self.targets.includes(name) && !p.scope.hasBinding(name, true)) {
-                                        // windowなどのルート識別子を単体カウント
+                                    if (this.targets.includes(name) && !p.scope.hasBinding(name, true)) {
                                         counts.set(name, (counts.get(name) || 0) + 1);
                                     }
                                 }
                             });
-
                             const aliasesToInject = [];
                             let aliasCounter = 0;
-
                             for (const [exprStr, count] of counts.entries()) {
                                 if (count <= 1) continue;
-
                                 const originalBytes = exprStr.length * count;
-                                const aliasVarName = `_g_${aliasCounter}`; // 後段のマングラーで安全に一文字にされる
-                                // エイリアス宣言文: `let _g_0=document.getElementById;` のコスト + 呼び出し分の参照文字数コスト
+                                const aliasVarName = `_g_${aliasCounter}`;
                                 const declareCost = 13 + aliasVarName.length + exprStr.length;
                                 const referenceCost = aliasVarName.length * count;
                                 const savedBytes = originalBytes - (declareCost + referenceCost);
-
                                 if (savedBytes > 0) {
                                     aliasesToInject.push({ exprStr, aliasVarName, savedBytes });
                                     aliasCounter++;
                                 }
                             }
-
                             if (aliasesToInject.length > 0) {
                                 state.globalAliases = aliasesToInject;
-
-                                // 最上部にエイリアス一括宣言を注入
                                 const declarations = aliasesToInject.map(item => {
-                                    // AST値ノードを動的パースして割当
                                     const parts = item.exprStr.split('.');
                                     let valNode = t.identifier(parts[0]);
                                     for (let i = 1; i < parts.length; i++) {
@@ -1216,25 +1424,27 @@
                                     }
                                     return t.variableDeclarator(t.identifier(item.aliasVarName), valNode);
                                 });
-                                const varDeclaration = t.variableDeclaration('const', declarations);
-                                path.unshiftContainer('body', varDeclaration);
+                                //let で宣言し、スコープの先頭に安全に挿入
+                                const varDeclaration = t.variableDeclaration('let', declarations);
+                                const [insertedPath] = path.unshiftContainer('body', varDeclaration);
+                                // 挿入した新しい変数をBabelのスコープマネージャーに即時登録する
+                                path.scope.registerDeclaration(insertedPath);
                                 state.changed = true;
                             }
                         },
-                        exit(path, state) {
+                        exit: (path, state) => {
                             if (!state.globalAliases || state.globalAliases.length === 0) return;
                             const aliases = state.globalAliases;
-
                             path.traverse({
-                                MemberExpression(p) {
-                                    const exprStr = self.getStaticMemberExpressionStr(p.node);
+                                MemberExpression: (p) => {
+                                    const exprStr = this.getStaticMemberExpressionStr(p.node);
                                     const found = aliases.find(a => a.exprStr === exprStr);
                                     if (found) {
                                         p.replaceWith(t.identifier(found.aliasVarName));
                                         state.changed = true;
                                     }
                                 },
-                                Identifier(p) {
+                                Identifier: (p) => {
                                     if (p.isReferencedIdentifier()) {
                                         const name = p.node.name;
                                         const found = aliases.find(a => a.exprStr === name);
@@ -1251,7 +1461,6 @@
             }
         }
 
-        // 最終局面フェーズ用変数マングラー (Mangler)
         class ManglerPass {
             constructor(extraReserved = []) {
                 this.reservedWords = new Set([
@@ -1270,14 +1479,12 @@
                 return {
                     Program(path) {
                         const nameFrequency = new Map();
-
                         path.traverse({
                             Identifier(p) {
                                 if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
                                     const name = p.node.name;
                                     const binding = p.scope.getBinding(name);
                                     const isGlobal = !binding && !p.scope.hasBinding(name, true);
-
                                     if (isGlobal || name.length === 1 || reserved.has(name)) {
                                         if (isGlobal || name.length === 1) reserved.add(name);
                                     } else {
@@ -1286,7 +1493,6 @@
                                 }
                             }
                         });
-
                         let idCounter = 0;
                         const generateMangledName = () => {
                             const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$';
@@ -1298,10 +1504,7 @@
                             } while (num >= 0);
                             return name;
                         };
-
-                        const sortedNames = Array.from(nameFrequency.keys())
-                            .sort((a, b) => nameFrequency.get(b) - nameFrequency.get(a));
-
+                        const sortedNames = Array.from(nameFrequency.keys()).sort((a, b) => nameFrequency.get(b) - nameFrequency.get(a));
                         const renameMap = new Map();
                         sortedNames.forEach(oldName => {
                             let newName;
@@ -1311,7 +1514,6 @@
                             reserved.add(newName);
                             renameMap.set(oldName, newName);
                         });
-
                         path.traverse({
                             Identifier(p) {
                                 if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
@@ -1327,9 +1529,29 @@
             }
         }
 
-        // ==========================================================================
-        // 4. COMPILER CORE (ビルドオーケストレーション、解決、バンドル、リンク処理)
-        // ==========================================================================
+        window.App.Passes.ExtremeGolfPass = ExtremeGolfPass;
+        window.App.Passes.SafeStructureOptimizationPass = SafeStructureOptimizationPass;
+        window.App.Passes.DeadCodeEliminationPass = DeadCodeEliminationPass;
+        window.App.Passes.ConstantFoldingPass = ConstantFoldingPass;
+        window.App.Passes.StringCompressorPass = StringCompressorPass;
+        window.App.Passes.GlobalAliasingPass = GlobalAliasingPass;
+        window.App.Passes.ManglerPass = ManglerPass;
+        window.App.Passes.getStandardVisitors = (t, loopState, options) => {
+            return [
+                new DeadCodeEliminationPass().getVisitor(t, loopState, options),
+                new ConstantFoldingPass().getVisitor(t, loopState, options),
+                new SafeStructureOptimizationPass().getVisitor(t, loopState, options),
+                new ExtremeGolfPass().getVisitor(t, loopState, options),
+                new StringCompressorPass().getVisitor(t, loopState, { ...options, crossAssetEnabled: options.crossAssetEnabled }),
+                new GlobalAliasingPass().getVisitor(t, loopState, { globalAliasingEnabled: options.globalAliasingEnabled })
+            ];
+        };
+        //#endregion
+    </script>
+
+    <!-- 6. Compiler Core Module -->
+    <script type="module">
+        //#region Compiler Core Block
         class Scanner {
             resolveRelativePath(fromPath, relativePath, store) {
                 let projectRoot = '';
@@ -1341,7 +1563,6 @@
                         projectRoot = firstSegments[0];
                     }
                 }
-
                 const normalizePath = (base, target) => {
                     const parts = base ? base.split('/') : [];
                     const targetParts = target.split('/');
@@ -1353,9 +1574,7 @@
                     }
                     return stack.join('/');
                 };
-
                 let searchCandidates = [];
-
                 if (relativePath.startsWith('/')) {
                     const cleanTarget = relativePath.substring(1);
                     searchCandidates.push(projectRoot ? `${projectRoot}/${cleanTarget}` : cleanTarget);
@@ -1369,15 +1588,11 @@
                     searchCandidates.push(normalizePath(dirParts.join('/'), relativePath));
                     searchCandidates.push(projectRoot ? `${projectRoot}/${relativePath}` : relativePath);
                 }
-
                 const extensions = ['', '.js', '.mjs', '.ts', '.jsx', '.tsx', '/index.js', '/index.mjs', '.css', '.json'];
-
                 for (const candidate of searchCandidates) {
                     for (const ext of extensions) {
                         const targetPath = candidate + ext;
-                        if (store.hasFile(targetPath)) {
-                            return targetPath;
-                        }
+                        if (store.hasFile(targetPath)) return targetPath;
                     }
                 }
                 return relativePath;
@@ -1386,7 +1601,6 @@
             extractDependencies(source, fromPath, store) {
                 const deps = new Set();
                 const assets = new Set();
-
                 const dependencyCollectorPlugin = ({ types: t }) => {
                     return {
                         visitor: {
@@ -1413,19 +1627,16 @@
                                     if (t.isIdentifier(callee, { name: 'require' })) return;
                                     if (t.isImport(callee)) return;
                                 }
-
                                 const val = path.node.value;
                                 if (!val || val.length < 3 || val.includes('\n')) return;
                                 if (/^https?:\/\//.test(val) || val.startsWith('data:')) return;
                                 if (!/\.[a-zA-Z0-9]+$/.test(val)) return;
                                 if (val.split('/').pop().startsWith('_virtual_')) return;
-
                                 assets.add(val);
                             }
                         }
                     };
                 };
-
                 try {
                     const baseOptions = {
                         filename: (fromPath && (fromPath.endsWith('.ts') || fromPath.endsWith('.tsx') || fromPath.endsWith('.jsx'))) ? fromPath : (fromPath ? fromPath + '.tsx' : 'unknown.tsx'),
@@ -1433,39 +1644,43 @@
                         parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] },
                         ast: false, code: false
                     };
-                    const configRule = Config.extensionRules.babelConfig.find(r => r.condition(source, fromPath || '', store));
+                    const configRule = window.App.Config.extensionRules.babelConfig.find(r => r.condition(source, fromPath || '', store));
                     if (configRule) configRule.apply(baseOptions);
                     Babel.transform(source, baseOptions);
-                } catch (err) { throw new Error(`構文解析エラー:\n${err.message}`); }
-
+                } catch (err) {
+                    let errorMsg = err.message;
+                    const match = errorMsg.match(/\((\d+):(\d+)\)/);
+                    if (match) {
+                        const line = parseInt(match[1], 10);
+                        const lines = source.split('\n');
+                        const start = Math.max(0, line - 3);
+                        const end = Math.min(lines.length, line + 2);
+                        const snippet = lines.slice(start, end).map((l, i) => `${start + i + 1 === line ? '>>' : '  '} ${start + i + 1} | ${l}`).join('\n');
+                        errorMsg += `\n\n[エラー周辺コード]\n${snippet}\n`;
+                    }
+                    window.App.log(`[Scanner] 依存関係の解析エラー (${fromPath}): ${errorMsg}`, 'error');
+                    throw new Error(`依存関係の構文解析エラー (${fromPath}):\n詳細はログを確認してください。`);
+                }
                 return { modules: Array.from(deps), assets: Array.from(assets) };
             }
 
             extractReservedFunctionsFromHtml(html) {
                 const reserved = [];
-                html.replace(/on[a-z]+\s*=\s*(?:(["'])(.*?)\1|([^\s>]+))/gi, (match, quote, quoted, unquoted) => {
+                const extractFuncs = (match, quote, quoted, unquoted) => {
                     const code = (quoted !== undefined ? quoted : unquoted) || "";
                     code.replace(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g, (m, funcName) => {
-                        reserved.push(funcName);
-                        return m;
+                        reserved.push(funcName); return m;
                     });
                     return match;
-                });
+                };
 
-                html.replace(/href\s*=\s*(?:(["'])javascript:(.*?)\1|javascript:([^\s>]+))/gi, (match, quote, quoted, unquoted) => {
-                    const code = (quoted !== undefined ? quoted : unquoted) || "";
-                    code.replace(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g, (m, funcName) => {
-                        reserved.push(funcName);
-                        return m;
-                    });
-                    return match;
-                });
+                html.replace(/on[a-z]+\s*=\s*(?:(["'])(.*?)\1|([^\s>]+))/gi, extractFuncs);
+                html.replace(/href\s*=\s*(?:(["'])javascript:(.*?)\1|javascript:([^\s>]+))/gi, extractFuncs);
 
                 return Array.from(new Set(reserved));
             }
         }
 
-        // コアエンジン（提案された4フェーズアーキテクチャ）の実装
         class Transformer {
             mergeVisitors(visitors) {
                 const merged = {};
@@ -1483,22 +1698,17 @@
                         }
                     }
                 });
-
                 const finalVisitor = {};
                 for (const [nodeType, handlers] of Object.entries(merged)) {
                     if (Array.isArray(handlers)) {
                         finalVisitor[nodeType] = function (path, state) {
-                            for (const h of handlers) {
-                                if (path.node) h.call(this, path, state);
-                            }
+                            for (const h of handlers) { if (path.node) h.call(this, path, state); }
                         };
                     } else {
                         finalVisitor[nodeType] = {};
                         for (const [phase, phaseHandlers] of Object.entries(handlers)) {
                             finalVisitor[nodeType][phase] = function (path, state) {
-                                for (const h of phaseHandlers) {
-                                    if (path.node) h.call(this, path, state);
-                                }
+                                for (const h of phaseHandlers) { if (path.node) h.call(this, path, state); }
                             };
                         }
                     }
@@ -1507,20 +1717,9 @@
             }
 
             transformESMtoCJS(source, fromPath, resolvedPaths, options, logger) {
-                let babelCtx = null;
-                Babel.transform("()=>{}", {
-                    plugins: [function (api) { babelCtx = api; return { visitor: {} }; }]
-                });
-                if (!babelCtx) throw new Error("Babelコンテキストのキャプチャに失敗しました。");
-
+                const babelCtx = window.App.BabelHelper.getContext();
                 const t = babelCtx.types;
                 const traverse = babelCtx.traverse;
-
-                const parse = (code) => {
-                    const res = Babel.transform(code, { ast: true, code: false, parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] } });
-                    if (!res || !res.ast) throw new Error("Babel.transform が AST を返しませんでした。");
-                    return res.ast;
-                };
 
                 const pathRewriterPlugin = {
                     ImportDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
@@ -1535,12 +1734,7 @@
                             if (node.arguments && node.arguments.length === 1 && (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')) {
                                 const origVal = node.arguments[0].value;
                                 const finalVal = resolvedPaths[origVal] || origVal;
-                                path.replaceWith(
-                                    t.callExpression(
-                                        t.memberExpression(t.identifier('Promise'), t.identifier('resolve')),
-                                        [t.callExpression(t.identifier('require'), [t.stringLiteral(finalVal)])]
-                                    )
-                                );
+                                path.replaceWith(t.callExpression(t.memberExpression(t.identifier('Promise'), t.identifier('resolve')), [t.callExpression(t.identifier('require'), [t.stringLiteral(finalVal)])]));
                             }
                         }
                     }
@@ -1555,14 +1749,9 @@
                                 path.replaceWith(t.stringLiteral(assetData.content));
                             } else if (assetData.type === 'blob') {
                                 const blobArray = t.arrayExpression([t.stringLiteral(assetData.content)]);
-                                const blobOptions = t.objectExpression([
-                                    t.objectProperty(t.identifier('type'), t.stringLiteral(assetData.mime))
-                                ]);
+                                const blobOptions = t.objectExpression([t.objectProperty(t.identifier('type'), t.stringLiteral(assetData.mime))]);
                                 const newBlob = t.newExpression(t.identifier('Blob'), [blobArray, blobOptions]);
-                                const createObjectURL = t.callExpression(
-                                    t.memberExpression(t.identifier('URL'), t.identifier('createObjectURL')),
-                                    [newBlob]
-                                );
+                                const createObjectURL = t.callExpression(t.memberExpression(t.identifier('URL'), t.identifier('createObjectURL')), [newBlob]);
                                 path.replaceWith(createObjectURL);
                             }
                             path.skip();
@@ -1571,79 +1760,48 @@
                 };
 
                 let safeSource = source;
-                Config.extensionRules.source.forEach(rule => {
-                    if (rule.condition(safeSource, fromPath || '')) {
-                        safeSource = rule.apply(safeSource);
-                    }
+                window.App.Config.extensionRules.source.forEach(rule => {
+                    if (rule.condition(safeSource, fromPath || '')) safeSource = rule.apply(safeSource);
                 });
 
                 let ast;
                 try {
-                    ast = parse(safeSource);
+                    ast = window.App.BabelHelper.parse(safeSource);
                 } catch (err) {
                     throw new Error(`[${fromPath}] AST解析エラー:\n${err.message}`);
                 }
 
                 if (!options.skipCjs) {
                     try {
-                        const baseConfig = {
-                            plugins: [['transform-modules-commonjs', { loose: true, strict: false }]]
-                        };
-                        const configRule = Config.extensionRules.babelConfig.find(r => r.condition(safeSource, fromPath || '', options.store));
+                        const baseConfig = { plugins: [['transform-modules-commonjs', { loose: true, strict: false }]] };
+                        const configRule = window.App.Config.extensionRules.babelConfig.find(r => r.condition(safeSource, fromPath || '', options.store));
                         if (configRule) configRule.apply(baseConfig);
-
                         const { code } = Babel.transform(safeSource, {
                             ...baseConfig,
                             filename: fromPath.endsWith('.ts') || fromPath.endsWith('.tsx') ? fromPath : fromPath + '.tsx',
                             parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'objectRestSpread', 'exportDefaultFrom', 'dynamicImport'] },
                             ast: true, code: false
                         });
-                        ast = parse(code);
+                        ast = window.App.BabelHelper.parse(code);
                     } catch (e) {
-                        //エラーを握り潰さず、確実にビルドを停止させる
                         throw new Error(`一次共通規格変換(CJS変換)に失敗しました: ${e.message}`);
                     }
                 }
 
-                const dcePass = new DeadCodeEliminationPass();
-                const foldPass = new ConstantFoldingPass();
-                const structPass = new SafeStructureOptimizationPass();
-                const stringPass = new StringCompressorPass();
-                const aliasingPass = new GlobalAliasingPass();
-                const extremeGolfPass = new ExtremeGolfPass();
-
                 const loopState = { changed: false, globalAliases: [] };
-
+                const standardVisitors = window.App.Passes.getStandardVisitors(t, loopState, options);
                 const mergedVisitor = this.mergeVisitors([
                     pathRewriterPlugin,
                     assetInlinePlugin,
-                    dcePass.getVisitor(t, loopState, options),
-                    foldPass.getVisitor(t, loopState, options),
-                    structPass.getVisitor(t, loopState, options),
-                    extremeGolfPass.getVisitor(t, loopState, options),
-                    stringPass.getVisitor(t, loopState, { ...options, crossAssetEnabled: options.crossAssetEnabled }),
-                    aliasingPass.getVisitor(t, loopState, { globalAliasingEnabled: options.globalAliasingEnabled })
+                    ...standardVisitors
                 ]);
 
-                if (options.golfEnabled) {
-                    let isAstChanged = true;
-                    let iteration = 0;
-                    const MAX_ITERATIONS = 60;
+                if (options.golfEnabled && options.enableMangle) {
+                    // ASTが激しく変形した後のため、バインディング情報を一度リセットして再スキャン
+                    traverse(ast, { Program(path) { path.scope.crawl(); } });
 
-                    while (isAstChanged && iteration < MAX_ITERATIONS) {
-                        loopState.changed = false;
-                        traverse(ast, mergedVisitor);
-                        if (loopState.changed) {
-                            isAstChanged = true;
-                            traverse(ast, { Program(path) { path.scope.crawl(); } });
-                        } else {
-                            isAstChanged = false;
-                        }
-                        iteration++;
-                    }
-                    logger.info(`[ASTコンパイラ] 最適化ループが ${iteration} 回で完全に収束しました。`);
-                } else {
-                    traverse(ast, this.mergeVisitors([pathRewriterPlugin, assetInlinePlugin]));
+                    const mangler = new window.App.Passes.ManglerPass(options.extraReserved);
+                    traverse(ast, mangler.getVisitor(t));
                 }
 
                 try {
@@ -1654,7 +1812,6 @@
                         configFile: false,
                         babelrc: false
                     });
-
                     if (options.golfEnabled && options.enableExtreme) {
                         code = code.replace(/\breturn\s+([\{\["'`!~])/g, 'return$1');
                         code = code.replace(/\bthrow\s+([\{\["'`!~])/g, 'throw$1');
@@ -1662,63 +1819,106 @@
                     }
                     return code;
                 } catch (err) {
-                    throw new Error(`最終ジェネレータ生成エラー:\n${err.message}`);
+                    console.error(`[Transformer エラー詳細] 対象ファイル: ${fromPath}`);
+                    console.error(err);
+                    throw new Error(`最終ジェネレータ生成エラー (${fromPath}):\n${err.message}`);
                 }
             }
         }
 
         class Linker {
             executeSmartJSBundle(entryPoint, store, addStrict, keepComments, options, logger, scanner, transformer, utils) {
-                if (!entryPoint || !store.hasFile(entryPoint)) throw new Error("起点となるJSが見つかりません。");
+                // [Phase 1] 依存ソートフェーズ (トポロジカルに解決順を確定)
+                const orderedModules = this._resolveModuleOrder(entryPoint, store, scanner, utils);
+                logger.info(`[Scope Hoisting] モジュール境界を全平坦化します。対象モジュール数: ${orderedModules.length}`);
 
+                const babelCtx = window.App.BabelHelper.getContext();
+                const t = babelCtx.types;
+                const traverse = babelCtx.traverse;
+
+                // [Phase 2] 名前空間仮想化・リネームフェーズ (複数モジュールのローカル競合排除)
+                const { flatBodyNodeList, globalBindingRewriteMap, importResolutions, wildcardExports } =
+                    this._virtualizeNamespaces(orderedModules, store, t, traverse, keepComments, scanner);
+
+                // [Phase 3] リンク解決フェーズ (ImportとExport間の平坦化マッピング解決)
+                const finalRenameMap = this._linkImportExports(importResolutions, globalBindingRewriteMap, wildcardExports);
+
+                // [Phase 4] AST平坦化＆最終コード生成フェーズ
+                const flatSourceCode = this._generateFlatBundle(flatBodyNodeList, finalRenameMap, t, traverse, keepComments);
+
+                const transpileOptions = {
+                    golfEnabled: options.golfEnabled,
+                    enableMangle: options.enableMangle,
+                    enableConsoleStrip: options.enableConsoleStrip,
+                    enableExtreme: options.enableExtreme,
+                    golfStringHack: options.golfStringHack,
+                    crossAssetEnabled: options.crossAssetEnabled,
+                    globalAliasingEnabled: options.globalAliasingEnabled,
+                    keepComments,
+                    skipCjs: true,
+                    extraReserved: options.extraReserved,
+                    store: store,
+                    scanner: scanner
+                };
+                return transformer.transformESMtoCJS(flatSourceCode, "flat_bundle.js", {}, transpileOptions, logger);
+            }
+
+            // --- 細分化されたプライベート構造化メソッド群 ---
+
+            _resolveModuleOrder(entryPoint, store, scanner, utils) {
+                if (!entryPoint || !store.hasFile(entryPoint)) throw new Error(`起点となるJSが見つかりません: ${entryPoint}`);
                 const visited = new Set();
+                const visiting = new Set(); // 循環参照検知用のスタック
                 const orderedModules = [];
 
                 const sortModules = (currentPath) => {
+                    // 探索中スタックに既に存在する場合は循環参照
+                    if (visiting.has(currentPath)) {
+                        console.warn(`[循環参照を検知] 実行順序が予期せぬ結果になる可能性があります: ${currentPath}`);
+                        return;
+                    }
                     if (visited.has(currentPath)) return;
-                    visited.add(currentPath);
 
+                    visiting.add(currentPath); // 探索中としてマーク
                     store.addUsedFile(currentPath);
                     const file = store.getFile(currentPath);
-                    if (!file) return;
+
+                    if (!file) {
+                        console.warn(`[依存解決エラー] 参照されたファイルが存在しません: ${currentPath}`);
+                        visiting.delete(currentPath);
+                        return;
+                    }
 
                     if (!utils.isJSFile(currentPath)) {
                         orderedModules.push({ path: currentPath, code: "/* non-js */", isJS: false });
+                        visiting.delete(currentPath);
+                        visited.add(currentPath);
                         return;
                     }
 
                     const rawSource = file.content;
                     const extracted = scanner.extractDependencies(rawSource, currentPath, store);
-                    const dependencies = extracted.modules;
 
-                    dependencies.forEach(dep => {
+                    extracted.modules.forEach(dep => {
                         const resolvedPath = scanner.resolveRelativePath(currentPath, dep, store);
                         if (resolvedPath && store.hasFile(resolvedPath)) {
                             sortModules(resolvedPath);
+                        } else {
+                            console.warn(`[依存モジュール未発見] ${currentPath} から参照されている '${dep}' が見つかりません。外部モジュールとして扱います。`);
                         }
                     });
+
+                    visiting.delete(currentPath); // 探索中マークを解除
+                    visited.add(currentPath);
                     orderedModules.push({ path: currentPath, isJS: true });
                 };
 
                 sortModules(entryPoint);
-                logger.info(`[Scope Hoisting] モジュール境界を全平坦化します。対象モジュール数: ${orderedModules.length}`);
+                return orderedModules;
+            }
 
-                let babelCtx = null;
-                Babel.transform("()=>{}", {
-                    plugins: [function (api) { babelCtx = api; return { visitor: {} }; }]
-                });
-                if (!babelCtx) throw new Error("Babelコンテキストのキャプチャに失敗しました。");
-
-                const t = babelCtx.types;
-                const traverse = babelCtx.traverse;
-
-                const parse = (code) => {
-                    const res = Babel.transform(code, { ast: true, code: false, parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] } });
-                    if (!res || !res.ast) throw new Error("Babel.transform が AST を返しませんでした。");
-                    return res.ast;
-                };
-
-                let flatBodyNodeList = [];
+            _virtualizeNamespaces(orderedModules, store, t, traverse, keepComments, scanner) {
+                const flatBodyNodeList = [];
                 const globalBindingRewriteMap = {};
                 const importResolutions = {};
                 const wildcardExports = {};
@@ -1728,20 +1928,18 @@
                     const file = store.getFile(mod.path);
                     const modHash = `_m${idx}`;
 
-                    logger.info(`モジュールスコープ統合: ${mod.path} ➔ [${modHash}]`);
-
                     let ast;
                     try {
-                        ast = parse(file.content);
+                        ast = window.App.BabelHelper.parse(file.content);
                     } catch (e) {
                         throw new Error(`[${mod.path}] リンク時構文エラー: ${e.message}`);
                     }
 
+                    // 1. ローカル変数群のリネームバインド
                     traverse(ast, {
                         Program(path) {
                             path.scope.crawl();
-                            const bindings = Object.keys(path.scope.bindings);
-                            bindings.forEach(key => {
+                            Object.keys(path.scope.bindings).forEach(key => {
                                 const newName = `${modHash}_${key}`;
                                 globalBindingRewriteMap[`${mod.path}:${key}`] = newName;
                                 path.scope.rename(key, newName);
@@ -1749,21 +1947,14 @@
                         }
                     });
 
+                    // 2. Import/Export構文の平坦化展開
                     traverse(ast, {
                         ImportDeclaration(path) {
                             const srcPath = path.node.source.value;
                             const resolvedSrcPath = scanner.resolveRelativePath(mod.path, srcPath, store);
-
                             path.node.specifiers.forEach(spec => {
                                 const localName = spec.local.name;
-                                let importedName;
-                                if (spec.type === 'ImportSpecifier') {
-                                    importedName = spec.imported.name || spec.imported.value;
-                                } else if (spec.type === 'ImportDefaultSpecifier') {
-                                    importedName = 'default';
-                                } else {
-                                    importedName = '*';
-                                }
+                                let importedName = spec.type === 'ImportSpecifier' ? (spec.imported.name || spec.imported.value) : (spec.type === 'ImportDefaultSpecifier' ? 'default' : '*');
                                 importResolutions[localName] = { resolvedSrcPath, importedName };
                             });
                             path.remove();
@@ -1793,7 +1984,6 @@
                             }
                         },
                         ExportAllDeclaration(path) {
-                            // ワイルドカードの参照先を記録してから削除する
                             const resolvedSrcPath = scanner.resolveRelativePath(mod.path, path.node.source.value, store);
                             if (!wildcardExports[mod.path]) wildcardExports[mod.path] = [];
                             wildcardExports[mod.path].push(resolvedSrcPath);
@@ -1803,7 +1993,6 @@
                             const dec = path.node.declaration;
                             const defaultVarName = `${modHash}_default`;
                             globalBindingRewriteMap[`${mod.path}:default`] = defaultVarName;
-
                             if (t.isFunctionDeclaration(dec) || t.isClassDeclaration(dec)) {
                                 if (dec.id) {
                                     globalBindingRewriteMap[`${mod.path}:default`] = dec.id.name;
@@ -1816,9 +2005,7 @@
                                     }
                                 }
                             } else {
-                                path.replaceWith(t.variableDeclaration('const', [
-                                    t.variableDeclarator(t.identifier(defaultVarName), dec)
-                                ]));
+                                path.replaceWith(t.variableDeclaration('const', [t.variableDeclarator(t.identifier(defaultVarName), dec)]));
                             }
                         }
                     });
@@ -1831,17 +2018,15 @@
                     flatBodyNodeList.push(...ast.program.body);
                 });
 
-                // 複数階層の再エクスポートや export * を安全に再帰探索する関数
+                return { flatBodyNodeList, globalBindingRewriteMap, importResolutions, wildcardExports };
+            }
+
+            _linkImportExports(importResolutions, globalBindingRewriteMap, wildcardExports) {
                 const resolveExport = (basePath, exportName, visited = new Set()) => {
-                    if (visited.has(basePath)) return null; // 循環参照の無限ループ防止
+                    if (visited.has(basePath)) return null;
                     visited.add(basePath);
-
                     const directKey = `${basePath}:${exportName}`;
-                    if (globalBindingRewriteMap[directKey]) {
-                        return globalBindingRewriteMap[directKey]; // 明示的なエクスポートの発見
-                    }
-
-                    // 明示的なエクスポートがない場合は、export * で取り込まれたファイルを探索
+                    if (globalBindingRewriteMap[directKey]) return globalBindingRewriteMap[directKey];
                     if (wildcardExports[basePath]) {
                         for (const wildPath of wildcardExports[basePath]) {
                             const match = resolveExport(wildPath, exportName, visited);
@@ -1853,26 +2038,17 @@
 
                 const finalRenameMap = {};
                 for (const [renamedLocal, targetInfo] of Object.entries(importResolutions)) {
-                    let maxDepth = 60; // 複雑なプロジェクト向けに余裕を持たせる
+                    let maxDepth = 60;
                     let currTarget = targetInfo;
                     let resolvedName = null;
-
                     while (maxDepth-- > 0) {
-                        // 拡張した解決エンジンを通してターゲット変数を探す
                         const targetVarName = resolveExport(currTarget.resolvedSrcPath, currTarget.importedName, new Set());
-
                         if (!targetVarName) break;
-
-                        // "元ファイル:エクスポート名" のポインタだった場合はさらに辿る
                         if (targetVarName.includes(':')) {
                             const colonIdx = targetVarName.lastIndexOf(':');
-                            currTarget = {
-                                resolvedSrcPath: targetVarName.substring(0, colonIdx),
-                                importedName: targetVarName.substring(colonIdx + 1)
-                            };
+                            currTarget = { resolvedSrcPath: targetVarName.substring(0, colonIdx), importedName: targetVarName.substring(colonIdx + 1) };
                             continue;
                         }
-
                         if (importResolutions[targetVarName]) {
                             currTarget = importResolutions[targetVarName];
                         } else {
@@ -1880,17 +2056,14 @@
                             break;
                         }
                     }
-
-                    if (resolvedName) {
-                        finalRenameMap[renamedLocal] = resolvedName;
-                    }
+                    if (resolvedName) finalRenameMap[renamedLocal] = resolvedName;
                 }
+                return finalRenameMap;
+            }
 
+            _generateFlatBundle(flatBodyNodeList, finalRenameMap, t, traverse, keepComments) {
                 const finalProgramAst = t.program(flatBodyNodeList);
-                // ProgramノードをFileノードでラップし、Babel仕様に準拠した完全なASTルートを構築する
                 const finalFileAst = t.file(finalProgramAst, [], []);
-
-                // 走査はFileノードを起点として実行する
                 traverse(finalFileAst, {
                     Identifier(path) {
                         const name = path.node.name;
@@ -1901,126 +2074,43 @@
                         }
                     }
                 });
-
-                // コード生成にもFileノードを渡す
-                let flatSourceCode = Babel.transformFromAst(finalFileAst, null, {
-                    minified: false,
-                    comments: keepComments,
-                    configFile: false,
-                    babelrc: false
-                }).code;
-
-                const transpileOptions = {
-                    golfEnabled: options.golfEnabled,
-                    enableMangle: options.enableMangle,
-                    enableConsoleStrip: options.enableConsoleStrip,
-                    enableExtreme: options.enableExtreme,
-                    golfStringHack: options.golfStringHack,
-                    crossAssetEnabled: options.crossAssetEnabled,
-                    globalAliasingEnabled: options.globalAliasingEnabled,
-                    keepComments,
-                    skipCjs: true,
-                    extraReserved: options.extraReserved,
-                    store: store,
-                    scanner: scanner
-                };
-
-                return transformer.transformESMtoCJS(flatSourceCode, "flat_bundle.js", {}, transpileOptions, logger);
+                return Babel.transformFromAst(finalFileAst, null, { minified: false, comments: keepComments, configFile: false, babelrc: false }).code;
             }
 
             executeSimpleJSBundle(fileOrder, store, addStrict, keepComments, options, logger, transformer) {
                 const iifeWrapped = options.iifeWrapped;
                 let output = "";
-
                 if (addStrict) output += `"use strict";\n`;
-
                 fileOrder.forEach(path => {
-                    const file = store.getFile(path);
-                    if (!file) return;
+                    const file = store.getFile(path); if (!file) return;
                     store.addUsedFile(path);
-
                     if (keepComments) {
-                        output += `/* ========================================== */\n`;
-                        output += `/* FILE: ${path} */\n`;
-                        output += `/* ========================================== */\n`;
+                        output += `/* ========================================== */\n/* FILE: ${path} */\n/* ========================================== */\n`;
                     }
-
                     if (iifeWrapped) output += `(function() {\n/* --- START OF SCOPE --- */\n`;
                     output += file.content + `\n`;
                     if (iifeWrapped) output += `})(); /* --- END OF SCOPE --- */\n\n`;
                     else output += `\n`;
                 });
-
                 const golfEnabled = options.golfEnabled;
                 if (golfEnabled) {
                     try {
                         const enableMangle = options.enableMangle;
-
-                        let babelCtx = null;
-                        Babel.transform("()=>{}", {
-                            plugins: [function (api) { babelCtx = api; return { visitor: {} }; }]
-                        });
-                        if (!babelCtx) throw new Error("Babelコンテキストのキャプチャに失敗しました。");
-
+                        const babelCtx = window.App.BabelHelper.getContext();
                         const t = babelCtx.types;
                         const traverse = babelCtx.traverse;
-
-                        const parse = (code) => {
-                            const res = Babel.transform(code, { ast: true, code: false, parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] } });
-                            if (!res || !res.ast) throw new Error("Babel.transform が AST を返しませんでした。");
-                            return res.ast;
-                        };
-
-                        let ast = parse(output);
-
-                        const dcePass = new DeadCodeEliminationPass();
-                        const foldPass = new ConstantFoldingPass();
-                        const structPass = new SafeStructureOptimizationPass();
-                        const stringPass = new StringCompressorPass();
-                        const aliasingPass = new GlobalAliasingPass();
-                        const extremeGolfPass = new ExtremeGolfPass();
+                        const ast = window.App.BabelHelper.parse(output);
 
                         const loopState = { changed: false, globalAliases: [] };
-
-                        const mergedVisitor = transformer.mergeVisitors([
-                            dcePass.getVisitor(t, loopState, options),
-                            foldPass.getVisitor(t, loopState, options),
-                            structPass.getVisitor(t, loopState, options),
-                            stringPass.getVisitor(t, loopState, options),
-                            aliasingPass.getVisitor(t, loopState, { globalAliasingEnabled: options.globalAliasingEnabled }),
-                            extremeGolfPass.getVisitor(t, loopState, options)
-                        ]);
-
-                        let isAstChanged = true;
-                        let iteration = 0;
-                        const MAX_ITERATIONS = 60;
-
-                        while (isAstChanged && iteration < MAX_ITERATIONS) {
-                            loopState.changed = false;
-                            traverse(ast, mergedVisitor);
-                            if (loopState.changed) {
-                                isAstChanged = true;
-                                traverse(ast, { Program(path) { path.scope.crawl(); } });
-                            } else {
-                                isAstChanged = false;
-                            }
-                            iteration++;
-                        }
+                        const visitors = transformer.mergeVisitors(window.App.Passes.getStandardVisitors(t, loopState, options));
+                        window.App.BabelHelper.runOptimizationLoop(ast, visitors, options, traverse, loopState);
 
                         if (enableMangle) {
-                            const mangler = new ManglerPass();
+                            const mangler = new window.App.Passes.ManglerPass();
                             traverse(ast, mangler.getVisitor(t));
                         }
-
-                        const { code } = Babel.transformFromAst(ast, null, {
-                            minified: true,
-                            comments: false,
-                            compact: true,
-                            configFile: false,
-                            babelrc: false
-                        });
+                        const { code } = Babel.transformFromAst(ast, null, { minified: true, comments: false, compact: true, configFile: false, babelrc: false });
                         output = code;
-
                     } catch (err) {
                         throw new Error(`コードゴルフ処理中にエラーが発生しました: ${err.message}`);
                     }
@@ -2050,15 +2140,10 @@
                     .replace(/:0 0 0(;|}|\s)/g, ':0$1')
                     .replace(/:0 0(;|}|\s)/g, ':0$1')
                     .trim();
-
-                // 3. クロスアセット同期辞書の適用
-                if (Config.crossAssetDictionary) {
-                    const dict = Config.crossAssetDictionary;
+                if (window.App.Config.crossAssetDictionary) {
+                    const dict = window.App.Config.crossAssetDictionary;
                     min = min.replace(/([.#])([a-zA-Z0-9_-]+)/g, (match, prefix, name) => {
-                        if (dict[name]) {
-                            return prefix + dict[name];
-                        }
-                        return match;
+                        return dict[name] ? (prefix + dict[name]) : match;
                     });
                 }
                 return min;
@@ -2068,87 +2153,76 @@
                 const golfEnabled = options.golfEnabled;
                 const protectedBlocks = [];
                 const dynamicReserved = scanner.extractReservedFunctionsFromHtml(html);
-
                 if (golfEnabled && window.Babel) {
                     const scriptRegex = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
                     let match;
                     while ((match = scriptRegex.exec(html)) !== null) {
-                        const attrs = match[1];
-                        const content = match[2];
+                        const attrs = match[1]; const content = match[2];
                         const isJS = !attrs.includes('type=') || /type=["']?(text\/javascript|module|application\/javascript|text\/worklet)["']?/i.test(attrs);
-                        if (isJS && content.trim().length > 0) {
+                        if (isJS && content.trim().length > 0 && !attrs.includes('data-compiled')) {
                             try {
                                 Babel.transform(content, {
                                     plugins: [() => ({
-                                        visitor: {
-                                            Identifier(path) {
-                                                if (!path.scope.hasBinding(path.node.name, true)) {
-                                                    dynamicReserved.push(path.node.name);
-                                                }
-                                            }
-                                        }
+                                        visitor: { Identifier(path) { if (!path.scope.hasBinding(path.node.name, true)) { dynamicReserved.push(path.node.name); } } }
                                     })],
                                     parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] },
                                     ast: false, code: false
                                 });
-                            } catch (e) { }
+                            } catch (e) {
+                                window.App.log(`[HTML解析警告] <script> 内のJS構文解析に失敗しました。一部の関数名が圧縮から保護されない可能性があります。\n原因: ${e.message}`, 'warn');
+                            }
                         }
                     }
                 }
-
                 const uniqueReserved = Array.from(new Set(dynamicReserved));
-
                 let safeHtml = html.replace(/<(script|style)([^>]*)>([\s\S]*?)<\/\1>/gi, (match, tag, attrs, content) => {
                     let compressedContent = content;
-
                     if (golfEnabled) {
                         if (tag.toLowerCase() === 'style') {
                             compressedContent = this.minifyCss(content);
                         } else if (tag.toLowerCase() === 'script') {
                             const isJS = !attrs.includes('type=') || /type=["']?(text\/javascript|module|application\/javascript|text\/worklet)["']?/i.test(attrs);
                             if (isJS && content.trim().length > 0) {
-                                try {
-                                    const transpileOptions = {
-                                        golfEnabled,
-                                        enableMangle: options.enableMangle,
-                                        enableConsoleStrip: options.enableConsoleStrip,
-                                        enableExtreme: options.enableExtreme,
-                                        golfStringHack: options.golfStringHack,
-                                        crossAssetEnabled: options.crossAssetEnabled,
-                                        globalAliasingEnabled: options.globalAliasingEnabled,
-                                        keepComments: false,
-                                        skipCjs: true,
-                                        extraReserved: uniqueReserved,
-                                        store: options.store,
-                                        scanner: scanner
-                                    };
-                                    compressedContent = transformer.transformESMtoCJS(content, "inline_script", {}, transpileOptions, logger);
-                                } catch (e) {
-                                    throw new Error(`[HTML圧縮] <script> 内のJS圧縮に失敗しました: ${e.message}`);
+                                if (attrs.includes('data-compiled')) {
+                                    compressedContent = content;
+                                } else {
+                                    try {
+                                        const transpileOptions = {
+                                            golfEnabled,
+                                            enableMangle: options.enableMangle,
+                                            enableConsoleStrip: options.enableConsoleStrip,
+                                            enableExtreme: options.enableExtreme,
+                                            golfStringHack: options.golfStringHack,
+                                            crossAssetEnabled: options.crossAssetEnabled,
+                                            globalAliasingEnabled: options.globalAliasingEnabled,
+                                            keepComments: false,
+                                            skipCjs: true,
+                                            extraReserved: uniqueReserved,
+                                            store: options.store,
+                                            scanner: scanner
+                                        };
+                                        compressedContent = transformer.transformESMtoCJS(content, "inline_script", {}, transpileOptions, logger);
+                                    } catch (e) {
+                                        throw new Error(`[HTML圧縮] <script> 内のJS圧縮に失敗しました: ${e.message}`);
+                                    }
                                 }
                             }
                         }
                     }
-
                     protectedBlocks.push(`<${tag}${attrs}>${compressedContent}</${tag}>`);
                     return `__PROTECTED_BLOCK_${protectedBlocks.length - 1}__`;
                 });
-
                 if (golfEnabled && options.minifyAssets) {
-                    //クォーテーションを剥がす「前」に、確実にidとclassの辞書置換を実行
-                    if (Config.crossAssetDictionary) {
-                        const dict = Config.crossAssetDictionary;
+                    if (window.App.Config.crossAssetDictionary) {
+                        const dict = window.App.Config.crossAssetDictionary;
                         safeHtml = safeHtml.replace(/\bid=(["'])(.*?)\1/gi, (match, quote, val) => {
-                            if (dict[val]) return `id=${quote}${dict[val]}${quote}`;
-                            return match;
+                            return dict[val] ? `id=${quote}${dict[val]}${quote}` : match;
                         });
                         safeHtml = safeHtml.replace(/\bclass=(["'])(.*?)\1/gi, (match, quote, val) => {
                             const classes = val.split(/\s+/).map(c => dict[c] || c).join(' ');
                             return `class=${quote}${classes}${quote}`;
                         });
                     }
-
-                    // 辞書置換が終わった安全なHTMLに対して、極限圧縮（クォート剥がし等）を適用する
                     safeHtml = safeHtml
                         .replace(/<!--[\s\S]*?-->/g, '')
                         .replace(/<!DOCTYPE html>/i, '<!doctype html>')
@@ -2158,158 +2232,123 @@
                                 .replace(/<\/(html|body|head|p|li|td|tr|th|tbody|thead|tfoot|option|dt|dd)>/gi, '')
                                 .replace(/\b(checked|disabled|readonly|required|multiple|selected|autofocus|autoplay)=["']?(?:true|1|\1)["']?/gi, '$1');
                 }
-
                 protectedBlocks.forEach((block, index) => {
                     safeHtml = safeHtml.replace(`__PROTECTED_BLOCK_${index}__`, () => block);
                 });
-
+                safeHtml = safeHtml.replace(/\s+data-compiled=["']true["']/gi, '');
                 return safeHtml.trim();
             }
         }
 
         class CompilerEngine {
-            constructor(store, utils, logger, scanner, transformer, linker, minifier) {
-                this.store = store;
-                this.utils = utils;
+            constructor(logger) {
+                // ロガーだけはUIから注入し、他はApp名前空間から取得する
                 this.logger = logger;
-                this.Scanner = scanner;
-                this.Transformer = transformer;
-                this.Linker = linker;
-                this.Minifier = minifier;
+                this.store = window.App.Store;
+                this.utils = window.App.Utils;
+                this.config = window.App.Config;
+                this.Scanner = window.App.Compiler.Scanner;
+                this.Transformer = window.App.Compiler.Transformer;
+                this.Linker = window.App.Compiler.Linker;
+                this.Minifier = window.App.Compiler.Minifier;
             }
 
-            // Step 3: クロスアセット辞書構築ロジックの実行
             buildCrossAssetDictionary(options) {
                 if (!options.crossAssetEnabled) {
-                    Config.crossAssetDictionary = null;
-                    return;
+                    this.config.crossAssetDictionary = null; return;
                 }
-
                 this.logger.info("[クロスアセット辞書] HTML/CSSファイルを静的走査して id / class 辞書を構築します...");
                 const paths = this.store.getFilePaths();
-
-                const bypassRule = Config.extensionRules.manglingBypass.find(rule => rule.condition(paths, this.store));
+                const bypassRule = this.config.extensionRules.manglingBypass.find(rule => rule.condition(paths, this.store));
                 if (bypassRule) {
                     this.logger.success(bypassRule.message);
-                    Config.crossAssetDictionary = null;
-                    return;
+                    this.config.crossAssetDictionary = null; return;
                 }
-
                 const counts = new Map();
-
-                // HTMLファイルからのスキャン
                 paths.forEach(p => {
                     const ext = p.split('.').pop().toLowerCase();
                     if (['html', 'htm'].includes(ext)) {
                         const content = this.store.getFile(p).content || "";
-                        // class="..." 属性
                         const classRegex = /class=["']([^"']+)["']/gi;
                         let match;
                         while ((match = classRegex.exec(content)) !== null) {
-                            match[1].split(/\s+/).forEach(c => {
-                                if (c.trim().length >= 3) {
-                                    counts.set(c, (counts.get(c) || 0) + 1);
-                                }
-                            });
+                            match[1].split(/\s+/).forEach(c => { if (c.trim().length >= 3) counts.set(c, (counts.get(c) || 0) + 1); });
                         }
-                        // id="..." 属性
                         const idRegex = /id=["']([^"']+)["']/gi;
                         while ((match = idRegex.exec(content)) !== null) {
-                            const id = match[1].trim();
-                            if (id.length >= 3) {
-                                counts.set(id, (counts.get(id) || 0) + 1);
-                            }
+                            const id = match[1].trim(); if (id.length >= 3) counts.set(id, (counts.get(id) || 0) + 1);
                         }
                     } else if (ext === 'css') {
-                        // CSSクラス/IDセレクタのスキャン
                         const content = this.store.getFile(p).content || "";
                         const selectorRegex = /([.#])([a-zA-Z0-9_-]+)/g;
                         let match;
                         while ((match = selectorRegex.exec(content)) !== null) {
-                            const name = match[2];
-                            if (name.length >= 3) {
-                                counts.set(name, (counts.get(name) || 0) + 1);
-                            }
+                            const name = match[2]; if (name.length >= 3) counts.set(name, (counts.get(name) || 0) + 1);
                         }
                     }
                 });
-
                 if (counts.size === 0) {
                     this.logger.info("[クロスアセット辞書] クラスやIDは検出されませんでした。");
-                    Config.crossAssetDictionary = null;
-                    return;
+                    this.config.crossAssetDictionary = null; return;
                 }
-
-                // 頻出頻度順にソートし、一文字変数/クラス名の辞書を作成
                 const sortedNames = Array.from(counts.keys()).sort((a, b) => counts.get(b) - counts.get(a));
                 const dictionary = {};
-                let mangleIdx = 0;
-                const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
+                let mangleIdx = 0; const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
                 sortedNames.forEach(oldName => {
                     if (mangleIdx < alphabet.length) {
                         dictionary[oldName] = alphabet[mangleIdx++];
                     } else {
-                        // アルファベットを使い切った場合は複合一文字
                         dictionary[oldName] = alphabet[mangleIdx % alphabet.length] + Math.floor(mangleIdx / alphabet.length);
                         mangleIdx++;
                     }
                 });
-
-                Config.crossAssetDictionary = dictionary;
+                this.config.crossAssetDictionary = dictionary;
                 this.logger.success(`[クロスアセット辞書] 同期圧縮辞書を生成完了！登録キー数: ${Object.keys(dictionary).length} 件`);
             }
 
-            // Step 4: RegPack風自己解凍パッカー (LZ置換 eval)
             packOutput(code, isHtml) {
-                if (isHtml) return code; // パッカーはJS専用
-
+                if (isHtml) return code;
                 const asciiList = '`~!@#$%^&*()_+{}|:"<>?-=[]\\;\',./';
                 const unusedChars = [];
-                for (const char of asciiList) {
-                    if (!code.includes(char)) unusedChars.push(char);
-                }
-
+                for (const char of asciiList) { if (!code.includes(char)) unusedChars.push(char); }
                 if (unusedChars.length === 0) return code;
-
-                let packed = code;
-                const dict = [];
-
-                // 2文字〜15文字の部分文字列をスキャン
+                let packed = code; const dict = [];
                 while (unusedChars.length > 0) {
-                    const char = unusedChars.shift();
-                    const subCounts = new Map();
-
+                    const char = unusedChars.shift(); const subCounts = new Map();
                     for (let len = 3; len <= 12; len++) {
                         for (let i = 0; i <= packed.length - len; i++) {
                             const sub = packed.substring(i, i + len);
-                            if (/^[a-zA-Z0-9_\s.()]+$/.test(sub)) {
-                                subCounts.set(sub, (subCounts.get(sub) || 0) + 1);
-                            }
+                            if (/^[a-zA-Z0-9_\s.()]+$/.test(sub)) subCounts.set(sub, (subCounts.get(sub) || 0) + 1);
                         }
                     }
-
-                    let bestSub = "";
-                    let bestSavings = 0;
+                    let bestSub = ""; let bestSavings = 0;
                     for (const [sub, count] of subCounts.entries()) {
                         if (count < 2) continue;
                         const savings = (sub.length - 1) * count - (sub.length + 3);
-                        if (savings > bestSavings) {
-                            bestSavings = savings;
-                            bestSub = sub;
-                        }
+                        if (savings > bestSavings) { bestSavings = savings; bestSub = sub; }
                     }
-
                     if (bestSavings <= 0) break;
-
                     packed = packed.split(bestSub).join(char);
                     dict.push([char, bestSub]);
                 }
-
                 if (dict.length === 0) return code;
-
                 const dictStr = dict.map(([char, sub]) => char + sub).join('\x01');
-                const decoder = `_=${JSON.stringify(packed)};for(i of ${JSON.stringify(dictStr)}.split('\\x01'))with(_.split(i[0]))_=join(i.slice(1));eval(_)`;
+
+                // eval ではなく、間接呼出(グローバルスコープ)による評価に変更し、制約を回避
+                const decoder = `_=${JSON.stringify(packed)};for(i of ${JSON.stringify(dictStr)}.split('\\x01'))with(_.split(i[0]))_=join(i.slice(1));(1,eval)(_)`;
+
+                try {
+                    const testDecoder = `_=${JSON.stringify(packed)};for(i of ${JSON.stringify(dictStr)}.split('\\x01'))_=_.split(i[0]).join(i.slice(1));return _;`;
+                    const testResult = new Function(testDecoder)();
+
+                    if (testResult !== code) {
+                        window.App.log("[自己解凍パッカー] 解凍テストで不一致を検知しました。破損を防ぐためパッカー適用をバイパスします。", "warn");
+                        return code;
+                    }
+                } catch (e) {
+                    window.App.log(`[自己解凍パッカー] 解凍テスト中にエラーが発生しました: ${e.message}。パッカーをバイパスします。`, "warn");
+                    return code;
+                }
 
                 if (decoder.length < code.length) {
                     this.logger.success(`[自己解凍パッカー] 圧縮を適用しました。デコードラッパーを含む ${code.length} ➔ ${decoder.length} バイト (-${((1 - decoder.length / code.length) * 100).toFixed(1)}%)`);
@@ -2322,66 +2361,41 @@
                 this.store.clearUsedFiles();
                 const mode = this.store.currentMode;
                 options.store = this.store;
-
-                // ビルド最序盤でクロスアセット同期辞書を抽出構築
                 this.buildCrossAssetDictionary(options);
-
                 let resultStr = "";
-
-                if (mode === 'html') {
-                    resultStr = this.buildHtml(options);
-                } else if (mode === 'smart') {
-                    resultStr = this.buildSmartJS(options);
-                } else if (mode === 'direct') {
-                    resultStr = this.buildDirect(options);
-                } else {
-                    throw new Error(`未定義のビルドモードです: ${mode}`);
-                }
-
-                // 最終段階でのパッカー統合の試行
+                if (mode === 'html') resultStr = this.buildHtml(options);
+                else if (mode === 'smart') resultStr = this.buildSmartJS(options);
+                else if (mode === 'direct') resultStr = this.buildDirect(options);
+                else throw new Error(`未定義のビルドモードです: ${mode}`);
                 if (options.golfEnabled && options.packerEnabled && mode !== 'html') {
                     resultStr = this.packOutput(resultStr, false);
                 }
-
                 return resultStr;
             }
 
             buildHtml(options) {
                 const entryHtmlPath = options.htmlEntryPath;
-                if (!entryHtmlPath || !this.store.hasFile(entryHtmlPath)) {
-                    throw new Error("起点となるHTMLファイルが見つかりません。");
-                }
-
+                if (!entryHtmlPath || !this.store.hasFile(entryHtmlPath)) throw new Error("起点となるHTMLファイルが見つかりません。");
                 this.logger.info(`起点HTMLの解析を開始します: ${entryHtmlPath}`);
                 this.store.addUsedFile(entryHtmlPath);
-
                 const rawHtml = this.store.getFile(entryHtmlPath).content;
                 const globalHtmlReserved = this.Scanner.extractReservedFunctionsFromHtml(rawHtml);
                 options.extraReserved = globalHtmlReserved;
-
                 if (options.golfEnabled && globalHtmlReserved.length > 0) {
                     this.logger.success(`[データ駆動] DOM内イベントから保護関数を自動抽出しました: ${globalHtmlReserved.join(', ')}`);
                 }
-
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(rawHtml, 'text/html');
-
+                const parser = new DOMParser(); const doc = parser.parseFromString(rawHtml, 'text/html');
                 if (options.htmlOptCss) {
                     this.logger.info("CSSのアセットスキャンを開始...");
-                    const links = doc.querySelectorAll('link[rel="stylesheet"]');
-                    links.forEach(link => {
+                    doc.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
                         const href = link.getAttribute('href');
                         if (!href || href.startsWith('http') || href.startsWith('//')) return;
-
                         const resolvedPath = this.Scanner.resolveRelativePath(entryHtmlPath, href, this.store);
                         if (this.store.hasFile(resolvedPath)) {
                             this.store.addUsedFile(resolvedPath);
                             let cssContent = this.store.getFile(resolvedPath).content;
-                            if (options.htmlOptImg) {
-                                cssContent = this.utils.inlineCssImages(resolvedPath, cssContent, this.store, this.logger, this.Scanner);
-                            }
+                            if (options.htmlOptImg) cssContent = this.utils.inlineCssImages(resolvedPath, cssContent, this.store, this.logger, this.Scanner);
                             if (options.golfEnabled && options.minifyAssets) cssContent = this.Minifier.minifyCss(cssContent);
-
                             const styleEl = doc.createElement('style');
                             styleEl.textContent = `\n/* Inlined: ${resolvedPath} */\n` + cssContent + '\n';
                             link.replaceWith(styleEl);
@@ -2389,29 +2403,20 @@
                         }
                     });
                 }
-
                 if (options.htmlOptJs) {
                     this.logger.info("JSアセットの統合スキャンを開始...");
                     const scripts = doc.querySelectorAll('script');
-                    let virtualEntryCode = "";
-                    let firstScriptNode = null;
-                    let inlineCounter = 0;
-
+                    let virtualEntryCode = ""; let firstScriptNode = null; let inlineCounter = 0;
                     scripts.forEach(script => {
-                        const src = script.getAttribute('src');
-                        const type = script.getAttribute('type');
-
+                        const src = script.getAttribute('src'); const type = script.getAttribute('type');
                         if (src && (src.startsWith('http') || src.startsWith('//') || src.startsWith('data:'))) return;
                         if (type && !/^(text\/(javascript|babel)|module|application\/javascript)?$/i.test(type)) return;
-
                         if (!firstScriptNode) firstScriptNode = script;
-
                         if (src) {
                             const resolvedPath = this.Scanner.resolveRelativePath(entryHtmlPath, src, this.store);
                             if (this.store.hasFile(resolvedPath)) {
                                 this.store.addUsedFile(resolvedPath);
-                                virtualEntryCode += `import "${resolvedPath}";\n`;
-                                script.remove();
+                                virtualEntryCode += `import "${resolvedPath}";\n`; script.remove();
                                 this.logger.success(`JSスクリプトをモジュールツリーに追加: ${src}`);
                             }
                         } else {
@@ -2419,58 +2424,46 @@
                             if (inlineCode && inlineCode.trim().length > 0) {
                                 const virtualInlinePath = `_virtual_inline_${inlineCounter++}.js`;
                                 this.store.addFile(virtualInlinePath, inlineCode, 0, false);
-                                virtualEntryCode += `import "./${virtualInlinePath}";\n`;
-                                script.remove();
+                                virtualEntryCode += `import "./${virtualInlinePath}";\n`; script.remove();
                                 this.logger.success(`インラインJSスクリプトを独立モジュールとして抽出・追加`);
                             }
                         }
                     });
-
                     if (virtualEntryCode.trim()) {
                         const virtualEntry = "_virtual_html_entry.jsx";
                         this.store.addFile(virtualEntry, virtualEntryCode, 0, false);
-
                         let finalJsContent = "";
                         try {
-                            // Linker による Scope Hoisting 平坦化が走ります
                             finalJsContent = this.Linker.executeSmartJSBundle(virtualEntry, this.store, false, !options.golfEnabled, options, this.logger, this.Scanner, this.Transformer, this.utils);
                         } catch (err) {
                             this.logger.warn(`JSのスマート統合に失敗しました: ${err.message}`);
                             finalJsContent = virtualEntryCode;
                         }
-
                         const scriptEl = doc.createElement('script');
                         scriptEl.setAttribute('type', 'module');
+                        scriptEl.setAttribute('data-compiled', 'true');
                         scriptEl.textContent = `\n` + finalJsContent.replace(new RegExp('\\x3c/\\\\s*script\\\\s*\\x3e', 'gi'), '\\x3c\\/script\\x3e') + '\n';
-
                         if (firstScriptNode && firstScriptNode.parentNode) {
                             firstScriptNode.parentNode.insertBefore(scriptEl, firstScriptNode);
-                        } else {
-                            doc.body.appendChild(scriptEl);
-                        }
+                        } else { doc.body.appendChild(scriptEl); }
                         this.logger.success(`すべてのローカルJSを独立モジュールスコープを保ったまま1つの <script type="module"> として結合完了！`);
                     }
                 }
-
                 if (options.htmlOptImg) {
-                    const imgs = doc.querySelectorAll('img[src]');
-                    imgs.forEach(img => {
+                    doc.querySelectorAll('img[src]').forEach(img => {
                         const src = img.getAttribute('src');
                         if (!src || src.startsWith('http') || src.startsWith('data:') || src.startsWith('//')) return;
                         const resolvedPath = this.Scanner.resolveRelativePath(entryHtmlPath, src, this.store);
                         if (this.store.hasFile(resolvedPath)) {
                             this.store.addUsedFile(resolvedPath);
                             const file = this.store.getFile(resolvedPath);
-                            if (file.isBinary) {
-                                img.setAttribute('src', file.content);
-                            } else if (resolvedPath.toLowerCase().endsWith('.svg')) {
+                            if (file.isBinary) img.setAttribute('src', file.content);
+                            else if (resolvedPath.toLowerCase().endsWith('.svg')) {
                                 img.setAttribute('src', `data:image/svg+xml;utf8,${encodeURIComponent(file.content)}`);
                             }
                         }
                     });
-
-                    const icons = doc.querySelectorAll('link[rel*="icon"]');
-                    icons.forEach(icon => {
+                    doc.querySelectorAll('link[rel*="icon"]').forEach(icon => {
                         const href = icon.getAttribute('href');
                         if (!href || href.startsWith('http') || href.startsWith('data:') || href.startsWith('//')) return;
                         const resolvedPath = this.Scanner.resolveRelativePath(entryHtmlPath, href, this.store);
@@ -2480,15 +2473,12 @@
                         }
                     });
                 }
-
                 const fullHtmlContent = doc.documentElement.innerHTML;
-                Config.extensionRules.dom.forEach(rule => {
+                this.config.extensionRules.dom.forEach(rule => {
                     if (rule.condition(fullHtmlContent, this.store)) {
-                        const logMsg = rule.apply(doc, this.store);
-                        if (logMsg) this.logger.success(logMsg);
+                        const logMsg = rule.apply(doc, this.store); if (logMsg) this.logger.success(logMsg);
                     }
                 });
-
                 let htmlString = "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
                 if (options.golfEnabled && options.minifyAssets) {
                     htmlString = this.Minifier.minifyHtml(htmlString, options, this.logger, this.Scanner, this.Transformer);
@@ -2499,21 +2489,17 @@
             buildSmartJS(options) {
                 let hasModuleSyntax = false;
                 const jsFiles = this.store.getFilePaths().filter(path => this.utils.isJSFile(path));
-
                 for (const path of jsFiles) {
                     const code = this.store.getFile(path).content;
                     if (/(?:^|\s)(import|export)\s+[\w*{]/.test(code) || /require\s*\(/.test(code) || /module\.exports/.test(code)) {
-                        hasModuleSyntax = true;
-                        break;
+                        hasModuleSyntax = true; break;
                     }
                 }
-
                 if (hasModuleSyntax || jsFiles.length === 1) {
                     this.logger.success("[自動判別] ESモジュール構文を検知しました。Scope Hoisting(AST平坦化)によるスマート結合を実行します。");
                     return this.Linker.executeSmartJSBundle(options.jsEntryPoint, this.store, options.addStrict, options.keepComments, options, this.logger, this.Scanner, this.Transformer, this.utils);
                 } else {
                     this.logger.warn("[自動判別] モジュール構文がありません。レガシー結合を実行します。");
-                    // 末尾に this.Transformer を渡す
                     return this.Linker.executeSimpleJSBundle(this.store.fileOrder, this.store, options.addStrict, options.keepComments, options, this.logger, this.Transformer);
                 }
             }
@@ -2521,24 +2507,17 @@
             buildDirect(options) {
                 const sourceCode = options.directSourceCode;
                 if (!sourceCode.trim()) throw new Error("入力(Input)にコードがありません。");
-
-                let lang = options.directLang;
-                const trimmed = sourceCode.trim();
-
+                let lang = options.directLang; const trimmed = sourceCode.trim();
                 if (/^<(?:!doctype|[a-z]+|!--)/i.test(trimmed)) {
                     if (lang !== 'html') { lang = 'html'; this.logger.success("HTMLを検知。自動で言語を切り替えました。"); }
                 } else if (/^[.#@a-zA-Z0-9_-].*\{/m.test(trimmed) && !trimmed.includes('const ') && !trimmed.includes('let ') && !trimmed.includes('function')) {
                     if (lang === 'js') { lang = 'css'; this.logger.success("CSSを検知。自動で言語を切り替えました。"); }
                 }
-
                 this.store.addUsedFile("direct_input");
                 this.store.addFile("direct_input", sourceCode, new Blob([sourceCode]).size, false);
-
                 if (!options.golfEnabled) {
-                    this.logger.info("ゴルフ化無効。そのまま出力します");
-                    return sourceCode;
+                    this.logger.info("ゴルフ化無効。そのまま出力します"); return sourceCode;
                 }
-
                 if (lang === 'js') {
                     return (options.addStrict ? `"use strict";\n` : "") + this.Transformer.transformESMtoCJS(sourceCode, "direct_input.js", {}, { ...options, skipCjs: true, store: this.store, scanner: this.Scanner }, this.logger);
                 } else if (lang === 'html') {
@@ -2550,93 +2529,27 @@
             }
         }
 
-        // ==========================================================================
-        // 5. UTILS (共通ユーティリティ)
-        // ==========================================================================
-        class UtilsManager {
-            isSupportedFile(filename) {
-                const ext = filename.split('.').pop().toLowerCase();
-                const textExts = ['js', 'mjs', 'jsx', 'ts', 'tsx', 'html', 'htm', 'css', 'json', 'svg'];
-                const binaryExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico'];
-                return textExts.includes(ext) || binaryExts.includes(ext);
-            }
+        window.App.Compiler.Scanner = new Scanner();
+        window.App.Compiler.Transformer = new Transformer();
+        window.App.Compiler.Linker = new Linker();
+        window.App.Compiler.Minifier = new Minifier();
+        window.App.Compiler.EngineClass = CompilerEngine;
+        //#endregion
+    </script>
 
-            isBinaryFile(filename) {
-                const ext = filename.split('.').pop().toLowerCase();
-                const binaryExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico'];
-                return binaryExts.includes(ext);
-            }
-
-            isJSFile(filename) {
-                const ext = filename.split('.').pop().toLowerCase();
-                return ['js', 'mjs', 'jsx', 'ts', 'tsx'].includes(ext);
-            }
-
-            readFileAsDataURL(file) {
-                return new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(reader.result);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(file);
-                });
-            }
-
-            getGolfRank(reductionPercent) {
-                if (reductionPercent >= 85) return { rank: "🏆 SSS", color: "bg-red-600" };
-                if (reductionPercent >= 70) return { rank: "💎 SS", color: "bg-orange-500" };
-                if (reductionPercent >= 50) return { rank: "🔥 S", color: "bg-amber-500" };
-                if (reductionPercent >= 30) return { rank: "⭐ A", color: "bg-emerald-500" };
-                if (reductionPercent >= 15) return { rank: "⚡ B", color: "bg-brand-500" };
-                return { rank: "⛳️ C", color: "bg-slate-500" };
-            }
-
-            inlineCssImages(cssPath, cssContent, store, logger, scanner) {
-                const urlRegex = /url\s*\(\s*['"`]?([^'"`\)]+)['"`]?\s*\)/gi;
-                return cssContent.replace(urlRegex, (match, urlPath) => {
-                    if (urlPath.startsWith('http://') || urlPath.startsWith('https://') || urlPath.startsWith('data:') || urlPath.startsWith('//')) {
-                        return match;
-                    }
-
-                    const resolvedImagePath = scanner.resolveRelativePath(cssPath, urlPath, store);
-                    if (store.hasFile(resolvedImagePath)) {
-                        const file = store.getFile(resolvedImagePath);
-                        store.addUsedFile(resolvedImagePath);
-
-                        if (file.isBinary) {
-                            logger.success(`CSS内画像のBase64変換: ${resolvedImagePath}`);
-                            return `url("${file.content}")`;
-                        } else if (resolvedImagePath.toLowerCase().endsWith('.svg')) {
-                            logger.success(`CSS内SVG画像のData URLインライン変換: ${resolvedImagePath}`);
-                            const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(file.content)}`;
-                            return `url("${dataUrl}")`;
-                        } else {
-                            logger.success(`CSS内アセットを展開: ${resolvedImagePath}`);
-                            return `url("${file.content}")`;
-                        }
-                    } else {
-                        logger.warn(`警告: CSSから参照される画像 [${urlPath}] がフォルダ内に見つかりません。`);
-                        return match;
-                    }
-                });
-            }
-        }
-        const Utils = new UtilsManager();
-
-        // ==========================================================================
-        // 6. UI MANAGER (DOM操作、D&D、イベント委譲、レンダリング、一括リスナー)
-        // ==========================================================================
+    <!-- 7. UI & View Module (Pub/Sub駆動描画 & Template要素レンダリング) -->
+    <script type="module">
+        //#region UIManager Block
         class UIManager {
             constructor(store, compiler, utils) {
-                this.store = store;
-                this.compiler = compiler;
-                this.utils = utils;
+                this.store = store; this.compiler = compiler; this.utils = utils;
                 this.elements = {};
             }
 
             init() {
                 this.cacheElements();
                 this.bindEvents();
-                this.updateView();
+                this.renderAll();
                 lucide.createIcons();
             }
 
@@ -2690,78 +2603,86 @@
                 this.elements.modeDirectBtn = document.getElementById('mode-direct-btn');
             }
 
+            // Pub/Sub（イベント駆動）の導入による疎結合な購読宣言
             bindEvents() {
+                // UIインタラクション（DOMイベント）からStoreのアクションへの一方通行トリガー
                 document.addEventListener('click', (e) => {
-                    const target = e.target.closest('[data-action]');
-                    if (!target) return;
+                    const target = e.target.closest('[data-action]'); if (!target) return;
                     const action = target.getAttribute('data-action');
-
                     if (action === 'triggerFolderInput') this.elements.folderInput.click();
                     else if (action === 'triggerFilesInput') this.elements.filesInput.click();
-                    else if (action === 'resetAll') this.resetAll();
-                    else if (action === 'switchMode') this.switchMode(target.getAttribute('data-value'));
+                    else if (action === 'resetAll') this.store.reset();
+                    else if (action === 'switchMode') this.store.setMode(target.getAttribute('data-value'));
                     else if (action === 'runBundle') this.runBundle();
                     else if (action === 'copyToClipboard') this.copyToClipboard();
                     else if (action === 'downloadOutput') this.downloadOutput();
                     else if (action === 'switchEditorTab') this.switchEditorTab(target.getAttribute('data-tab'));
                     else if (action === 'deleteFile') {
-                        const path = target.getAttribute('data-path');
-                        this.store.deleteFile(path);
-                        this.onFilesUpdated();
-                        this.showToast(`アセットを削除しました: ${path.split('/').pop()}`, "info");
-                    }
-                    else if (action === 'moveOrder') {
+                        const path = target.getAttribute('data-path'); this.store.deleteFile(path);
+                    } else if (action === 'moveOrder') {
                         const idx = parseInt(target.getAttribute('data-idx'));
                         const dir = parseInt(target.getAttribute('data-dir'));
                         this.store.moveOrder(idx, dir);
-                        this.updateSimpleOrderList();
                     }
                 });
 
                 ['dragenter', 'dragover'].forEach(eventName => {
                     this.elements.dropZone.addEventListener(eventName, (e) => {
-                        e.preventDefault();
-                        this.elements.dropZone.classList.add('border-brand-500', 'bg-brand-500/5');
+                        e.preventDefault(); this.elements.dropZone.classList.add('border-brand-500', 'bg-brand-500/5');
                     }, false);
                 });
 
                 ['dragleave', 'drop'].forEach(eventName => {
                     this.elements.dropZone.addEventListener(eventName, (e) => {
-                        e.preventDefault();
-                        this.elements.dropZone.classList.remove('border-brand-500', 'bg-brand-500/5');
+                        e.preventDefault(); this.elements.dropZone.classList.remove('border-brand-500', 'bg-brand-500/5');
                     }, false);
                 });
 
                 this.elements.dropZone.addEventListener('drop', async (e) => {
-                    const items = e.dataTransfer.items;
-                    if (!items) return;
-
+                    const items = e.dataTransfer.items; if (!items) return;
                     this.showLoading(true, "アップロードされたアセットを走査中...");
-
                     try {
                         for (let i = 0; i < items.length; i++) {
                             const entry = items[i].webkitGetAsEntry();
-                            if (entry) {
-                                await this.scanEntry(entry);
-                            }
+                            if (entry) await this.scanEntry(entry);
                         }
-                        this.onFilesUpdated();
                         this.showToast("ファイル群の読込が完了しました！", "success");
                     } catch (err) {
-                        this.showToast("ファイルの読込エラーが発生しました", "error");
-                        console.error(err);
-                    } finally {
-                        this.showLoading(false);
-                    }
+                        this.showToast("ファイルの読込エラーが発生しました", "error"); console.error(err);
+                    } finally { this.showLoading(false); }
                 });
 
                 this.elements.folderInput.addEventListener('change', async (e) => this.handleFileSelection(e.target.files));
                 this.elements.filesInput.addEventListener('change', async (e) => this.handleFileSelection(e.target.files));
-
                 this.elements.optGolf.addEventListener('change', () => this.toggleGolfUI());
-
                 this.elements.inputCode.addEventListener('scroll', () => { this.elements.lineNumbers.scrollTop = this.elements.inputCode.scrollTop; });
                 this.elements.outputCode.addEventListener('scroll', () => { this.elements.lineNumbers.scrollTop = this.elements.outputCode.scrollTop; });
+
+                // ==========================================
+                // Store発信の CustomEvent 受信購読（UI側のリアクション部）
+                // ==========================================
+                let renderTimer = null;
+                window.addEventListener('app:files-updated', (e) => {
+                    // 連続してイベントが来ても、実際のDOM更新は次の描画フレームに1回だけまとめる
+                    if (renderTimer) cancelAnimationFrame(renderTimer);
+                    renderTimer = requestAnimationFrame(() => {
+                        this.onFilesUpdated();
+                    });
+
+                    // トースト通知などは個別に処理してOK
+                    if (e.detail.action === 'delete') {
+                        this.showToast(`アセットを削除しました: ${e.detail.path.split('/').pop()}`, "info");
+                    }
+                });
+                window.addEventListener('app:order-changed', () => {
+                    this.updateSimpleOrderList();
+                });
+                window.addEventListener('app:mode-changed', (e) => {
+                    this.renderModeSwitch(e.detail.mode);
+                });
+                window.addEventListener('app:reset', () => {
+                    this.renderReset();
+                });
             }
 
             async scanEntry(entry, path = "") {
@@ -2804,7 +2725,6 @@
             async handleFileSelection(fileList) {
                 if (fileList.length === 0) return;
                 this.showLoading(true, "ファイルをメモリに格納中...");
-
                 try {
                     for (let i = 0; i < fileList.length; i++) {
                         const file = fileList[i];
@@ -2815,20 +2735,15 @@
                             this.store.addFile(path, content, file.size, binary);
                         }
                     }
-                    this.onFilesUpdated();
                     this.showToast("ファイルを読み込みました！", "success");
                 } catch (err) {
-                    this.showToast("ファイルの読み込み中にエラーが発生しました", "error");
-                    console.error(err);
-                } finally {
-                    this.showLoading(false);
-                }
+                    this.showToast("ファイルの読み込み中にエラーが発生しました", "error"); console.error(err);
+                } finally { this.showLoading(false); }
             }
 
             onFilesUpdated() {
                 const keys = Object.keys(this.store.filesStore);
-                if (keys.length === 0) { this.resetAll(); return; }
-
+                if (keys.length === 0) { this.store.reset(); return; }
                 this.elements.fileListCard.classList.remove('hidden');
                 this.elements.dropZone.classList.add('py-4');
                 this.elements.fileCount.textContent = keys.length;
@@ -2844,89 +2759,67 @@
                         if (['js', 'mjs', 'ts', 'jsx'].includes(ext)) this.elements.directLangSelect.value = 'js';
                         else if (['html', 'htm'].includes(ext)) this.elements.directLangSelect.value = 'html';
                         else if (ext === 'css') this.elements.directLangSelect.value = 'css';
-
                         this.elements.inputCode.value = singleFile.content;
                         this.switchEditorTab('input');
-                        this.switchMode('direct');
+                        this.store.setMode('direct');
                         this.addLog(`単一ファイルを検知。直接圧縮モードの [Input] に展開しました。`, "info");
                     }
                 } else {
-                    const jsKeys = keys.filter(this.utils.isJSFile);
-                    if (jsKeys.length === keys.length) this.switchMode('smart');
-                    else if (this.store.currentMode === 'direct') this.switchMode('html');
+                    const jsKeys = keys.filter(k => this.utils.isJSFile(k));
+                    if (jsKeys.length === keys.length) this.store.setMode('smart');
+                    else if (this.store.currentMode === 'direct') this.store.setMode('html');
                 }
                 this.updatePreviewFilename();
             }
 
+            // HTMLテンプレートを利用した安全なUIレンダリング (innerHTMLハードコード排除)
             updateDetectedFilesList() {
                 this.elements.detectedFiles.innerHTML = '';
+                const template = document.getElementById('template-detected-file');
                 Object.keys(this.store.filesStore).sort().forEach(path => {
                     const file = this.store.getFile(path);
                     const sizeKB = (file.size / 1024).toFixed(1);
                     const isBin = file.isBinary;
-
-                    let iconType = "file-code";
-                    let iconColor = "text-brand-400";
+                    let iconType = "file-code"; let iconColor = "text-brand-400";
                     const ext = path.split('.').pop().toLowerCase();
+                    if (['html', 'htm'].includes(ext)) { iconType = "globe"; iconColor = "text-amber-400"; }
+                    else if (ext === 'css') { iconType = "file-spreadsheet"; iconColor = "text-purple-400"; }
+                    else if (isBin || ext === 'svg') { iconType = "image"; iconColor = "text-emerald-400"; }
 
-                    if (['html', 'htm'].includes(ext)) {
-                        iconType = "globe";
-                        iconColor = "text-amber-400";
-                    } else if (ext === 'css') {
-                        iconType = "file-spreadsheet";
-                        iconColor = "text-purple-400";
-                    } else if (isBin || ext === 'svg') {
-                        iconType = "image";
-                        iconColor = "text-emerald-400";
-                    }
-
-                    const div = document.createElement('div');
-                    div.className = "flex items-center justify-between p-2 hover:bg-slate-800/40 rounded-lg group border border-transparent hover:border-slate-800 transition-all";
-                    div.innerHTML = `
-                        <div class="flex items-center gap-2 truncate">
-                            <i data-lucide="${iconType}" class="w-3.5 h-3.5 ${iconColor} shrink-0"></i>
-                            <span class="truncate text-slate-300" title="${path}">${path}</span>
-                        </div>
-                        <div class="flex items-center gap-3 shrink-0">
-                            <span class="text-[10px] text-slate-500">${sizeKB} KB</span>
-                            <button data-action="deleteFile" data-path="${path}" class="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-0.5">
-                                <i data-lucide="x" class="w-3.5 h-3.5"></i>
-                            </button>
-                        </div>
-                    `;
-                    this.elements.detectedFiles.appendChild(div);
+                    const clone = template.content.cloneNode(true);
+                    const iconNode = clone.querySelector('[data-template-icon]');
+                    iconNode.setAttribute('data-lucide', iconType);
+                    iconNode.className += ` ${iconColor}`;
+                    const pathNode = clone.querySelector('[data-template-path]');
+                    pathNode.textContent = path; pathNode.setAttribute('title', path);
+                    clone.querySelector('[data-template-size]').textContent = `${sizeKB} KB`;
+                    clone.querySelector('[data-action="deleteFile"]').setAttribute('data-path', path);
+                    this.elements.detectedFiles.appendChild(clone);
                 });
                 lucide.createIcons({ root: this.elements.detectedFiles });
             }
 
+            // テンプレート駆動によるリストバインド
             updateSimpleOrderList() {
                 this.elements.simpleFileList.innerHTML = '';
                 const jsFiles = this.store.fileOrder;
-
                 if (jsFiles.length === 0) {
                     this.elements.simpleFileList.innerHTML = '<div class="text-center text-slate-500 p-4">結合可能なJSファイルが見つかりません</div>';
                     return;
                 }
-
+                const template = document.getElementById('template-simple-file');
                 jsFiles.forEach((path, idx) => {
-                    const div = document.createElement('div');
-                    div.className = "flex items-center justify-between p-2 bg-slate-900 border border-slate-800/60 rounded-lg";
-                    div.innerHTML = `
-                        <div class="flex items-center gap-2 truncate">
-                            <span class="text-[10px] text-slate-500 font-mono w-4 text-right">${idx + 1}.</span>
-                            <span class="truncate text-slate-300" title="${path}">${path.split('/').pop()}</span>
-                            <span class="text-[9px] text-slate-600 truncate max-w-[120px]" title="${path}">(${path})</span>
-                        </div>
-                        <div class="flex gap-1">
-                            <button data-action="moveOrder" data-idx="${idx}" data-dir="-1" ${idx === 0 ? 'disabled' : ''} class="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-30">
-                                <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
-                            </button>
-                            <button data-action="moveOrder" data-idx="${idx}" data-dir="1" ${idx === jsFiles.length - 1 ? 'disabled' : ''} class="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 disabled:opacity-30">
-                                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
-                            </button>
-                        </div>
-                    `;
-                    this.elements.simpleFileList.appendChild(div);
+                    const clone = template.content.cloneNode(true);
+                    clone.querySelector('[data-template-idx]').textContent = `${idx + 1}.`;
+                    const nameNode = clone.querySelector('[data-template-name]');
+                    nameNode.textContent = path.split('/').pop(); nameNode.setAttribute('title', path);
+                    const fullNameNode = clone.querySelector('[data-template-fullname]');
+                    fullNameNode.textContent = `(${path})`; fullNameNode.setAttribute('title', path);
+                    const upBtn = clone.querySelector('[data-dir="-1"]');
+                    upBtn.setAttribute('data-idx', idx); if (idx === 0) upBtn.setAttribute('disabled', 'true');
+                    const downBtn = clone.querySelector('[data-dir="1"]');
+                    downBtn.setAttribute('data-idx', idx); if (idx === jsFiles.length - 1) downBtn.setAttribute('disabled', 'true');
+                    this.elements.simpleFileList.appendChild(clone);
                 });
                 lucide.createIcons({ root: this.elements.simpleFileList });
             }
@@ -2934,83 +2827,50 @@
             updateDropdowns() {
                 const keys = Object.keys(this.store.filesStore).sort();
                 const htmlKeys = keys.filter(k => ['html', 'htm'].includes(k.split('.').pop().toLowerCase()));
-                const jsKeys = keys.filter(this.utils.isJSFile);
-
+                const jsKeys = keys.filter(k => this.utils.isJSFile(k));
                 const currentHtmlSelected = this.elements.htmlEntrySelect.value;
                 this.elements.htmlEntrySelect.innerHTML = '';
-
                 if (htmlKeys.length === 0) {
-                    const opt = document.createElement('option');
-                    opt.textContent = "HTMLファイルをアップロードしてください";
+                    const opt = document.createElement('option'); opt.textContent = "HTMLファイルをアップロードしてください";
                     this.elements.htmlEntrySelect.appendChild(opt);
                 } else {
                     let defaultHtml = htmlKeys[0];
-                    for (const k of htmlKeys) {
-                        if (k.toLowerCase().includes('index.html')) {
-                            defaultHtml = k;
-                            break;
-                        }
-                    }
+                    for (const k of htmlKeys) { if (k.toLowerCase().includes('index.html')) { defaultHtml = k; break; } }
                     htmlKeys.forEach(path => {
-                        const opt = document.createElement('option');
-                        opt.value = path;
-                        opt.textContent = path;
-                        if (path === currentHtmlSelected || (!currentHtmlSelected && path === defaultHtml)) {
-                            opt.selected = true;
-                        }
+                        const opt = document.createElement('option'); opt.value = path; opt.textContent = path;
+                        if (path === currentHtmlSelected || (!currentHtmlSelected && path === defaultHtml)) opt.selected = true;
                         this.elements.htmlEntrySelect.appendChild(opt);
                     });
                 }
-
                 const currentJsSelected = this.elements.entryPointSelect.value;
                 this.elements.entryPointSelect.innerHTML = '';
-
                 if (jsKeys.length === 0) {
-                    const opt = document.createElement('option');
-                    opt.textContent = "JSファイルをアップロードしてください";
+                    const opt = document.createElement('option'); opt.textContent = "JSファイルをアップロードしてください";
                     this.elements.entryPointSelect.appendChild(opt);
                 } else {
                     let defaultJs = jsKeys[0];
                     const matchKeywords = ['index.', 'main.', 'app.'];
                     for (const k of jsKeys) {
-                        const lower = k.toLowerCase();
-                        if (matchKeywords.some(keyword => lower.includes(keyword))) {
-                            defaultJs = k;
-                            break;
-                        }
+                        const lower = k.toLowerCase(); if (matchKeywords.some(keyword => lower.includes(keyword))) { defaultJs = k; break; }
                     }
                     jsKeys.forEach(path => {
-                        const opt = document.createElement('option');
-                        opt.value = path;
-                        opt.textContent = path;
-                        if (path === currentJsSelected || (!currentJsSelected && path === defaultJs)) {
-                            opt.selected = true;
-                        }
+                        const opt = document.createElement('option'); opt.value = path; opt.textContent = path;
+                        if (path === currentJsSelected || (!currentJsSelected && path === defaultJs)) opt.selected = true;
                         this.elements.entryPointSelect.appendChild(opt);
                     });
                 }
             }
 
             updatePreviewFilename() {
-                if (this.store.currentMode === 'html') {
-                    this.elements.previewFilename.textContent = "index.html (単一統合済みHTML)";
-                } else {
-                    this.elements.previewFilename.textContent = "bundle.js (結合済みJavaScript)";
-                }
+                if (this.store.currentMode === 'html') this.elements.previewFilename.textContent = "index.html (単一統合済みHTML)";
+                else this.elements.previewFilename.textContent = "bundle.js (結合済みJavaScript)";
             }
 
-            switchMode(mode) {
-                this.store.setMode(mode);
-
-                const tabs = [
-                    this.elements.modeHtmlBtn,
-                    this.elements.modeSmartBtn,
-                    this.elements.modeDirectBtn
-                ];
+            renderModeSwitch(mode) {
+                const tabs = [this.elements.modeHtmlBtn, this.elements.modeSmartBtn, this.elements.modeDirectBtn];
                 tabs.forEach(tab => {
                     if (tab) tab.className = "flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200";
                 });
-
                 const targetBtn = mode === 'html' ? tabs[0] : (mode === 'smart' ? tabs[1] : tabs[2]);
                 if (targetBtn) targetBtn.className = "flex-1 min-w-[110px] py-2 text-xs font-semibold rounded-lg transition-all text-brand-400 bg-slate-900 shadow-sm border border-slate-800";
 
@@ -3023,73 +2883,42 @@
                 else if (mode === 'smart') this.elements.smartOptions.classList.remove('hidden');
                 else if (mode === 'direct') this.elements.directOptions.classList.remove('hidden');
 
-                if (mode === 'direct') {
-                    this.switchEditorTab('input');
-                } else {
-                    this.switchEditorTab('output');
-                }
-
+                if (mode === 'direct') this.switchEditorTab('input');
+                else this.switchEditorTab('output');
                 this.updatePreviewFilename();
             }
 
             switchEditorTab(tab) {
+                const isInput = tab === 'input';
                 const tabIn = document.getElementById('tab-input');
                 const tabOut = document.getElementById('tab-output');
 
-                if (tab === 'input') {
-                    tabIn.classList.replace('text-slate-500', 'text-brand-400');
-                    tabIn.classList.replace('border-transparent', 'border-brand-500');
-                    tabIn.classList.add('bg-slate-800/50');
-                    tabOut.classList.replace('text-brand-400', 'text-slate-500');
-                    tabOut.classList.replace('border-brand-500', 'border-transparent');
-                    tabOut.classList.remove('bg-slate-800/50');
+                const activeTab = isInput ? tabIn : tabOut;
+                const inactiveTab = isInput ? tabOut : tabIn;
 
-                    this.elements.inputCode.classList.remove('hidden');
-                    this.elements.outputCode.classList.add('hidden');
-                    this.updateLineNumbers(this.elements.inputCode.value);
-                } else {
-                    tabOut.classList.replace('text-slate-500', 'text-brand-400');
-                    tabOut.classList.replace('border-transparent', 'border-brand-500');
-                    tabOut.classList.add('bg-slate-800/50');
-                    tabIn.classList.replace('text-brand-400', 'text-slate-500');
-                    tabIn.classList.replace('border-brand-500', 'border-transparent');
-                    tabIn.classList.remove('bg-slate-800/50');
+                activeTab.className = "flex-1 pb-2 border-b-2 font-medium text-sm transition-all border-brand-500 text-brand-400 bg-slate-800/50";
+                inactiveTab.className = "flex-1 pb-2 border-b-2 font-medium text-sm transition-all border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-700";
 
-                    this.elements.outputCode.classList.remove('hidden');
-                    this.elements.inputCode.classList.add('hidden');
-                    this.updateLineNumbers(this.elements.outputCode.value);
-                }
+                this.elements.inputCode.classList.toggle('hidden', !isInput);
+                this.elements.outputCode.classList.toggle('hidden', isInput);
+                this.updateLineNumbers(isInput ? this.elements.inputCode.value : this.elements.outputCode.value);
             }
 
             updateLineNumbers(code) {
                 const lines = code.split('\n').length;
                 let numbersHtml = '';
-                for (let i = 1; i <= Math.max(lines, 1); i++) {
-                    numbersHtml += `${i}<br>`;
-                }
+                for (let i = 1; i <= Math.max(lines, 1); i++) { numbersHtml += `${i}<br>`; }
                 this.elements.lineNumbers.innerHTML = numbersHtml;
             }
 
-            resetAll() {
-                this.store.reset();
-                this.elements.fileListCard.classList.add('hidden');
-                this.elements.dropZone.classList.remove('py-4');
-                this.elements.folderInput.value = '';
-                this.elements.filesInput.value = '';
-                this.elements.inputCode.value = '';
-                this.elements.outputCode.value = '';
-                this.updateLineNumbers("");
-
-                this.elements.copyBtn.disabled = true;
-                this.elements.downloadBtn.disabled = true;
-                this.elements.logSection.classList.add('hidden');
-                this.elements.logContent.innerHTML = '';
-                this.elements.golfScoreboard.classList.add('hidden');
-                this.elements.optGolf.checked = false;
-                this.toggleGolfUI();
-
-                this.switchEditorTab('input');
-                this.switchMode('direct');
+            renderReset() {
+                this.elements.fileListCard.classList.add('hidden'); this.elements.dropZone.classList.remove('py-4');
+                this.elements.folderInput.value = ''; this.elements.filesInput.value = '';
+                this.elements.inputCode.value = ''; this.elements.outputCode.value = '';
+                this.updateLineNumbers(""); this.elements.copyBtn.disabled = true; this.elements.downloadBtn.disabled = true;
+                this.elements.logSection.classList.add('hidden'); this.elements.logContent.innerHTML = '';
+                this.elements.golfScoreboard.classList.add('hidden'); this.elements.optGolf.checked = false;
+                this.toggleGolfUI(); this.switchEditorTab('input'); this.renderModeSwitch('direct');
                 this.showToast("すべてクリアされました", "info");
             }
 
@@ -3097,29 +2926,14 @@
                 if (show) {
                     this.elements.loadingOverlay.querySelector('p').textContent = message;
                     this.elements.loadingOverlay.classList.remove('hidden');
-                } else {
-                    this.elements.loadingOverlay.classList.add('hidden');
-                }
+                } else { this.elements.loadingOverlay.classList.add('hidden'); }
             }
 
             addLog(message, type = 'info') {
-                const colors = {
-                    info: 'text-slate-300',
-                    success: 'text-emerald-400',
-                    warn: 'text-amber-400',
-                    error: 'text-red-400 font-bold'
-                };
-                const prefix = {
-                    info: 'ℹ',
-                    success: '✔',
-                    warn: '⚠',
-                    error: '❌'
-                };
-
-                const div = document.createElement('div');
-                div.className = `${colors[type]} mb-1`;
-                div.textContent = `${prefix[type]} ${message}`;
-                this.elements.logContent.appendChild(div);
+                const colors = { info: 'text-slate-300', success: 'text-emerald-400', warn: 'text-amber-400', error: 'text-red-400 font-bold' };
+                const prefix = { info: 'ℹ', success: '✔', warn: '⚠', error: '❌' };
+                const div = document.createElement('div'); div.className = `${colors[type]} mb-1`;
+                div.textContent = `${prefix[type]} ${message}`; this.elements.logContent.appendChild(div);
                 this.elements.logSection.scrollTop = this.elements.logSection.scrollHeight;
             }
 
@@ -3130,16 +2944,18 @@
 
                 text.textContent = message;
 
-                if (type === 'success') {
-                    icon.innerHTML = '<i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>';
-                    toast.className = "fixed bottom-6 right-6 bg-slate-900 border border-emerald-500/30 text-slate-100 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 translate-y-0 opacity-100";
-                } else if (type === 'error') {
-                    icon.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4 text-red-400"></i>';
-                    toast.className = "fixed bottom-6 right-6 bg-slate-900 border border-red-500/30 text-slate-100 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 translate-y-0 opacity-100";
-                } else {
-                    icon.innerHTML = '<i data-lucide="info" class="w-4 h-4 text-brand-400"></i>';
-                    toast.className = "fixed bottom-6 right-6 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 translate-y-0 opacity-100";
-                }
+                // タイプごとの固有設定をマッピング
+                const config = {
+                    success: { icon: 'check-circle-2', color: 'text-emerald-400', border: 'border-emerald-500/30' },
+                    error: { icon: 'alert-circle', color: 'text-red-400', border: 'border-red-500/30' },
+                    info: { icon: 'info', color: 'text-brand-400', border: 'border-slate-800' }
+                }[type];
+
+                icon.innerHTML = `<i data-lucide="${config.icon}" class="w-4 h-4 ${config.color}"></i>`;
+
+                // 共通のベースクラスに固有のボーダー色を注入するだけ
+                toast.className = `fixed bottom-6 right-6 bg-slate-900 border ${config.border} text-slate-100 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 translate-y-0 opacity-100`;
+
                 lucide.createIcons();
 
                 setTimeout(() => {
@@ -3147,22 +2963,19 @@
                 }, 3000);
             }
 
-            updateView() {
+            renderAll() {
                 this.updatePreviewFilename();
             }
 
             updateGolfScoreboard(originalBytes, finalBytes) {
                 const saved = Math.max(originalBytes - finalBytes, 0);
                 const reduction = originalBytes > 0 ? ((saved / originalBytes) * 100).toFixed(1) : 0;
-
                 this.elements.golfOrigSize.textContent = `${(originalBytes / 1024).toFixed(2)} KB`;
                 this.elements.golfFinalSize.textContent = `${(finalBytes / 1024).toFixed(2)} KB`;
                 this.elements.golfReduction.textContent = `-${reduction}%`;
-
                 const rankInfo = this.utils.getGolfRank(parseFloat(reduction));
                 this.elements.golfRankBadge.textContent = rankInfo.rank;
                 this.elements.golfRankBadge.className = `px-2 py-0.5 text-xs text-white rounded font-mono font-bold animate-pulse ${rankInfo.color}`;
-
                 this.elements.golfScoreboard.classList.remove('hidden');
                 this.addLog(`[⛳️ ゴルフコンパイラ] 実参照されたアセット合計 ${originalBytes} バイト ➔ ${finalBytes} バイトに圧縮完了。削減率 -${reduction}% !`, "success");
             }
@@ -3171,35 +2984,27 @@
                 const usedFiles = this.store.usedFilesSet;
                 if (this.elements.optGolf.checked && usedFiles.size > 0) {
                     let sum = 0;
-                    usedFiles.forEach(path => {
-                        if (this.store.hasFile(path)) {
-                            sum += this.store.getFile(path).size;
-                        }
-                    });
+                    usedFiles.forEach(path => { if (this.store.hasFile(path)) sum += this.store.getFile(path).size; });
                     return sum;
                 }
                 return Object.values(this.store.filesStore).reduce((sum, file) => sum + file.size, 0);
             }
 
             runBundle() {
-                this.showLoading(true, "ビルド中...");
-                this.elements.logSection.classList.remove('hidden');
+                this.showLoading(true, "ビルド中..."); this.elements.logSection.classList.remove('hidden');
                 this.elements.logContent.innerHTML = '';
-
                 if (this.store.currentMode !== 'direct') this.elements.outputCode.value = '';
 
                 setTimeout(() => {
                     try {
                         this.addLog("コンパイルタスクを開始します...", "info");
-                        Config.analyzeEnvironmentData(this.store.filesStore);
-
+                        window.App.Config.analyzeEnvironmentData(this.store.filesStore);
                         const logger = {
                             info: (msg) => this.addLog(msg, 'info'),
                             success: (msg) => this.addLog(msg, 'success'),
                             warn: (msg) => this.addLog(msg, 'warn'),
                             error: (msg) => this.addLog(msg, 'error')
                         };
-
                         const options = {
                             addStrict: this.elements.optStrict.checked,
                             keepComments: this.elements.optComments.checked,
@@ -3213,119 +3018,92 @@
                             crossAssetEnabled: this.elements.golfCrossAsset.checked,
                             packerEnabled: this.elements.golfPacker.checked,
                             iifeWrapped: this.elements.optIife.checked,
-
                             htmlEntryPath: this.elements.htmlEntrySelect.value,
                             htmlOptCss: this.elements.htmlOptCss.checked,
                             htmlOptJs: this.elements.htmlOptJs.checked,
                             htmlOptImg: this.elements.htmlOptImg.checked,
-
                             jsEntryPoint: this.elements.entryPointSelect.value,
-
                             directSourceCode: this.elements.inputCode.value,
                             directLang: this.elements.directLangSelect.value
                         };
-
                         const finalContent = this.compiler.build(options);
-
                         if (finalContent) {
-                            this.elements.outputCode.value = finalContent;
-                            this.switchEditorTab('output');
-
-                            this.elements.copyBtn.disabled = false;
-                            this.elements.downloadBtn.disabled = false;
+                            this.elements.outputCode.value = finalContent; this.switchEditorTab('output');
+                            this.elements.copyBtn.disabled = false; this.elements.downloadBtn.disabled = false;
                             this.showToast("バンドル処理が完了しました！", "success");
                             this.addLog("ビルド成果物が正常に出力されました！", "success");
-
                             if (options.golfEnabled) {
                                 const originalSize = this.getTotalOriginalBytes();
                                 const blob = new Blob([finalContent], { type: this.store.currentMode === 'html' ? 'text/html' : 'application/javascript' });
                                 this.updateGolfScoreboard(originalSize, blob.size);
-                            } else {
-                                this.elements.golfScoreboard.classList.add('hidden');
-                            }
+                            } else { this.elements.golfScoreboard.classList.add('hidden'); }
                         }
                     } catch (error) {
-                        console.error(error);
-                        this.addLog(`処理失敗: ${error.message}`, "error");
+                        console.error(error); this.addLog(`処理失敗: ${error.message}`, "error");
                         this.showToast("バンドル実行に失敗しました", "error");
-                    } finally {
-                        this.showLoading(false);
-                    }
+                    } finally { this.showLoading(false); }
                 }, 400);
             }
 
             copyToClipboard() {
-                const text = this.elements.outputCode.value;
-                if (!text) return;
-
+                const text = this.elements.outputCode.value; if (!text) return;
                 if (navigator.clipboard) {
                     navigator.clipboard.writeText(text).then(() => {
                         this.showToast("クリップボードにコピーしました！", "success");
-                    }).catch(err => {
-                        this.fallbackCopyToClipboard(text);
-                    });
-                } else {
-                    this.fallbackCopyToClipboard(text);
-                }
+                    }).catch(() => this.fallbackCopyToClipboard(text));
+                } else { this.fallbackCopyToClipboard(text); }
             }
 
             fallbackCopyToClipboard(text) {
                 const tempTextarea = document.createElement('textarea');
-                tempTextarea.value = text;
-                document.body.appendChild(tempTextarea);
+                tempTextarea.value = text; document.body.appendChild(tempTextarea);
                 tempTextarea.select();
                 try {
-                    document.execCommand('copy');
-                    this.showToast("クリップボードにコピーしました！", "success");
-                } catch (err) {
-                    this.showToast("コピーに失敗しました", "error");
-                } finally {
-                    document.body.removeChild(tempTextarea);
-                }
+                    document.execCommand('copy'); this.showToast("クリップボードにコピーしました！", "success");
+                } catch (err) { this.showToast("コピーに失敗しました", "error"); }
+                finally { document.body.removeChild(tempTextarea); }
             }
 
             downloadOutput() {
-                const text = this.elements.outputCode.value;
-                if (!text) return;
-
+                const text = this.elements.outputCode.value; if (!text) return;
                 const isHtml = this.store.currentMode === 'html';
                 const filename = isHtml ? 'index.html' : 'bundle.js';
                 const mimeType = isHtml ? 'text/html' : 'application/javascript';
-
                 const blob = new Blob([text], { type: mimeType });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-
+                a.href = url; a.download = filename; document.body.appendChild(a);
+                a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
                 this.showToast(`${filename} をダウンロードしました！`, "success");
             }
         }
 
-        // ==========================================================================
-        // 7. BOOTSTRAPPER (初期化、Lucideライフサイクル統合)
-        // ==========================================================================
+        window.App.UI = UIManager;
+        //#endregion
+    </script>
+
+    <!-- 8. Bootstrapper Module -->
+    <script type="module">
+        //#region Bootstrapper Block
         window.addEventListener('DOMContentLoaded', () => {
             const loggerAdapter = {
-                info: (msg) => { if (ui) ui.addLog(msg, 'info'); },
-                success: (msg) => { if (ui) ui.addLog(msg, 'success'); },
-                warn: (msg) => { if (ui) ui.addLog(msg, 'warn'); },
-                error: (msg) => { if (ui) ui.addLog(msg, 'error'); }
+                info: (msg) => { if (uiInstance) uiInstance.addLog(msg, 'info'); },
+                success: (msg) => { if (uiInstance) uiInstance.addLog(msg, 'success'); },
+                warn: (msg) => { if (uiInstance) uiInstance.addLog(msg, 'warn'); },
+                error: (msg) => { if (uiInstance) uiInstance.addLog(msg, 'error'); }
             };
 
-            const scanner = new Scanner();
-            const transformer = new Transformer();
-            const linker = new Linker();
-            const minifier = new Minifier();
+            // CompilerEngineの構築
+            const compilerInstance = new window.App.Compiler.EngineClass(loggerAdapter);
 
-            const compiler = new CompilerEngine(Store, Utils, loggerAdapter, scanner, transformer, linker, minifier);
-            const ui = new UIManager(Store, compiler, Utils);
-            ui.init();
+            // UIManagerのインスタンス化および登録
+            const uiInstance = new window.App.UI(window.App.Store, compilerInstance, window.App.Utils);
+            window.App.UIInstance = uiInstance;
+
+            // UIライフサイクル起動
+            uiInstance.init();
         });
+        //#endregion
     </script>
 </body>
 
