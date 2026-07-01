@@ -1101,56 +1101,62 @@
         class SafeStructureOptimizationPass {
             getVisitor(t, state, options) {
                 return {
-                    // 配列の直接操作(splice)を廃止。Babelの正規APIを利用し、1箇所変更したら即座にreturnする
+                    // ブロック内の連続する文を、可能な限り一気に結合しきる (ループ上限対策)
                     "Program|BlockStatement"(path) {
-                        const bodyPaths = path.get('body');
-                        if (!Array.isArray(bodyPaths)) return;
+                        let changedInBlock = true;
+                        while (changedInBlock) {
+                            changedInBlock = false;
+                            const bodyPaths = path.get('body');
+                            if (!Array.isArray(bodyPaths)) return;
 
-                        for (let i = 0; i < bodyPaths.length - 1; i++) {
-                            const currentPath = bodyPaths[i];
-                            const nextPath = bodyPaths[i + 1];
+                            for (let i = 0; i < bodyPaths.length - 1; i++) {
+                                const currentPath = bodyPaths[i];
+                                const nextPath = bodyPaths[i + 1];
 
-                            // すでに削除処理されたパスはスキップ
-                            if (!currentPath.node || !nextPath.node) continue;
+                                if (!currentPath.node || !nextPath.node) continue;
 
-                            const current = currentPath.node;
-                            const next = nextPath.node;
+                                const current = currentPath.node;
+                                const next = nextPath.node;
 
-                            // パターン1: 変数宣言の統合 (let x=1; let y=2; -> let x=1,y=2;)
-                            if (t.isVariableDeclaration(current) && t.isVariableDeclaration(next)) {
-                                if (current.kind === next.kind || (current.kind !== 'var' && next.kind !== 'var')) {
-                                    current.kind = (current.kind === 'var' && next.kind === 'var') ? 'var' : 'let';
-                                    current.declarations.push(...next.declarations.map(d => t.cloneNode(d, true)));
-                                    nextPath.remove(); // Babel APIで正しく削除
-                                    state.changed = true;
-                                    return; //ループを中断し、イテレータのクラッシュや重複宣言バグを防ぐ
+                                // パターン1: 変数宣言の統合 (let x=1; let y=2; -> let x=1,y=2;)
+                                if (t.isVariableDeclaration(current) && t.isVariableDeclaration(next)) {
+                                    if (current.kind === next.kind || (current.kind !== 'var' && next.kind !== 'var')) {
+                                        current.kind = (current.kind === 'var' && next.kind === 'var') ? 'var' : 'let';
+                                        current.declarations.push(...next.declarations.map(d => t.cloneNode(d, true)));
+                                        nextPath.remove();
+                                        state.changed = true;
+                                        changedInBlock = true;
+                                        break; // forループを抜けて、最新のASTでブロックを再走査
+                                    }
                                 }
-                            }
 
-                            // パターン2: 代入とReturnの統合 (x = 1; return x; -> return x = 1;)
-                            if (t.isExpressionStatement(current) && t.isAssignmentExpression(current.expression) && t.isReturnStatement(next)) {
-                                const assignLeft = current.expression.left;
-                                const retArg = next.argument;
-                                if (t.isIdentifier(assignLeft) && t.isIdentifier(retArg) && assignLeft.name === retArg.name) {
-                                    nextPath.get('argument').replaceWith(t.cloneNode(current.expression, true));
-                                    currentPath.remove();
-                                    state.changed = true;
-                                    return;
+                                // パターン2: 代入とReturnの統合 (x = 1; return x; -> return x = 1;)
+                                if (t.isExpressionStatement(current) && t.isAssignmentExpression(current.expression) && t.isReturnStatement(next)) {
+                                    const assignLeft = current.expression.left;
+                                    const retArg = next.argument;
+                                    if (t.isIdentifier(assignLeft) && t.isIdentifier(retArg) && assignLeft.name === retArg.name) {
+                                        nextPath.get('argument').replaceWith(t.cloneNode(current.expression, true));
+                                        currentPath.remove();
+                                        state.changed = true;
+                                        changedInBlock = true;
+                                        break;
+                                    }
                                 }
-                            }
 
-                            // パターン3: 連続する式ステートメントの統合 (a(); b(); -> a(), b();)
-                            if (t.isExpressionStatement(current) && t.isExpressionStatement(next)) {
-                                const exprs = [];
-                                if (t.isSequenceExpression(current.expression)) exprs.push(...current.expression.expressions.map(e => t.cloneNode(e, true)));
-                                else exprs.push(t.cloneNode(current.expression, true));
-                                if (t.isSequenceExpression(next.expression)) exprs.push(...next.expression.expressions.map(e => t.cloneNode(e, true)));
-                                else exprs.push(t.cloneNode(next.expression, true));
+                                // パターン3: 連続する式ステートメントの統合 (a(); b(); -> a(), b();)
+                                if (t.isExpressionStatement(current) && t.isExpressionStatement(next)) {
+                                    const exprs = [];
+                                    if (t.isSequenceExpression(current.expression)) exprs.push(...current.expression.expressions.map(e => t.cloneNode(e, true)));
+                                    else exprs.push(t.cloneNode(current.expression, true));
+                                    if (t.isSequenceExpression(next.expression)) exprs.push(...next.expression.expressions.map(e => t.cloneNode(e, true)));
+                                    else exprs.push(t.cloneNode(next.expression, true));
 
-                                currentPath.get('expression').replaceWith(t.sequenceExpression(exprs));
-                                nextPath.remove();
-                                state.changed = true;
-                                return;
+                                    currentPath.get('expression').replaceWith(t.sequenceExpression(exprs));
+                                    nextPath.remove();
+                                    state.changed = true;
+                                    changedInBlock = true;
+                                    break;
+                                }
                             }
                         }
                     },
@@ -1183,6 +1189,126 @@
                             else path.replaceWith(t.expressionStatement(t.logicalExpression('&&', t.cloneNode(test, true), t.cloneNode(consExpr, true))));
                             state.changed = true;
                         }
+                    }
+                };
+            }
+        }
+
+        class GlobalAliasingPass {
+            constructor() {
+                this.targets = [
+                    'document', 'window', 'console', 'Math', 'Object', 'Array', 'String', 'Number',
+                    'Math.floor', 'Math.random', 'Math.ceil', 'Math.round', 'Math.abs', 'Math.max', 'Math.min',
+                    'Object.keys', 'Object.values', 'Object.assign', 'Array.isArray'
+                ];
+            }
+
+            getStaticMemberExpressionStr(node) {
+                if (node.type === 'MemberExpression' && !node.computed && node.property.type === 'Identifier') {
+                    if (node.object.type === 'Identifier') {
+                        return `${node.object.name}.${node.property.name}`;
+                    } else if (node.object.type === 'MemberExpression') {
+                        const parentStr = this.getStaticMemberExpressionStr(node.object);
+                        if (parentStr) return `${parentStr}.${node.property.name}`;
+                    }
+                }
+                return null;
+            }
+
+            getVisitor(t, state, options) {
+                const self = this;
+                return {
+                    Program(path) {
+                        if (!options.globalAliasingEnabled) return;
+
+                        const counts = new Map();
+                        path.traverse({
+                            MemberExpression: (p) => {
+                                const exprStr = self.getStaticMemberExpressionStr(p.node);
+                                if (exprStr && self.targets.includes(exprStr)) {
+                                    counts.set(exprStr, (counts.get(exprStr) || 0) + 1);
+                                }
+                            },
+                            Identifier: (p) => {
+                                const name = p.node.name;
+                                if (self.targets.includes(name) && !p.scope.hasBinding(name, true)) {
+                                    counts.set(name, (counts.get(name) || 0) + 1);
+                                }
+                            }
+                        });
+
+                        const aliasesToInject = [];
+                        let aliasCounter = 0;
+                        for (const [exprStr, count] of counts.entries()) {
+                            if (count <= 1) continue;
+                            const originalBytes = exprStr.length * count;
+                            const aliasVarName = `_g_${aliasCounter}`;
+                            const declareCost = 13 + aliasVarName.length + exprStr.length;
+                            const referenceCost = aliasVarName.length * count;
+                            const savedBytes = originalBytes - (declareCost + referenceCost);
+                            if (savedBytes > 0) {
+                                aliasesToInject.push({ exprStr, aliasVarName, savedBytes });
+                                aliasCounter++;
+                            }
+                        }
+
+                        if (aliasesToInject.length === 0) return;
+
+                        const declarations = aliasesToInject.map(item => {
+                            const parts = item.exprStr.split('.');
+                            let valNode = t.identifier(parts[0]);
+                            for (let i = 1; i < parts.length; i++) {
+                                valNode = t.memberExpression(valNode, t.identifier(parts[i]));
+                            }
+                            return t.variableDeclarator(t.identifier(item.aliasVarName), valNode);
+                        });
+
+                        const varDeclaration = t.variableDeclaration('let', declarations);
+
+                        // import文の直後（実行コードの直前）を探して挿入する
+                        let insertIdx = 0;
+                        const bodyPaths = path.get('body');
+                        for (let i = 0; i < bodyPaths.length; i++) {
+                            if (!bodyPaths[i].isImportDeclaration()) {
+                                insertIdx = i;
+                                break;
+                            }
+                        }
+
+                        let insertedPath;
+                        if (bodyPaths[insertIdx]) {
+                            [insertedPath] = bodyPaths[insertIdx].insertBefore(varDeclaration);
+                        } else {
+                            [insertedPath] = path.unshiftContainer('body', varDeclaration);
+                        }
+
+                        path.scope.registerDeclaration(insertedPath);
+
+                        // 置換処理
+                        path.traverse({
+                            MemberExpression: (p) => {
+                                // 自分が今挿入したばかりの宣言ノード(右辺)の中は置換せずにスキップする
+                                if (p.findParent(parent => parent === insertedPath)) return;
+
+                                const exprStr = self.getStaticMemberExpressionStr(p.node);
+                                const found = aliasesToInject.find(a => a.exprStr === exprStr);
+                                if (found) {
+                                    p.replaceWith(t.identifier(found.aliasVarName));
+                                }
+                            },
+                            Identifier: (p) => {
+                                // 自分が今挿入したばかりの宣言ノード(右辺)の中は置換せずにスキップする
+                                if (p.findParent(parent => parent === insertedPath)) return;
+
+                                if (p.isReferencedIdentifier()) {
+                                    const name = p.node.name;
+                                    const found = aliasesToInject.find(a => a.exprStr === name);
+                                    if (found && !p.scope.hasBinding(name, true)) {
+                                        p.replaceWith(t.identifier(found.aliasVarName));
+                                    }
+                                }
+                            }
+                        });
                     }
                 };
             }
@@ -1269,6 +1395,9 @@
                             const val = path.node.value;
                             if (Number.isInteger(val) && val >= 1000 && val.toString().endsWith('000')) {
                                 const cleanExp = val.toExponential().replace('+', '');
+                                // すでに変換済みの場合はスキップして無限ループを防ぐ
+                                if (path.node.extra && path.node.extra.raw === cleanExp) return;
+
                                 if (cleanExp.length < val.toString().length) {
                                     path.node.extra = { raw: cleanExp, rawValue: val };
                                     state.changed = true;
@@ -1284,6 +1413,59 @@
                             } else if (path.node.name === 'Infinity' && !path.scope.hasBinding('Infinity')) {
                                 path.replaceWith(t.binaryExpression('/', t.numericLiteral(1), t.numericLiteral(0)));
                                 path.skip();
+                                state.changed = true;
+                            }
+                        }
+                    }
+                };
+            }
+        }
+
+        // 変数宣言の極限消去 (Strict Modeの放棄)
+        // let a = 1, b = 2; ➔ a=1,b=2; (暗黙のグローバル化)
+        class NakedAssignmentPass {
+            getVisitor(t, state, options) {
+                return {
+                    VariableDeclaration(path) {
+                        if (!options.enableExtreme) return;
+
+                        const parent = path.parentPath;
+
+                        if ((parent.isForInStatement() || parent.isForOfStatement()) && path.key === 'left') {
+                            const decl = path.node.declarations[0];
+                            if (t.isIdentifier(decl.id)) {
+                                if (options.hoistedVars) options.hoistedVars.add(decl.id.name); // 消去した変数をバケツに記録
+                                path.replaceWith(decl.id);
+                                state.changed = true;
+                                path.skip();
+                            }
+                            return;
+                        }
+
+                        const declarations = path.node.declarations;
+                        const assignments = [];
+
+                        declarations.forEach(decl => {
+                            if (t.isIdentifier(decl.id)) {
+                                if (options.hoistedVars) options.hoistedVars.add(decl.id.name); // 消去した変数をバケツに記録
+                                if (decl.init) {
+                                    assignments.push(t.assignmentExpression('=', decl.id, decl.init));
+                                }
+                            }
+                        });
+
+                        if (assignments.length > 0) {
+                            const sequence = assignments.length === 1 ? assignments[0] : t.sequenceExpression(assignments);
+                            if (parent.isForStatement() && path.key === 'init') {
+                                path.replaceWith(sequence);
+                            } else {
+                                path.replaceWith(t.expressionStatement(sequence));
+                            }
+                            state.changed = true;
+                            path.skip();
+                        } else {
+                            if (!(parent.isForStatement() && path.key === 'init')) {
+                                path.remove();
                                 state.changed = true;
                             }
                         }
@@ -1355,108 +1537,6 @@
             }
         }
 
-        class GlobalAliasingPass {
-            constructor() {
-                this.targets = [
-                    'document', 'window', 'console', 'Math', 'Object', 'Array', 'String', 'Number',
-                    'Math.floor', 'Math.random', 'Math.ceil', 'Math.round', 'Math.abs', 'Math.max', 'Math.min',
-                    'Object.keys', 'Object.values', 'Object.assign', 'Array.isArray'
-                ];
-            }
-
-            getStaticMemberExpressionStr(node) {
-                if (node.type === 'MemberExpression' && !node.computed && node.property.type === 'Identifier') {
-                    if (node.object.type === 'Identifier') {
-                        return `${node.object.name}.${node.property.name}`;
-                    } else if (node.object.type === 'MemberExpression') {
-                        const parentStr = this.getStaticMemberExpressionStr(node.object);
-                        if (parentStr) return `${parentStr}.${node.property.name}`;
-                    }
-                }
-                return null;
-            }
-
-            getVisitor(t, state, options) {
-                return {
-                    Program: {
-                        enter: (path) => {
-                            if (!options.globalAliasingEnabled) return;
-                            const counts = new Map();
-                            path.traverse({
-                                MemberExpression: (p) => {
-                                    const exprStr = this.getStaticMemberExpressionStr(p.node);
-                                    if (exprStr && this.targets.includes(exprStr)) {
-                                        counts.set(exprStr, (counts.get(exprStr) || 0) + 1);
-                                    }
-                                },
-                                Identifier: (p) => {
-                                    const name = p.node.name;
-                                    if (this.targets.includes(name) && !p.scope.hasBinding(name, true)) {
-                                        counts.set(name, (counts.get(name) || 0) + 1);
-                                    }
-                                }
-                            });
-                            const aliasesToInject = [];
-                            let aliasCounter = 0;
-                            for (const [exprStr, count] of counts.entries()) {
-                                if (count <= 1) continue;
-                                const originalBytes = exprStr.length * count;
-                                const aliasVarName = `_g_${aliasCounter}`;
-                                const declareCost = 13 + aliasVarName.length + exprStr.length;
-                                const referenceCost = aliasVarName.length * count;
-                                const savedBytes = originalBytes - (declareCost + referenceCost);
-                                if (savedBytes > 0) {
-                                    aliasesToInject.push({ exprStr, aliasVarName, savedBytes });
-                                    aliasCounter++;
-                                }
-                            }
-                            if (aliasesToInject.length > 0) {
-                                state.globalAliases = aliasesToInject;
-                                const declarations = aliasesToInject.map(item => {
-                                    const parts = item.exprStr.split('.');
-                                    let valNode = t.identifier(parts[0]);
-                                    for (let i = 1; i < parts.length; i++) {
-                                        valNode = t.memberExpression(valNode, t.identifier(parts[i]));
-                                    }
-                                    return t.variableDeclarator(t.identifier(item.aliasVarName), valNode);
-                                });
-                                //let で宣言し、スコープの先頭に安全に挿入
-                                const varDeclaration = t.variableDeclaration('let', declarations);
-                                const [insertedPath] = path.unshiftContainer('body', varDeclaration);
-                                // 挿入した新しい変数をBabelのスコープマネージャーに即時登録する
-                                path.scope.registerDeclaration(insertedPath);
-                                state.changed = true;
-                            }
-                        },
-                        exit: (path, state) => {
-                            if (!state.globalAliases || state.globalAliases.length === 0) return;
-                            const aliases = state.globalAliases;
-                            path.traverse({
-                                MemberExpression: (p) => {
-                                    const exprStr = this.getStaticMemberExpressionStr(p.node);
-                                    const found = aliases.find(a => a.exprStr === exprStr);
-                                    if (found) {
-                                        p.replaceWith(t.identifier(found.aliasVarName));
-                                        state.changed = true;
-                                    }
-                                },
-                                Identifier: (p) => {
-                                    if (p.isReferencedIdentifier()) {
-                                        const name = p.node.name;
-                                        const found = aliases.find(a => a.exprStr === name);
-                                        if (found && !p.scope.hasBinding(name, true)) {
-                                            p.replaceWith(t.identifier(found.aliasVarName));
-                                            state.changed = true;
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    }
-                };
-            }
-        }
-
         class ManglerPass {
             constructor(extraReserved = []) {
                 this.reservedWords = new Set([
@@ -1520,55 +1600,6 @@
                                 }
                             }
                         });
-                    }
-                };
-            }
-        }
-
-        // 変数宣言の完全消去 (Strict Modeの放棄)
-        // let a = 1, b = 2; ➔ a=1,b=2; (暗黙のグローバル化)
-        class NakedAssignmentPass {
-            getVisitor(t, state, options) {
-                return {
-                    VariableDeclaration(path) {
-                        if (!options.enableExtreme) return;
-
-                        const parent = path.parentPath;
-                        if ((parent.isForInStatement() || parent.isForOfStatement()) && path.key === 'left') {
-                            const decl = path.node.declarations[0];
-                            if (t.isIdentifier(decl.id)) {
-                                path.replaceWith(decl.id);
-                                state.changed = true;
-                                path.skip(); // これがないと配列が読めずに length エラーになる
-                            }
-                            return;
-                        }
-
-                        const declarations = path.node.declarations;
-                        const assignments = [];
-
-                        declarations.forEach(decl => {
-                            if (t.isIdentifier(decl.id) && decl.init) {
-                                assignments.push(t.assignmentExpression('=', decl.id, decl.init));
-                            }
-                        });
-
-                        if (assignments.length > 0) {
-                            const sequence = assignments.length === 1 ? assignments[0] : t.sequenceExpression(assignments);
-                            if (parent.isForStatement() && path.key === 'init') {
-                                path.replaceWith(sequence);
-                            } else {
-                                path.replaceWith(t.expressionStatement(sequence));
-                            }
-                            state.changed = true;
-                            path.skip();
-                        } else {
-                            if (!(parent.isForStatement() && path.key === 'init')) {
-                                path.remove();
-                                state.changed = true;
-                                // 削除時は勝手にスキップされるためskipは不要
-                            }
-                        }
                     }
                 };
             }
@@ -1701,7 +1732,7 @@
                 new SafeStructureOptimizationPass().getVisitor(t, loopState, options),
                 new ExtremeGolfPass().getVisitor(t, loopState, options),
                 new StringCompressorPass().getVisitor(t, loopState, { ...options, crossAssetEnabled: options.crossAssetEnabled }),
-                new GlobalAliasingPass().getVisitor(t, loopState, { globalAliasingEnabled: options.globalAliasingEnabled }),
+                // ※ GlobalAliasingPass は無限ループの原因となるため、ここから除外しループ外で1度だけ実行する
                 new NakedAssignmentPass().getVisitor(t, loopState, options),
                 new DOMElementIdHackPass().getVisitor(t, loopState, options),
                 new EvilMathHackPass().getVisitor(t, loopState, options),
@@ -1953,28 +1984,66 @@
 
                 const loopState = { changed: false, globalAliases: [] };
 
+                // One-Letホイスト用の共有バケツを準備
+                options.hoistedVars = new Set();
+
                 // ベースとなる安全なプラグイン（パス解決とインライン化）
                 let visitorsToRun = [pathRewriterPlugin, assetInlinePlugin];
 
                 if (options.golfEnabled) {
-                    // ゴルフ有効時のみ、激しいAST書き換えを行うパス群を追加して最適化ループを回す
                     const standardVisitors = window.App.Passes.getStandardVisitors(t, loopState, options);
                     visitorsToRun.push(...standardVisitors);
                     const mergedVisitor = this.mergeVisitors(visitorsToRun);
 
+                    // 激しいAST最適化ループを実行
                     window.App.BabelHelper.runOptimizationLoop(ast, mergedVisitor, options, traverse, loopState);
                 } else {
-                    // ゴルフ無効時は、安全なベースプラグインのみを適用し、ASTの破壊を防ぐ
                     const mergedVisitor = this.mergeVisitors(visitorsToRun);
                     traverse(ast, mergedVisitor);
                 }
 
-                if (options.golfEnabled && options.enableMangle) {
-                    // ASTが激しく変形した後のため、バインディング情報を一度リセットして再スキャン
-                    traverse(ast, { Program(path) { path.scope.crawl(); } });
+                if (options.golfEnabled) {
+                    // [フェーズ 1] Strict Mode対策の One-Let ホイスト
+                    // NakedAssignmentPass が記録した「消した変数」だけを安全に復元する（DOMのID等とは混ざらない）
+                    if (options.enableExtreme && options.hasExternalImports && options.hoistedVars.size > 0) {
+                        const declarators = Array.from(options.hoistedVars).map(name => t.variableDeclarator(t.identifier(name)));
+                        const letDecl = t.variableDeclaration('let', declarators);
 
-                    const mangler = new window.App.Passes.ManglerPass(options.extraReserved);
-                    traverse(ast, mangler.getVisitor(t));
+                        traverse(ast, {
+                            Program(path) {
+                                const bodyPaths = path.get('body');
+                                let insertIdx = 0;
+                                for (let i = 0; i < bodyPaths.length; i++) {
+                                    if (!bodyPaths[i].isImportDeclaration()) {
+                                        insertIdx = i;
+                                        break;
+                                    }
+                                }
+                                if (bodyPaths[insertIdx]) {
+                                    bodyPaths[insertIdx].insertBefore(letDecl);
+                                } else {
+                                    path.unshiftContainer('body', letDecl);
+                                }
+                                path.stop();
+                            }
+                        });
+                    }
+
+                    // [フェーズ 2] Global Aliasing Pass (グローバル変数の圧縮)
+                    // 無限ループを防ぐため、最適化ループが完全に終わったあとで1回だけ実行する
+                    if (options.globalAliasingEnabled) {
+                        const aliasState = { changed: false, globalAliases: [] };
+                        const aliasing = new window.App.Passes.GlobalAliasingPass();
+                        traverse(ast, aliasing.getVisitor(t, aliasState, { globalAliasingEnabled: true }));
+                    }
+
+                    // [フェーズ 3] マングリング (変数名の1文字化)
+                    // 全てのホイストやエイリアス生成が確定した「最も安定したAST」に対して最後に一気にリネームをかける
+                    if (options.enableMangle) {
+                        traverse(ast, { Program(path) { path.scope.crawl(); } });
+                        const mangler = new window.App.Passes.ManglerPass(options.extraReserved);
+                        traverse(ast, mangler.getVisitor(t));
+                    }
                 }
 
                 try {
@@ -2010,8 +2079,11 @@
                 const traverse = babelCtx.traverse;
 
                 // [Phase 2] 名前空間仮想化・リネームフェーズ (複数モジュールのローカル競合排除)
-                const { flatBodyNodeList, globalBindingRewriteMap, importResolutions, wildcardExports } =
+                const { flatBodyNodeList, globalBindingRewriteMap, importResolutions, wildcardExports, hasExternalImports } =
                     this._virtualizeNamespaces(orderedModules, store, t, traverse, keepComments, scanner);
+
+                // 外部モジュールの有無をオプションに記録し、上位のHTML生成処理に伝搬させる
+                options.hasExternalImports = hasExternalImports;
 
                 // [Phase 3] リンク解決フェーズ (ImportとExport間の平坦化マッピング解決)
                 const finalRenameMap = this._linkImportExports(importResolutions, globalBindingRewriteMap, wildcardExports);
@@ -2031,7 +2103,8 @@
                     skipCjs: true,
                     extraReserved: options.extraReserved,
                     store: store,
-                    scanner: scanner
+                    scanner: scanner,
+                    hasExternalImports: hasExternalImports // AST Passにもフラグを渡す
                 };
                 try {
                     return transformer.transformESMtoCJS(flatSourceCode, "flat_bundle.js", {}, transpileOptions, logger);
@@ -2101,6 +2174,9 @@
                 const importResolutions = {};
                 const wildcardExports = {};
 
+                // 外部モジュールのインポート/エクスポート文を退避する配列
+                const externalImports = [];
+
                 orderedModules.forEach((mod, idx) => {
                     if (!mod.isJS) return;
                     const file = store.getFile(mod.path);
@@ -2130,24 +2206,38 @@
                         ImportDeclaration(path) {
                             const srcPath = path.node.source.value;
                             const resolvedSrcPath = scanner.resolveRelativePath(mod.path, srcPath, store);
-                            path.node.specifiers.forEach(spec => {
-                                const localName = spec.local.name;
-                                let importedName = spec.type === 'ImportSpecifier' ? (spec.imported.name || spec.imported.value) : (spec.type === 'ImportDefaultSpecifier' ? 'default' : '*');
-                                importResolutions[localName] = { resolvedSrcPath, importedName };
-                            });
-                            path.remove();
+
+                            if (store.hasFile(resolvedSrcPath)) {
+                                path.node.specifiers.forEach(spec => {
+                                    const localName = spec.local.name;
+                                    let importedName = spec.type === 'ImportSpecifier' ? (spec.imported.name || spec.imported.value) : (spec.type === 'ImportDefaultSpecifier' ? 'default' : '*');
+                                    importResolutions[localName] = { resolvedSrcPath, importedName };
+                                });
+                                path.remove();
+                            } else {
+                                // 外部モジュールへの依存は削除せずにホイスト用配列に退避する
+                                // (※変数はすでに _mX_name にリネームされているため、import { ... as _mX_name } の形になる)
+                                externalImports.push(t.cloneNode(path.node, true));
+                                path.remove();
+                            }
                         },
                         ExportNamedDeclaration(path) {
                             if (path.node.source) {
                                 const resolvedSrcPath = scanner.resolveRelativePath(mod.path, path.node.source.value, store);
-                                path.node.specifiers.forEach(spec => {
-                                    if (spec.type === 'ExportSpecifier') {
-                                        const localName = spec.local.name;
-                                        const exportedName = spec.exported.name || spec.exported.value;
-                                        globalBindingRewriteMap[`${mod.path}:${exportedName}`] = `${resolvedSrcPath}:${localName}`;
-                                    }
-                                });
-                                path.remove();
+                                if (store.hasFile(resolvedSrcPath)) {
+                                    path.node.specifiers.forEach(spec => {
+                                        if (spec.type === 'ExportSpecifier') {
+                                            const localName = spec.local.name;
+                                            const exportedName = spec.exported.name || spec.exported.value;
+                                            globalBindingRewriteMap[`${mod.path}:${exportedName}`] = `${resolvedSrcPath}:${localName}`;
+                                        }
+                                    });
+                                    path.remove();
+                                } else {
+                                    // 外部モジュールの再エクスポートを保護
+                                    externalImports.push(t.cloneNode(path.node, true));
+                                    path.remove();
+                                }
                             } else if (path.node.declaration) {
                                 path.replaceWith(path.node.declaration);
                             } else {
@@ -2163,9 +2253,15 @@
                         },
                         ExportAllDeclaration(path) {
                             const resolvedSrcPath = scanner.resolveRelativePath(mod.path, path.node.source.value, store);
-                            if (!wildcardExports[mod.path]) wildcardExports[mod.path] = [];
-                            wildcardExports[mod.path].push(resolvedSrcPath);
-                            path.remove();
+                            if (store.hasFile(resolvedSrcPath)) {
+                                if (!wildcardExports[mod.path]) wildcardExports[mod.path] = [];
+                                wildcardExports[mod.path].push(resolvedSrcPath);
+                                path.remove();
+                            } else {
+                                // 外部モジュールのワイルドカードエクスポートを保護
+                                externalImports.push(t.cloneNode(path.node, true));
+                                path.remove();
+                            }
                         },
                         ExportDefaultDeclaration(path) {
                             const dec = path.node.declaration;
@@ -2196,7 +2292,17 @@
                     flatBodyNodeList.push(...ast.program.body);
                 });
 
-                return { flatBodyNodeList, globalBindingRewriteMap, importResolutions, wildcardExports };
+                // 抽出した外部インポート/エクスポート群を、結合したASTの先頭（ホイスト）に挿入する
+                flatBodyNodeList.unshift(...externalImports);
+
+                // 外部インポートが存在したかどうかのフラグ (hasExternalImports) を追加で返す
+                return {
+                    flatBodyNodeList,
+                    globalBindingRewriteMap,
+                    importResolutions,
+                    wildcardExports,
+                    hasExternalImports: externalImports.length > 0
+                };
             }
 
             _linkImportExports(importResolutions, globalBindingRewriteMap, wildcardExports) {
@@ -2365,6 +2471,7 @@
                                     compressedContent = content;
                                 } else {
                                     try {
+                                        const hasImport = /\b(import|export)\b/.test(content);
                                         const transpileOptions = {
                                             golfEnabled,
                                             enableMangle: options.enableMangle,
@@ -2377,9 +2484,15 @@
                                             skipCjs: true,
                                             extraReserved: uniqueReserved,
                                             store: options.store,
-                                            scanner: scanner
+                                            scanner: scanner,
+                                            hasExternalImports: hasImport // インラインのインポート検知
                                         };
                                         compressedContent = transformer.transformESMtoCJS(content, "inline_script", {}, transpileOptions, logger);
+
+                                        // 極限ゴルフ時、インポートがなければ type="module" を剥がしてSloppy Modeへ移行
+                                        if (options.golfEnabled && options.enableExtreme && !hasImport) {
+                                            attrs = attrs.replace(/\s*type=["']?module["']?/i, '');
+                                        }
                                     } catch (e) {
                                         throw new Error(`[HTML圧縮] <script> 内のJS圧縮に失敗しました: ${e.message}`);
                                     }
@@ -2621,8 +2734,9 @@
                         const scriptEl = doc.createElement('script');
 
                         // 極限ゴルフ時は let/const が消えて暗黙のグローバル変数になるため、
-                        // 厳密モード(Strict Mode)を強制する type="module" 属性を除外する。
-                        if (!options.golfEnabled || !options.enableExtreme) {
+                        // 厳密モードを強制する type="module" 属性を除外するが、
+                        // 外部インポートがある場合は除外できない（モジュールとして実行必須）
+                        if (!options.golfEnabled || !options.enableExtreme || options.hasExternalImports) {
                             scriptEl.setAttribute('type', 'module');
                         }
 
