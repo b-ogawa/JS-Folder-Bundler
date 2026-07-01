@@ -166,19 +166,20 @@
                             <input type="checkbox" id="html-opt-css" checked
                                 class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <label for="html-opt-css" class="text-xs text-slate-300 cursor-pointer">CSSファイルを
-                                &lt;style&gt; に変換</label>
+                                &lt;style&gt; に変換 (htmlOptCss)</label>
                         </div>
                         <div class="flex items-center gap-2">
                             <input type="checkbox" id="html-opt-js" checked
                                 class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <label for="html-opt-js" class="text-xs text-slate-300 cursor-pointer">JSファイルを
-                                &lt;script&gt; に変換 (AST依存解決付)</label>
+                                &lt;script&gt; に変換 (htmlOptJs)</label>
                         </div>
                         <div class="flex items-center gap-2">
                             <input type="checkbox" id="html-opt-img" checked
                                 class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <label for="html-opt-img"
-                                class="text-xs text-slate-300 cursor-pointer">画像をBase64/DataURL形式で埋め込み</label>
+                                class="text-xs text-slate-300 cursor-pointer">画像をBase64/DataURL形式で埋め込み
+                                (htmlOptImg)</label>
                         </div>
                     </div>
                 </div>
@@ -189,7 +190,7 @@
                         <label class="block text-xs text-slate-400 mb-1.5 font-medium">エントリーポイント（起点となるJS）</label>
                         <select id="entry-point-select"
                             class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-brand-500">
-                            <!-- 動的追加 -->
+                            <!-- デフォルト -->
                         </select>
                         <p class="text-[10px] text-slate-500 mt-1">※ 指定されたJSからimport/require文をたどり、自動で解析します。</p>
                         <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ AST（抽象構文木）解析エンジン「Babel
@@ -211,14 +212,14 @@
                     </div>
                     <div id="simple-file-list"
                         class="max-h-60 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl p-2 flex flex-col gap-1.5 font-mono text-xs">
-                        <!-- ファイル順序変更リスト -->
+                        <!-- リスト -->
                     </div>
                     <div class="flex items-center gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800">
                         <input type="checkbox" id="opt-iife"
                             class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                         <div class="flex flex-col">
                             <label for="opt-iife" class="text-xs font-semibold text-slate-200 cursor-pointer">即時関数
-                                (IIFE) で安全に包む</label>
+                                (IIFE) で安全に包む (iifeWrapped)</label>
                             <span class="text-[10px] text-slate-500">各ファイルを変数衝突が起きないように個別の関数に隔離して結合します</span>
                         </div>
                     </div>
@@ -247,7 +248,7 @@
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2 text-amber-500 font-bold text-xs uppercase tracking-wider">
                             <i data-lucide="award" class="w-4 h-4"></i>
-                            コードゴルフ化オプション
+                            コードゴルフ化オプション (golfEnabled)
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" id="opt-golf" class="sr-only peer">
@@ -265,7 +266,7 @@
                             <div class="flex flex-col">
                                 <label for="golf-mangle"
                                     class="text-xs font-semibold text-slate-200 cursor-pointer">変数・関数名の一文字化
-                                    (Mangle)</label>
+                                    (enableMangle)</label>
                                 <span
                                     class="text-[9px] text-slate-400">スコープ内の全識別子を解析して、1文字変数に徹底圧縮。固定点到達後の最適化スコープに対して実行するため安全です</span>
                             </div>
@@ -275,7 +276,8 @@
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-console"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">console.logの全自動消去</label>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">console.logの全自動消去
+                                    (enableConsoleStrip)</label>
                                 <span class="text-[9px] text-slate-400">デバッグ用のログ出力や debugger 文を安全に排除（式の内部では undefined
                                     に自動置換）</span>
                             </div>
@@ -285,7 +287,8 @@
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-minify-assets"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">HTMLとCSSも徹底圧縮</label>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">HTMLとCSSも徹底圧縮
+                                    (minifyAssets)</label>
                                 <span class="text-[9px] text-slate-400">属性クォーテーションの最適除去や小数の頭の0、冗長なマージン指定などをクレンジング</span>
                             </div>
                         </div>
@@ -295,8 +298,8 @@
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-extreme"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">極限構文ハック (Boolean /
-                                    Number / If / Loop / アロー化)</label>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">極限構文ハック
+                                    (enableExtreme)</label>
                                 <span
                                     class="text-[9px] text-slate-400">true➔!0、10000➔1e4、単一if文➔&&短絡評価、定数畳み込み、while(true)➔for(;;)、無名関数のアロー化など</span>
                             </div>
@@ -308,7 +311,7 @@
                             <div class="flex flex-col">
                                 <label for="golf-string-hack"
                                     class="text-xs font-semibold text-slate-200 cursor-pointer">GLSL / Web Worker /
-                                    アセット文字列圧縮ハック</label>
+                                    アセット文字列圧縮ハック (golfStringHack)</label>
                                 <span class="text-[9px] text-slate-400">文字列内のGLSLシェーダーの空白・コメント除去、Web Worker
                                     JSの再帰圧縮</span>
                             </div>
@@ -321,7 +324,7 @@
                                 <div class="flex flex-col">
                                     <label for="golf-global-alias"
                                         class="text-xs font-bold text-amber-400 cursor-pointer">Global Aliasing
-                                        Pass</label>
+                                        Pass (globalAliasingEnabled)</label>
                                     <span
                                         class="text-[9px] text-slate-400">`document`や`Math`等のAPIアクセスを統計分析。コスト計算に基づき最上部にエイリアス展開。</span>
                                 </div>
@@ -331,7 +334,8 @@
                                     class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                                 <div class="flex flex-col">
                                     <label for="golf-cross-asset"
-                                        class="text-xs font-bold text-amber-400 cursor-pointer">三位一体クロスアセット辞書</label>
+                                        class="text-xs font-bold text-amber-400 cursor-pointer">三位一体クロスアセット辞書
+                                        (crossAssetEnabled)</label>
                                     <span
                                         class="text-[9px] text-slate-400">HTMLのid/class、CSSのセレクタ、JSのDOMセレクタ指定文字列を完全同期させて一文字に置換。</span>
                                 </div>
@@ -341,7 +345,8 @@
                                     class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                                 <div class="flex flex-col">
                                     <label for="golf-packer"
-                                        class="text-xs font-bold text-amber-400 cursor-pointer">LZ77エントロピー自己解凍パッカー</label>
+                                        class="text-xs font-bold text-amber-400 cursor-pointer">LZ77エントロピー自己解凍パッカー
+                                        (packerEnabled)</label>
                                     <span
                                         class="text-[9px] text-slate-400">Babel出力後にRegPack風の辞書置換evalラッパーを試行。削減された場合のみ自動適用。</span>
                                 </div>
@@ -356,13 +361,14 @@
                         <input type="checkbox" id="opt-strict" checked
                             class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                         <label for="opt-strict" class="text-xs font-semibold text-slate-200 cursor-pointer">"use
-                            strict"; を先頭に追加</label>
+                            strict"; を先頭に追加 (addStrict)</label>
                     </div>
                     <div class="flex items-center gap-2">
                         <input type="checkbox" id="opt-comments" checked
                             class="rounded border-slate-800 text-brand-500 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                         <label for="opt-comments"
-                            class="text-xs font-semibold text-slate-200 cursor-pointer">ファイル境界の区切りコメントを残す</label>
+                            class="text-xs font-semibold text-slate-200 cursor-pointer">ファイル境界の区切りコメントを残す
+                            (keepComments)</label>
                     </div>
                 </div>
 
@@ -1003,19 +1009,22 @@
                 let isAstChanged = true;
                 let iteration = 0;
 
-                while (isAstChanged && iteration < maxIterations) {
-                    loopState.changed = false;
-                    traverse(ast, visitors);
-                    if (loopState.changed) {
-                        isAstChanged = true;
-                        traverse(ast, { Program(path) { path.scope.crawl(); } });
-                    } else {
-                        isAstChanged = false;
+                try {
+                    while (isAstChanged && iteration < maxIterations) {
+                        loopState.changed = false;
+                        traverse(ast, visitors);
+                        if (loopState.changed) {
+                            isAstChanged = true;
+                            traverse(ast, { Program(path) { path.scope.crawl(); } });
+                        } else {
+                            isAstChanged = false;
+                        }
+                        iteration++;
                     }
-                    iteration++;
+                } catch (err) {
+                    throw new Error(`最適化ループ(${iteration}周目)でクラッシュ:\n${err.message}\n[スタックトレース]\n${err.stack}`);
                 }
 
-                // 4. 無限ループ（収束未到達）の警告
                 if (iteration >= maxIterations) {
                     window.App.log(`[AST最適化] 最適化ループが上限(${maxIterations}回)に達しました。パス間で循環変更が起きている可能性があります。`, 'warn');
                 }
@@ -1032,40 +1041,14 @@
         class ExtremeGolfPass {
             getVisitor(t, state, options) {
                 return {
-                    "FunctionDeclaration|FunctionExpression|ArrowFunctionExpression"(path) {
-                        if (!options.enableExtreme || !path.node || !path.isFunction()) return;
-                        let hasArguments = false;
-                        path.traverse({ Identifier(innerPath) { if (innerPath.node.name === 'arguments') hasArguments = true; } });
-                        if (hasArguments) return;
-                        const bodyPath = path.get('body'); if (!bodyPath.isBlockStatement()) return;
-                        let modified = false;
-                        const stmts = bodyPath.get('body');
-                        if (Array.isArray(stmts)) {
-                            stmts.forEach(stmtPath => {
-                                if (stmtPath.isVariableDeclaration()) {
-                                    const declarations = stmtPath.node.declarations;
-                                    if (declarations.some(decl => !t.isIdentifier(decl.id))) return;
-                                    const assignments = [];
-                                    declarations.forEach(decl => {
-                                        path.node.params.push(t.identifier(decl.id.name));
-                                        if (decl.init) assignments.push(t.assignmentExpression('=', t.identifier(decl.id.name), t.cloneNode(decl.init, true)));
-                                    });
-                                    if (assignments.length > 0) {
-                                        const sequence = assignments.length === 1 ? assignments[0] : t.sequenceExpression(assignments);
-                                        stmtPath.replaceWith(t.expressionStatement(sequence));
-                                    } else { stmtPath.remove(); }
-                                    modified = true;
-                                }
-                            });
-                        }
-                        if (modified) state.changed = true;
-                    },
                     ArrowFunctionExpression(path) {
                         if (!options.enableExtreme || !path.isArrowFunctionExpression()) return;
                         const body = path.node.body;
                         if (t.isBlockStatement(body) && body.body && body.body.length === 1 && t.isReturnStatement(body.body[0])) {
                             const retArg = body.body[0].argument ? t.cloneNode(body.body[0].argument, true) : t.identifier('undefined');
-                            path.get('body').replaceWith(retArg); state.changed = true;
+                            path.get('body').replaceWith(retArg);
+                            state.changed = true;
+                            path.skip();
                         }
                     },
                     FunctionExpression(path) {
@@ -1076,13 +1059,16 @@
                         if (!hasThisOrArgs) {
                             path.replaceWith(t.arrowFunctionExpression(path.node.params.map(p => t.cloneNode(p, true)), t.cloneNode(path.node.body, true)));
                             state.changed = true;
+                            path.skip();
                         }
                     },
                     WhileStatement(path) {
                         if (!options.enableExtreme || !path.isWhileStatement()) return;
                         const test = path.node.test;
                         if (t.isBooleanLiteral(test, { value: true }) || (t.isNumericLiteral(test) && test.value !== 0) || (t.isUnaryExpression(test, { operator: '!' }) && t.isNumericLiteral(test.argument, { value: 0 }))) {
-                            path.replaceWith(t.forStatement(null, null, null, t.cloneNode(path.node.body, true))); state.changed = true;
+                            path.replaceWith(t.forStatement(null, null, null, t.cloneNode(path.node.body, true)));
+                            state.changed = true;
+                            path.skip();
                         }
                     },
                     MemberExpression(path) {
@@ -1094,11 +1080,18 @@
                             const propName = path.node.property.value; if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(propName)) { path.node.computed = false; path.node.property = t.identifier(propName); state.changed = true; }
                         }
                     },
+                    // CallExpression のクラッシュガードを追加
                     CallExpression(path) {
-                        if (!options.enableExtreme || !path.isCallExpression()) return;
+                        if (!options.enableExtreme || !path.node) return;
                         const { callee, arguments: args } = path.node;
-                        if (args && args.length === 1 && t.isIdentifier(callee, { name: 'String' })) {
-                            path.replaceWith(t.binaryExpression('+', t.stringLiteral(""), t.cloneNode(args[0], true))); state.changed = true;
+
+                        // 特殊な関数呼び出しによる length クラッシュを防御
+                        if (!args || !Array.isArray(args)) return;
+
+                        if (args.length === 1 && t.isIdentifier(callee, { name: 'String' })) {
+                            path.replaceWith(t.binaryExpression('+', t.stringLiteral(""), t.cloneNode(args[0], true)));
+                            state.changed = true;
+                            path.skip();
                         }
                     }
                 };
@@ -1108,53 +1101,56 @@
         class SafeStructureOptimizationPass {
             getVisitor(t, state, options) {
                 return {
+                    // 配列の直接操作(splice)を廃止。Babelの正規APIを利用し、1箇所変更したら即座にreturnする
                     "Program|BlockStatement"(path) {
-                        if (!path.node || (!path.isProgram() && !path.isBlockStatement())) return;
-                        const bodyPath = path.get('body');
-                        if (!Array.isArray(bodyPath)) return;
+                        const bodyPaths = path.get('body');
+                        if (!Array.isArray(bodyPaths)) return;
 
-                        for (let i = 0; i < bodyPath.length - 1; i++) {
-                            const current = bodyPath[i];
-                            if (!current.node) continue;
+                        for (let i = 0; i < bodyPaths.length - 1; i++) {
+                            const currentPath = bodyPaths[i];
+                            const nextPath = bodyPaths[i + 1];
 
-                            let nextIdx = i + 1;
-                            while (nextIdx < bodyPath.length && !bodyPath[nextIdx].node) nextIdx++;
-                            if (nextIdx >= bodyPath.length) break;
+                            // すでに削除処理されたパスはスキップ
+                            if (!currentPath.node || !nextPath.node) continue;
 
-                            const next = bodyPath[nextIdx];
+                            const current = currentPath.node;
+                            const next = nextPath.node;
 
                             // パターン1: 変数宣言の統合 (let x=1; let y=2; -> let x=1,y=2;)
-                            if (current.isVariableDeclaration() && next.isVariableDeclaration()) {
-                                if (current.node.kind === next.node.kind || (current.node.kind !== 'var' && next.node.kind !== 'var')) {
-                                    current.node.kind = (current.node.kind === 'var' && next.node.kind === 'var') ? 'var' : 'let';
-                                    const clonedDecls = next.node.declarations.map(d => t.cloneNode(d, true));
-                                    current.node.declarations.push(...clonedDecls);
-                                    next.remove(); state.changed = true; i--;
-                                    continue; // 変更があったら次の処理へ
+                            if (t.isVariableDeclaration(current) && t.isVariableDeclaration(next)) {
+                                if (current.kind === next.kind || (current.kind !== 'var' && next.kind !== 'var')) {
+                                    current.kind = (current.kind === 'var' && next.kind === 'var') ? 'var' : 'let';
+                                    current.declarations.push(...next.declarations.map(d => t.cloneNode(d, true)));
+                                    nextPath.remove(); // Babel APIで正しく削除
+                                    state.changed = true;
+                                    return; //ループを中断し、イテレータのクラッシュや重複宣言バグを防ぐ
                                 }
                             }
 
                             // パターン2: 代入とReturnの統合 (x = 1; return x; -> return x = 1;)
-                            if (current.isExpressionStatement() && t.isAssignmentExpression(current.node.expression) && next.isReturnStatement()) {
-                                const assignLeft = current.node.expression.left;
-                                const retArg = next.node.argument;
+                            if (t.isExpressionStatement(current) && t.isAssignmentExpression(current.expression) && t.isReturnStatement(next)) {
+                                const assignLeft = current.expression.left;
+                                const retArg = next.argument;
                                 if (t.isIdentifier(assignLeft) && t.isIdentifier(retArg) && assignLeft.name === retArg.name) {
-                                    next.node.argument = t.cloneNode(current.node.expression, true);
-                                    current.remove(); state.changed = true;
-                                    continue;
+                                    nextPath.get('argument').replaceWith(t.cloneNode(current.expression, true));
+                                    currentPath.remove();
+                                    state.changed = true;
+                                    return;
                                 }
                             }
 
                             // パターン3: 連続する式ステートメントの統合 (a(); b(); -> a(), b();)
-                            if (current.isExpressionStatement() && next.isExpressionStatement()) {
+                            if (t.isExpressionStatement(current) && t.isExpressionStatement(next)) {
                                 const exprs = [];
-                                if (t.isSequenceExpression(current.node.expression)) exprs.push(...current.node.expression.expressions.map(e => t.cloneNode(e, true)));
-                                else exprs.push(t.cloneNode(current.node.expression, true));
-                                if (t.isSequenceExpression(next.node.expression)) exprs.push(...next.node.expression.expressions.map(e => t.cloneNode(e, true)));
-                                else exprs.push(t.cloneNode(next.node.expression, true));
+                                if (t.isSequenceExpression(current.expression)) exprs.push(...current.expression.expressions.map(e => t.cloneNode(e, true)));
+                                else exprs.push(t.cloneNode(current.expression, true));
+                                if (t.isSequenceExpression(next.expression)) exprs.push(...next.expression.expressions.map(e => t.cloneNode(e, true)));
+                                else exprs.push(t.cloneNode(next.expression, true));
 
-                                current.replaceWith(t.expressionStatement(t.sequenceExpression(exprs)));
-                                next.remove(); state.changed = true; i--;
+                                currentPath.get('expression').replaceWith(t.sequenceExpression(exprs));
+                                nextPath.remove();
+                                state.changed = true;
+                                return;
                             }
                         }
                     },
@@ -1529,6 +1525,167 @@
             }
         }
 
+        // 変数宣言の完全消去 (Strict Modeの放棄)
+        // let a = 1, b = 2; ➔ a=1,b=2; (暗黙のグローバル化)
+        class NakedAssignmentPass {
+            getVisitor(t, state, options) {
+                return {
+                    VariableDeclaration(path) {
+                        if (!options.enableExtreme) return;
+
+                        const parent = path.parentPath;
+                        if ((parent.isForInStatement() || parent.isForOfStatement()) && path.key === 'left') {
+                            const decl = path.node.declarations[0];
+                            if (t.isIdentifier(decl.id)) {
+                                path.replaceWith(decl.id);
+                                state.changed = true;
+                                path.skip(); // これがないと配列が読めずに length エラーになる
+                            }
+                            return;
+                        }
+
+                        const declarations = path.node.declarations;
+                        const assignments = [];
+
+                        declarations.forEach(decl => {
+                            if (t.isIdentifier(decl.id) && decl.init) {
+                                assignments.push(t.assignmentExpression('=', decl.id, decl.init));
+                            }
+                        });
+
+                        if (assignments.length > 0) {
+                            const sequence = assignments.length === 1 ? assignments[0] : t.sequenceExpression(assignments);
+                            if (parent.isForStatement() && path.key === 'init') {
+                                path.replaceWith(sequence);
+                            } else {
+                                path.replaceWith(t.expressionStatement(sequence));
+                            }
+                            state.changed = true;
+                            path.skip();
+                        } else {
+                            if (!(parent.isForStatement() && path.key === 'init')) {
+                                path.remove();
+                                state.changed = true;
+                                // 削除時は勝手にスキップされるためskipは不要
+                            }
+                        }
+                    }
+                };
+            }
+        }
+
+        // DOM IDのグローバル参照ハック
+        // document.getElementById('canvas') ➔ canvas
+        class DOMElementIdHackPass {
+            getVisitor(t, state, options) {
+                return {
+                    CallExpression(path) {
+                        if (!options.enableExtreme || !path.node) return;
+                        const { callee, arguments: args } = path.node;
+
+                        // 特殊な関数呼び出しによる length クラッシュを防御
+                        if (!args || !Array.isArray(args)) return;
+
+                        // callee.property が存在しない場合のエラーも防御
+                        if (t.isMemberExpression(callee) && t.isIdentifier(callee.object, { name: 'document' }) && t.isIdentifier(callee.property)) {
+                            const propName = callee.property.name;
+                            if ((propName === 'getElementById' || propName === 'querySelector') && args.length === 1 && t.isStringLiteral(args[0])) {
+                                let idName = args[0].value;
+                                if (propName === 'querySelector' && idName.startsWith('#')) {
+                                    idName = idName.substring(1);
+                                }
+                                if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(idName)) {
+                                    path.replaceWith(t.identifier(idName));
+                                    state.changed = true;
+                                    path.skip(); // 置換直後のイテレータ保護
+                                }
+                            }
+                        }
+                    }
+                };
+            }
+        }
+
+        // Mathオブジェクトと型変換のビット演算化
+        // Math.floor(x) ➔ x|0, Math.round(x) ➔ x+.5|0
+        class EvilMathHackPass {
+            getVisitor(t, state, options) {
+                return {
+                    CallExpression(path) {
+                        if (!options.enableExtreme || !path.node) return;
+                        const { callee, arguments: args } = path.node;
+
+                        // 特殊な関数呼び出しによる length クラッシュを防御
+                        if (!args || !Array.isArray(args) || args.length !== 1) return;
+
+                        const arg = args[0];
+
+                        if (t.isIdentifier(callee, { name: 'parseInt' })) {
+                            path.replaceWith(t.binaryExpression('|', arg, t.numericLiteral(0)));
+                            state.changed = true;
+                            path.skip(); //イテレータ保護
+                            return;
+                        }
+
+                        // callee.property が存在しない場合のエラーも防御
+                        if (t.isMemberExpression(callee) && t.isIdentifier(callee.object, { name: 'Math' }) && t.isIdentifier(callee.property)) {
+                            const method = callee.property.name;
+                            if (method === 'floor' || method === 'trunc') {
+                                path.replaceWith(t.binaryExpression('|', arg, t.numericLiteral(0)));
+                                state.changed = true;
+                                path.skip();
+                            } else if (method === 'round') {
+                                path.replaceWith(t.binaryExpression('|', t.binaryExpression('+', arg, t.numericLiteral(0.5)), t.numericLiteral(0)));
+                                state.changed = true;
+                                path.skip();
+                            }
+                        }
+                    }
+                };
+            }
+        }
+
+        // 配列の文字列圧縮 (Array to Split)
+        // ['a', 'b', 'c'] ➔ 'a,b,c'.split(',')
+        class ArrayToSplitPass {
+            getVisitor(t, state, options) {
+                return {
+                    ArrayExpression(path) {
+                        if (!options.enableExtreme) return;
+                        const elements = path.node.elements;
+                        // すべての要素が文字列かチェック
+                        if (elements.length < 3) return; // 3要素未満は逆に長くなる
+                        if (!elements.every(e => t.isStringLiteral(e))) return;
+
+                        const strList = elements.map(e => e.value);
+                        // カンマを含まない文字列の集まりかチェック
+                        if (strList.some(s => s.includes(','))) return;
+
+                        const joined = strList.join(',');
+
+                        // 損益分岐点計算 (['a','b'] ➔ 9 bytes, 'a,b'.split(',') ➔ 16 bytes)
+                        // 文字列が長ければ長いほど、要素数が多いほどsplitが得になる
+                        const arrayCost = strList.reduce((acc, s) => acc + s.length + 3, 0) - 1 + 2; // "str", + []
+                        const splitCost = joined.length + 13; // 'joined'.split(',')
+
+                        if (splitCost < arrayCost) {
+                            path.replaceWith(
+                                t.callExpression(
+                                    t.memberExpression(t.stringLiteral(joined), t.identifier('split')),
+                                    [t.stringLiteral(',')]
+                                )
+                            );
+                            state.changed = true;
+                        }
+                    }
+                };
+            }
+        }
+
+        window.App.Passes.NakedAssignmentPass = NakedAssignmentPass;
+        window.App.Passes.DOMElementIdHackPass = DOMElementIdHackPass;
+        window.App.Passes.EvilMathHackPass = EvilMathHackPass;
+        window.App.Passes.ArrayToSplitPass = ArrayToSplitPass;
         window.App.Passes.ExtremeGolfPass = ExtremeGolfPass;
         window.App.Passes.SafeStructureOptimizationPass = SafeStructureOptimizationPass;
         window.App.Passes.DeadCodeEliminationPass = DeadCodeEliminationPass;
@@ -1536,15 +1693,21 @@
         window.App.Passes.StringCompressorPass = StringCompressorPass;
         window.App.Passes.GlobalAliasingPass = GlobalAliasingPass;
         window.App.Passes.ManglerPass = ManglerPass;
+
         window.App.Passes.getStandardVisitors = (t, loopState, options) => {
-            return [
+            const visitors = [
                 new DeadCodeEliminationPass().getVisitor(t, loopState, options),
                 new ConstantFoldingPass().getVisitor(t, loopState, options),
                 new SafeStructureOptimizationPass().getVisitor(t, loopState, options),
                 new ExtremeGolfPass().getVisitor(t, loopState, options),
                 new StringCompressorPass().getVisitor(t, loopState, { ...options, crossAssetEnabled: options.crossAssetEnabled }),
-                new GlobalAliasingPass().getVisitor(t, loopState, { globalAliasingEnabled: options.globalAliasingEnabled })
+                new GlobalAliasingPass().getVisitor(t, loopState, { globalAliasingEnabled: options.globalAliasingEnabled }),
+                new NakedAssignmentPass().getVisitor(t, loopState, options),
+                new DOMElementIdHackPass().getVisitor(t, loopState, options),
+                new EvilMathHackPass().getVisitor(t, loopState, options),
+                new ArrayToSplitPass().getVisitor(t, loopState, options)
             ];
+            return visitors;
         };
         //#endregion
     </script>
@@ -1789,12 +1952,22 @@
                 }
 
                 const loopState = { changed: false, globalAliases: [] };
-                const standardVisitors = window.App.Passes.getStandardVisitors(t, loopState, options);
-                const mergedVisitor = this.mergeVisitors([
-                    pathRewriterPlugin,
-                    assetInlinePlugin,
-                    ...standardVisitors
-                ]);
+
+                // ベースとなる安全なプラグイン（パス解決とインライン化）
+                let visitorsToRun = [pathRewriterPlugin, assetInlinePlugin];
+
+                if (options.golfEnabled) {
+                    // ゴルフ有効時のみ、激しいAST書き換えを行うパス群を追加して最適化ループを回す
+                    const standardVisitors = window.App.Passes.getStandardVisitors(t, loopState, options);
+                    visitorsToRun.push(...standardVisitors);
+                    const mergedVisitor = this.mergeVisitors(visitorsToRun);
+
+                    window.App.BabelHelper.runOptimizationLoop(ast, mergedVisitor, options, traverse, loopState);
+                } else {
+                    // ゴルフ無効時は、安全なベースプラグインのみを適用し、ASTの破壊を防ぐ
+                    const mergedVisitor = this.mergeVisitors(visitorsToRun);
+                    traverse(ast, mergedVisitor);
+                }
 
                 if (options.golfEnabled && options.enableMangle) {
                     // ASTが激しく変形した後のため、バインディング情報を一度リセットして再スキャン
@@ -1860,8 +2033,13 @@
                     store: store,
                     scanner: scanner
                 };
-                return transformer.transformESMtoCJS(flatSourceCode, "flat_bundle.js", {}, transpileOptions, logger);
+                try {
+                    return transformer.transformESMtoCJS(flatSourceCode, "flat_bundle.js", {}, transpileOptions, logger);
+                } catch (err) {
+                    throw new Error(`[SmartJS結合エラー] ${err.message}\n${err.stack || ''}`);
+                }
             }
+
 
             // --- 細分化されたプライベート構造化メソッド群 ---
 
@@ -2436,11 +2614,18 @@
                         try {
                             finalJsContent = this.Linker.executeSmartJSBundle(virtualEntry, this.store, false, !options.golfEnabled, options, this.logger, this.Scanner, this.Transformer, this.utils);
                         } catch (err) {
-                            this.logger.warn(`JSのスマート統合に失敗しました: ${err.message}`);
+                            this.logger.warn(`JSのスマート統合に失敗しました。フォールバックします。\n原因: ${err.message}`);
+                            console.error("[コンパイラ詳細エラー]", err);
                             finalJsContent = virtualEntryCode;
                         }
                         const scriptEl = doc.createElement('script');
-                        scriptEl.setAttribute('type', 'module');
+
+                        // 極限ゴルフ時は let/const が消えて暗黙のグローバル変数になるため、
+                        // 厳密モード(Strict Mode)を強制する type="module" 属性を除外する。
+                        if (!options.golfEnabled || !options.enableExtreme) {
+                            scriptEl.setAttribute('type', 'module');
+                        }
+
                         scriptEl.setAttribute('data-compiled', 'true');
                         scriptEl.textContent = `\n` + finalJsContent.replace(new RegExp('\\x3c/\\\\s*script\\\\s*\\x3e', 'gi'), '\\x3c\\/script\\x3e') + '\n';
                         if (firstScriptNode && firstScriptNode.parentNode) {
