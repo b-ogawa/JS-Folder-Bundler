@@ -65,10 +65,10 @@
                     <h1
                         class="text-xl font-bold tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent flex items-center gap-2">
                         Web Asset & JS Bundler <span
-                            class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono font-normal">Golf
-                            Edition ⛳️</span>
+                            class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono font-normal">Super
+                            Golf Edition ⛳️</span>
                     </h1>
-                    <p class="text-xs text-slate-400">複数ファイルを安全に1枚にバンドル ＆ AST解析で極限まで削り落とすコードゴルフ機能搭載</p>
+                    <p class="text-xs text-slate-400">Scope Hoisting・グローバルAPIエイリアス・三位一体クロスアセット圧縮・自己解凍LZパッカー搭載</p>
                 </div>
             </div>
             <div class="flex items-center gap-3">
@@ -96,7 +96,7 @@
                     <i data-lucide="folder-up" class="w-10 h-10"></i>
                 </div>
 
-                <h3 class="text-base font-semibold mb-1">フォルダをドラッグ＆ドロップ</h3>
+                <h3>フォルダをドラッグ＆ドロップ</h3>
                 <p class="text-xs text-slate-400 max-w-xs mb-4">HTML、CSS、JS、各種画像（PNG, JPG, SVGなど）を含むフォルダに対応</p>
 
                 <div class="flex gap-2">
@@ -190,13 +190,13 @@
                         </select>
                         <p class="text-[10px] text-slate-500 mt-1">※ 指定されたJSからimport/require文をたどり、自動で解析します。</p>
                         <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ AST（抽象構文木）解析エンジン「Babel
-                            Parser」を搭載！複合インポート、aliasインポート、名前付き再エクスポートをサポート！</p>
+                            Parser」を搭載！マルチパス統合最適化（収束反復）によって、不要コード(DCE)を完全にパージします。</p>
+                        <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Scope
+                            Hoistingモードによりモジュール外殻(CJSラッパー)を完全撤廃！グローバル変数のように効率的にマングルされます。</p>
                         <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Three.jsなどの外部CDNライブラリや importmap
                             との共存（ネイティブ import フォールバック）に対応！</p>
                         <p class="text-[10px] text-emerald-400 mt-0.5 font-medium">※ Web Worker環境（globalThis）での動作に完全対応！
                         </p>
-                        <p class="text-[10px] text-red-400 mt-0.5 font-medium">※ 制限事項: 1行に複数の変数宣言を並べる `export const a =
-                            1, b = 2;` には対応していません。個別に行を分けてエクスポートしてください。</p>
                     </div>
                 </div>
 
@@ -264,7 +264,7 @@
                                     class="text-xs font-semibold text-slate-200 cursor-pointer">変数・関数名の一文字化
                                     (Mangle)</label>
                                 <span
-                                    class="text-[9px] text-slate-400">スコープ内の変数を安全に圧縮。既存の1文字変数は保護され、2フェーズコンパイルでBabelの衝突を防ぎます</span>
+                                    class="text-[9px] text-slate-400">スコープ内の全識別子を解析して、1文字変数に徹底圧縮。固定点到達後の最適化スコープに対して実行するため安全です</span>
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
@@ -273,7 +273,8 @@
                             <div class="flex flex-col">
                                 <label for="golf-console"
                                     class="text-xs font-semibold text-slate-200 cursor-pointer">console.logの全自動消去</label>
-                                <span class="text-[9px] text-slate-400">デバッグ用のログ出力文を安全に消去（式内の場合はundefinedに置換）</span>
+                                <span class="text-[9px] text-slate-400">デバッグ用のログ出力や debugger 文を安全に排除（式の内部では undefined
+                                    に自動置換）</span>
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
@@ -303,10 +304,44 @@
                                 class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
                             <div class="flex flex-col">
                                 <label for="golf-string-hack"
-                                    class="text-xs font-semibold text-slate-200 cursor-pointer">GLSL / Web Worker
-                                    文字列圧縮ハック</label>
+                                    class="text-xs font-semibold text-slate-200 cursor-pointer">GLSL / Web Worker /
+                                    アセット文字列圧縮ハック</label>
                                 <span class="text-[9px] text-slate-400">文字列内のGLSLシェーダーの空白・コメント除去、Web Worker
                                     JSの再帰圧縮</span>
+                            </div>
+                        </div>
+                        <!-- 超級オプション：グローバルエイリアス、クロスアセット、LZパッカー -->
+                        <div class="border-t border-amber-500/20 pt-2.5 mt-1.5 flex flex-col gap-2.5">
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="golf-global-alias" checked
+                                    class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+                                <div class="flex flex-col">
+                                    <label for="golf-global-alias"
+                                        class="text-xs font-bold text-amber-400 cursor-pointer">Global Aliasing
+                                        Pass</label>
+                                    <span
+                                        class="text-[9px] text-slate-400">`document`や`Math`等のAPIアクセスを統計分析。コスト計算に基づき最上部にエイリアス展開。</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="golf-cross-asset" checked
+                                    class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+                                <div class="flex flex-col">
+                                    <label for="golf-cross-asset"
+                                        class="text-xs font-bold text-amber-400 cursor-pointer">三位一体クロスアセット辞書</label>
+                                    <span
+                                        class="text-[9px] text-slate-400">HTMLのid/class、CSSのセレクタ、JSのDOMセレクタ指定文字列を完全同期させて一文字に置換。</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="golf-packer" checked
+                                    class="rounded border-slate-800 text-amber-600 focus:ring-0 focus:ring-offset-0 bg-slate-900 w-4 h-4">
+                                <div class="flex flex-col">
+                                    <label for="golf-packer"
+                                        class="text-xs font-bold text-amber-400 cursor-pointer">LZ77エントロピー自己解凍パッカー</label>
+                                    <span
+                                        class="text-[9px] text-slate-400">Babel出力後にRegPack風の辞書置換evalラッパーを試行。削減された場合のみ自動適用。</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -356,7 +391,7 @@
         <!-- 右メインエリア: 変換結果プレビュー (7カラム) -->
         <div class="lg:col-span-7 flex flex-col gap-6 h-[calc(100vh-120px)] min-h-[500px]">
 
-            <!-- ⛳️ ゴルフスコアボード（初期状態は隠す） -->
+            <!-- ⛳️ ゴルフスコアボード -->
             <div id="golf-scoreboard"
                 class="bg-gradient-to-r from-amber-600/10 to-brand-600/10 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-4 hidden">
                 <div class="flex items-center gap-3">
@@ -365,12 +400,12 @@
                         <i data-lucide="flag" class="w-6 h-6"></i>
                     </div>
                     <div>
-                        <div class="text-xs text-slate-400 font-bold">⛳️ CODE GOLF SCOREBOARD</div>
+                        <div class="text-xs text-slate-400 font-bold">⛳️ SUPER CODE GOLF SCOREBOARD</div>
                         <div class="text-lg font-extrabold text-amber-400 flex items-center gap-2">
                             極限圧縮を達成！
                             <span id="golf-rank-badge"
                                 class="px-2 py-0.5 text-xs bg-red-500 text-white rounded font-mono font-bold animate-pulse">RANK
-                                S</span>
+                                SSS</span>
                         </div>
                     </div>
                 </div>
@@ -474,7 +509,7 @@
     </main>
 
     <footer class="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
-        <p>Web Asset & JS Bundler with Code Golfing &copy; 2026. すべての処理はブラウザのメモリ上で完全にローカル実行されます。</p>
+        <p>Web Asset & JS Bundler with Super Code Golfing &copy; 2026. すべての処理はブラウザのメモリ上で完全にローカル実行されます。</p>
     </footer>
 
     <!-- カスタムトースト通知 -->
@@ -490,7 +525,7 @@
            ==========================================================================
            1. CONFIG & RULES (環境設定・データ駆動ルール)
            2. STORE (ES6 Classベース・グローバル状態管理モジュール)
-           3. AST PLUGINS (Babel/AST用コードゴルフ拡張プラグイン)
+           3. AST PLUGINS & PASSES (Babel/AST用コードゴルフ拡張パスモジュール群)
            4. COMPILER CORE (ビルドオーケストレーション、解決、バンドル、リンク処理)
            5. UTILS (共通ユーティリティ)
            6. UI MANAGER (DOM操作、D&D、イベント委譲、レンダリング、一括リスナー)
@@ -501,48 +536,50 @@
         // 1. CONFIG & RULES (環境設定・データ駆動ルール)
         // ==========================================================================
         const Config = {
-            compilerEnv: {
-                importMap: {},
-                cdnBaseUrl: "https://esm.sh/",
-                // 必要な場合は外部UIや設定ファイルから注入されるべきデータ
-                globalAliases: {}
-            },
+            compilerEnv: { importMap: {}, cdnBaseUrl: "https://esm.sh/", globalAliases: {} },
+            crossAssetDictionary: null,
             extensionRules: {
+                // コアエンジンから特定のライブラリ依存を切り離すためのバイパス判定ルール
+                manglingBypass: [
+                    {
+                        id: 'detect-dynamic-css-engines',
+                        condition: (paths, store) => {
+                            // ここにTailwindなどの「実行時にクラス名を動的生成する」系の検知ロジックを隔離する
+                            for (const p of paths) {
+                                const ext = p.split('.').pop().toLowerCase();
+                                const content = store.getFile(p).content || "";
+                                if (['html', 'htm'].includes(ext) && (content.includes('tailwindcss.com') || content.includes('unocss'))) return true;
+                                if (/tailwind\.config\.(js|cjs|mjs|ts)$/i.test(p)) return true;
+                                if (ext === 'css' && /@tailwind\s+(base|components|utilities)/.test(content)) return true;
+                            }
+                            return false;
+                        },
+                        message: "[ルール適用] 実行時CSSジェネレータを検知したため、UI保護のためにクラス名圧縮をバイパスします。"
+                    }
+                    // 将来的にVueやReactの動的クラスバインディング検知ルールなどもここに追加可能
+                ],
                 dom: [
                     {
                         id: 'tailwind-cdn-injector',
-                        // クラス名の推測ではなく、プロジェクト構造の「静的解析」で確定させる
                         condition: (html, store) => {
-                            // すでに手動でTailwindが読み込まれている場合はスキップ
                             if (html.includes('tailwindcss.com')) return false;
                             if (!store) return false;
 
                             const paths = store.getFilePaths();
                             for (const path of paths) {
-                                // 1: 設定ファイルの存在確認
-                                if (/tailwind\.config\.(js|cjs|mjs|ts)$/i.test(path)) {
-                                    return true;
-                                }
+                                if (/tailwind\.config\.(js|cjs|mjs|ts)$/i.test(path)) return true;
 
-                                // 2: CSSファイル内の @tailwind ディレクティブの確認
                                 if (path.endsWith('.css')) {
                                     const content = store.getFile(path).content || "";
-                                    if (/@tailwind\s+(base|components|utilities)/.test(content)) {
-                                        return true;
-                                    }
+                                    if (/@tailwind\s+(base|components|utilities)/.test(content)) return true;
                                 }
 
-                                // 3: package.json の依存パッケージ確認
                                 if (path.endsWith('package.json')) {
                                     try {
                                         const pkg = JSON.parse(store.getFile(path).content);
                                         const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-                                        if (deps['tailwindcss']) {
-                                            return true;
-                                        }
-                                    } catch (e) {
-                                        // JSONパースエラー時は安全に無視
-                                    }
+                                        if (deps['tailwindcss']) return true;
+                                    } catch (e) { }
                                 }
                             }
                             return false;
@@ -555,7 +592,6 @@
                         }
                     }
                 ],
-                // Reactの勝手なimport注入を削除
                 source: [],
                 strings: [
                     {
@@ -600,14 +636,9 @@
                     },
                     {
                         id: 'react-jsx-automatic',
-                        // 単なる拡張子や文字列検索ではなく、プロジェクトの静的構造（store）から推論する
                         condition: (source, path, store) => {
                             if (!path || (!path.endsWith('.tsx') && !path.endsWith('.jsx'))) return false;
-
-                            // 1: コード内に明示的な import があればモジュール環境と確定
                             if (/import\s+.*?from\s+['"]react['"]/.test(source) || /require\(['"]react['"]\)/.test(source)) return true;
-
-                            // 2: package.json の依存関係をチェックし、モダンビルド環境か判定
                             if (store) {
                                 const paths = store.getFilePaths();
                                 for (const p of paths) {
@@ -620,7 +651,6 @@
                                     }
                                 }
                             }
-                            // 証拠が無ければ UMD（レガシー）環境とみなし false を返す
                             return false;
                         },
                         apply: (options) => {
@@ -635,7 +665,6 @@
                         condition: () => true,
                         apply: (options) => {
                             options.presets = [
-                                // モダン環境でないと推論された場合、グローバル変数にフォールバックできる classic を適用
                                 ['react', { runtime: 'classic' }],
                                 ['typescript', { isTSX: true, allExtensions: true }]
                             ];
@@ -662,12 +691,11 @@
         // 2. STORE (ES6 Classベース・グローバル状態管理モジュール)
         // ==========================================================================
         class StoreManager {
-            #filesStore = {}; // 内部状態を安全に隠蔽化（カプセル化）
+            #filesStore = {};
             #currentMode = 'direct';
             #fileOrder = [];
             #usedFilesSet = new Set();
 
-            // 外部にはシャローコピーした安全なクローンを返し、生データの上書き改ざんをブロック
             get filesStore() {
                 const copy = {};
                 for (const [key, value] of Object.entries(this.#filesStore)) {
@@ -724,7 +752,7 @@
             getFile(path) {
                 const file = this.#filesStore[path];
                 if (!file) return null;
-                return { ...file }; // プロパティ書き換え防止のコピー返却
+                return { ...file };
             }
 
             hasFile(path) {
@@ -732,7 +760,6 @@
             }
 
             getFilePaths() {
-                // ファイルパス一覧を配列で取得
                 return Object.keys(this.#filesStore);
             }
 
@@ -746,36 +773,488 @@
         const Store = new StoreManager();
 
         // ==========================================================================
-        // 3. AST PLUGINS (Babel/AST用コードゴルフ拡張プラグイン)
+        // 3. AST PLUGINS & PASSES (Babel/AST用コードゴルフ拡張パスモジュール群)
         // ==========================================================================
-        const ASTPlugins = {
-            consoleStripperPlugin() {
+
+        class ExtremeGolfPass {
+            getVisitor(t, state, options) {
                 return {
-                    visitor: {
-                        CallExpression(path) {
-                            const callee = path.node.callee;
-                            if (
-                                callee.type === 'MemberExpression' &&
-                                callee.object.type === 'Identifier' &&
-                                callee.object.name === 'console' &&
-                                callee.property.type === 'Identifier' &&
-                                ['log', 'debug', 'info', 'warn', 'clear'].includes(callee.property.name)
-                            ) {
-                                if (path.parentPath.isExpressionStatement()) {
-                                    path.remove();
-                                } else {
-                                    path.replaceWith({ type: 'Identifier', name: 'undefined' });
+                    "FunctionDeclaration|FunctionExpression|ArrowFunctionExpression"(path) {
+                        if (!options.enableExtreme || !path.node || !path.isFunction()) return;
+                        let hasArguments = false;
+                        path.traverse({ Identifier(innerPath) { if (innerPath.node.name === 'arguments') hasArguments = true; } });
+                        if (hasArguments) return;
+                        const bodyPath = path.get('body'); if (!bodyPath.isBlockStatement()) return;
+                        let modified = false;
+                        const stmts = bodyPath.get('body');
+                        if (Array.isArray(stmts)) {
+                            stmts.forEach(stmtPath => {
+                                if (stmtPath.isVariableDeclaration()) {
+                                    const declarations = stmtPath.node.declarations;
+                                    // 分割代入 (let {x} = obj;) など特殊な宣言が混ざっている場合は安全のためスキップ
+                                    if (declarations.some(decl => !t.isIdentifier(decl.id))) return;
+
+                                    const assignments = [];
+                                    declarations.forEach(decl => {
+                                        path.node.params.push(t.identifier(decl.id.name));
+                                        // 初期化式(decl.init)をそのまま使い回さずクローンする
+                                        if (decl.init) assignments.push(t.assignmentExpression('=', t.identifier(decl.id.name), t.cloneNode(decl.init, true)));
+                                    });
+                                    if (assignments.length > 0) {
+                                        const sequence = assignments.length === 1 ? assignments[0] : t.sequenceExpression(assignments);
+                                        stmtPath.replaceWith(t.expressionStatement(sequence));
+                                    } else { stmtPath.remove(); }
+                                    modified = true;
                                 }
-                            }
-                        },
-                        DebuggerStatement(path) {
-                            path.remove();
+                            });
+                        }
+                        if (modified) state.changed = true;
+                    },
+                    ArrowFunctionExpression(path) {
+                        if (!options.enableExtreme || !path.isArrowFunctionExpression()) return;
+                        const body = path.node.body;
+                        if (t.isBlockStatement(body) && body.body && body.body.length === 1 && t.isReturnStatement(body.body[0])) {
+                            // 戻り値もクローンして安全に置換
+                            const retArg = body.body[0].argument ? t.cloneNode(body.body[0].argument, true) : t.identifier('undefined');
+                            path.get('body').replaceWith(retArg); state.changed = true;
+                        }
+                    },
+                    FunctionExpression(path) {
+                        if (!options.enableExtreme || !path.isFunctionExpression()) return;
+                        if (path.node.id || path.node.generator || path.node.async) return;
+                        const parent = path.parent; if (t.isNewExpression(parent) || t.isVariableDeclarator(parent) || t.isAssignmentExpression(parent) || t.isProperty(parent)) return;
+                        let hasThisOrArgs = false; path.traverse({ ThisExpression() { hasThisOrArgs = true; }, Identifier(p) { if (p.node.name === 'arguments') hasThisOrArgs = true; } });
+                        if (!hasThisOrArgs) {
+                            // パラメータとボディをクローン
+                            path.replaceWith(t.arrowFunctionExpression(path.node.params.map(p => t.cloneNode(p, true)), t.cloneNode(path.node.body, true)));
+                            state.changed = true;
+                        }
+                    },
+                    WhileStatement(path) {
+                        if (!options.enableExtreme || !path.isWhileStatement()) return;
+                        const test = path.node.test;
+                        if (t.isBooleanLiteral(test, { value: true }) || (t.isNumericLiteral(test) && test.value !== 0) || (t.isUnaryExpression(test, { operator: '!' }) && t.isNumericLiteral(test.argument, { value: 0 }))) {
+                            // ループのボディをクローン
+                            path.replaceWith(t.forStatement(null, null, null, t.cloneNode(path.node.body, true))); state.changed = true;
+                        }
+                    },
+                    MemberExpression(path) {
+                        if (!options.enableExtreme || !path.isMemberExpression()) return;
+                        if (t.isIdentifier(path.node.object, { name: 'window' }) && !path.node.computed && t.isIdentifier(path.node.property)) {
+                            const propName = path.node.property.name; if (!path.scope.hasBinding(propName)) { path.replaceWith(t.identifier(propName)); state.changed = true; return; }
+                        }
+                        if (path.node.computed && t.isStringLiteral(path.node.property)) {
+                            const propName = path.node.property.value; if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(propName)) { path.node.computed = false; path.node.property = t.identifier(propName); state.changed = true; }
+                        }
+                    },
+                    CallExpression(path) {
+                        if (!options.enableExtreme || !path.isCallExpression()) return;
+                        const { callee, arguments: args } = path.node;
+                        if (args && args.length === 1 && t.isIdentifier(callee, { name: 'String' })) {
+                            path.replaceWith(t.binaryExpression('+', t.stringLiteral(""), t.cloneNode(args[0], true))); state.changed = true;
                         }
                     }
                 };
-            },
-            createManglerPlugin(extraReserved = []) {
-                const reservedWords = new Set([
+            }
+        }
+
+        class SafeStructureOptimizationPass {
+            getVisitor(t, state, options) {
+                return {
+                    "Program|BlockStatement"(path) {
+                        if (!path.node || (!path.isProgram() && !path.isBlockStatement())) return;
+                        const bodyPath = path.get('body'); if (!Array.isArray(bodyPath)) return;
+
+                        for (let i = 0; i < bodyPath.length - 1; i++) {
+                            const current = bodyPath[i]; if (!current.node) continue;
+                            let nextIdx = i + 1; while (nextIdx < bodyPath.length && !bodyPath[nextIdx].node) nextIdx++;
+                            if (nextIdx >= bodyPath.length) break;
+                            const next = bodyPath[nextIdx];
+
+                            if (current.isVariableDeclaration() && next.isVariableDeclaration()) {
+                                if (current.node.kind === next.node.kind || (current.node.kind !== 'var' && next.node.kind !== 'var')) {
+                                    current.node.kind = (current.node.kind === 'var' && next.node.kind === 'var') ? 'var' : 'let';
+                                    // 宣言の統合時に必ずクローンする
+                                    const clonedDecls = next.node.declarations.map(d => t.cloneNode(d, true));
+                                    current.node.declarations.push(...clonedDecls);
+                                    next.remove(); state.changed = true; i--;
+                                }
+                            }
+                        }
+                        for (let i = 0; i < bodyPath.length - 1; i++) {
+                            const current = bodyPath[i]; if (!current.node) continue;
+                            let nextIdx = i + 1; while (nextIdx < bodyPath.length && !bodyPath[nextIdx].node) nextIdx++;
+                            if (nextIdx >= bodyPath.length) break;
+                            const next = bodyPath[nextIdx];
+
+                            if (current.isExpressionStatement() && t.isAssignmentExpression(current.node.expression) && next.isReturnStatement()) {
+                                const assignLeft = current.node.expression.left; const retArg = next.node.argument;
+                                if (t.isIdentifier(assignLeft) && t.isIdentifier(retArg) && assignLeft.name === retArg.name) {
+                                    // 代入式をクローンして渡す
+                                    next.node.argument = t.cloneNode(current.node.expression, true);
+                                    current.remove(); state.changed = true;
+                                }
+                            }
+                        }
+                        for (let i = 0; i < bodyPath.length - 1; i++) {
+                            const current = bodyPath[i]; if (!current.node) continue;
+                            let nextIdx = i + 1; while (nextIdx < bodyPath.length && !bodyPath[nextIdx].node) nextIdx++;
+                            if (nextIdx >= bodyPath.length) break;
+                            const next = bodyPath[nextIdx];
+
+                            if (current.isExpressionStatement() && next.isExpressionStatement()) {
+                                const exprs = [];
+                                // 全ての式要素を安全にディープコピーしてAST汚染を防ぐ
+                                if (t.isSequenceExpression(current.node.expression)) exprs.push(...current.node.expression.expressions.map(e => t.cloneNode(e, true)));
+                                else exprs.push(t.cloneNode(current.node.expression, true));
+
+                                if (t.isSequenceExpression(next.node.expression)) exprs.push(...next.node.expression.expressions.map(e => t.cloneNode(e, true)));
+                                else exprs.push(t.cloneNode(next.node.expression, true));
+
+                                current.replaceWith(t.expressionStatement(t.sequenceExpression(exprs)));
+                                next.remove(); state.changed = true; i--;
+                            }
+                        }
+                    },
+                    IfStatement(path) {
+                        if (!options.enableExtreme || !path.isIfStatement()) return;
+                        const { test, consequent, alternate } = path.node;
+                        const getSingleExpr = (stmt) => {
+                            if (!stmt) return null; if (t.isExpressionStatement(stmt)) return stmt.expression;
+                            if (t.isBlockStatement(stmt) && stmt.body && stmt.body.length === 1 && t.isExpressionStatement(stmt.body[0])) return stmt.body[0].expression;
+                            return null;
+                        };
+                        const getReturnExpr = (stmt) => {
+                            if (!stmt) return null; if (t.isReturnStatement(stmt)) return stmt.argument || t.identifier('undefined');
+                            if (t.isBlockStatement(stmt) && stmt.body && stmt.body.length === 1 && t.isReturnStatement(stmt.body[0])) return stmt.body[0].argument || t.identifier('undefined');
+                            return null;
+                        };
+                        const getAssignExpr = (stmt) => {
+                            if (!stmt) return null; const expr = getSingleExpr(stmt); return (expr && t.isAssignmentExpression(expr)) ? expr : null;
+                        };
+                        const consExpr = getSingleExpr(consequent); const altExpr = alternate ? getSingleExpr(alternate) : null;
+                        const consRet = getReturnExpr(consequent); const altRet = alternate ? getReturnExpr(alternate) : null;
+                        const consAssign = getAssignExpr(consequent); const altAssign = alternate ? getAssignExpr(alternate) : null;
+
+                        // if文を三項演算子などに崩す時、元のパーツを全てクローンする
+                        if (consAssign && altAssign && t.isIdentifier(consAssign.left) && t.isIdentifier(altAssign.left) && consAssign.left.name === altAssign.left.name && consAssign.operator === altAssign.operator) {
+                            path.replaceWith(t.expressionStatement(t.assignmentExpression(consAssign.operator, t.cloneNode(consAssign.left, true), t.conditionalExpression(t.cloneNode(test, true), t.cloneNode(consAssign.right, true), t.cloneNode(altAssign.right, true))))); state.changed = true; return;
+                        }
+                        if (consExpr && altExpr) { path.replaceWith(t.expressionStatement(t.conditionalExpression(t.cloneNode(test, true), t.cloneNode(consExpr, true), t.cloneNode(altExpr, true)))); state.changed = true; }
+                        else if (consRet && altRet) { path.replaceWith(t.returnStatement(t.conditionalExpression(t.cloneNode(test, true), t.cloneNode(consRet, true), t.cloneNode(altRet, true)))); state.changed = true; }
+                        else if (consExpr && !alternate) {
+                            if (t.isUnaryExpression(test, { operator: '!' })) path.replaceWith(t.expressionStatement(t.logicalExpression('||', t.cloneNode(test.argument, true), t.cloneNode(consExpr, true))));
+                            else path.replaceWith(t.expressionStatement(t.logicalExpression('&&', t.cloneNode(test, true), t.cloneNode(consExpr, true))));
+                            state.changed = true;
+                        }
+                    }
+                };
+            }
+        }
+
+        // 厳格な不要コード排除 (DCE) パス
+        class DeadCodeEliminationPass {
+            getVisitor(t, state, options) {
+                return {
+                    VariableDeclarator(path) {
+                        const id = path.get('id');
+                        if (id.isIdentifier()) {
+                            const name = id.node.name;
+                            const binding = path.scope.getBinding(name);
+                            if (binding && !binding.referenced && binding.kind !== 'module' && !options.extraReserved?.includes(name)) {
+                                const initPath = path.get('init');
+                                if (!initPath.node || initPath.isPure()) {
+                                    path.remove();
+                                    state.changed = true;
+                                }
+                            }
+                        }
+                    },
+                    FunctionDeclaration(path) {
+                        const id = path.get('id');
+                        if (id.isIdentifier()) {
+                            const name = id.node.name;
+                            const binding = path.scope.getBinding(name);
+                            if (binding && !binding.referenced && !options.extraReserved?.includes(name) && path.parentPath.isProgram()) {
+                                path.remove();
+                                state.changed = true;
+                            }
+                        }
+                    },
+                    DebuggerStatement(path) {
+                        path.remove();
+                        state.changed = true;
+                    },
+                    CallExpression(path) {
+                        if (!options.enableConsoleStrip) return;
+                        const callee = path.node.callee;
+                        if (
+                            callee.type === 'MemberExpression' &&
+                            callee.object.type === 'Identifier' &&
+                            callee.object.name === 'console' &&
+                            callee.property.type === 'Identifier' &&
+                            ['log', 'debug', 'info', 'warn', 'clear'].includes(callee.property.name)
+                        ) {
+                            if (path.parentPath.isExpressionStatement()) {
+                                path.remove();
+                            } else {
+                                path.replaceWith(t.identifier('undefined'));
+                            }
+                            state.changed = true;
+                        }
+                    }
+                };
+            }
+        }
+
+        // 定数畳み込み＆軽量化パス
+        class ConstantFoldingPass {
+            getVisitor(t, state, options) {
+                return {
+                    BinaryExpression(path) {
+                        const { operator, left, right } = path.node;
+                        if (t.isNumericLiteral(left) && t.isNumericLiteral(right)) {
+                            let res;
+                            switch (operator) {
+                                case '+': res = left.value + right.value; break;
+                                case '-': res = left.value - right.value; break;
+                                case '*': res = left.value * right.value; break;
+                                case '/': res = left.value / right.value; break;
+                            }
+                            if (res !== undefined) {
+                                path.replaceWith(t.numericLiteral(res));
+                                state.changed = true;
+                            }
+                        } else if (operator === '+' && t.isStringLiteral(left) && t.isStringLiteral(right)) {
+                            path.replaceWith(t.stringLiteral(left.value + right.value));
+                            state.changed = true;
+                        }
+                    },
+                    BooleanLiteral(path) {
+                        if (options.enableExtreme) {
+                            path.replaceWith(t.unaryExpression('!', t.numericLiteral(path.node.value ? 0 : 1)));
+                            state.changed = true;
+                        }
+                    },
+                    NumericLiteral(path) {
+                        if (options.enableExtreme) {
+                            const val = path.node.value;
+                            if (Number.isInteger(val) && val >= 1000 && val.toString().endsWith('000')) {
+                                const cleanExp = val.toExponential().replace('+', '');
+                                if (cleanExp.length < val.toString().length) {
+                                    path.node.extra = { raw: cleanExp, rawValue: val };
+                                    state.changed = true;
+                                }
+                            }
+                        }
+                    },
+                    Identifier(path) {
+                        if (options.enableExtreme) {
+                            if (path.node.name === 'undefined' && !path.scope.hasBinding('undefined')) {
+                                path.replaceWith(t.unaryExpression('void', t.numericLiteral(0)));
+                                state.changed = true;
+                            } else if (path.node.name === 'Infinity' && !path.scope.hasBinding('Infinity')) {
+                                path.replaceWith(t.binaryExpression('/', t.numericLiteral(1), t.numericLiteral(0)));
+                                path.skip();
+                                state.changed = true;
+                            }
+                        }
+                    }
+                };
+            }
+        }
+
+        // 文字列シェーダー・Worker・同期アセットゴルフ圧縮パス
+        class StringCompressorPass {
+            getVisitor(t, state, options) {
+                return {
+                    "StringLiteral|TemplateElement"(path) {
+                        const isTemplate = t.isTemplateElement(path.node);
+                        let text = isTemplate ? path.node.value.raw : path.node.value;
+                        if (!text || text.length < 2) return;
+
+                        let modified = false;
+
+                        // 3. クロスアセット同期辞書の適用
+                        if (options.crossAssetEnabled && Config.crossAssetDictionary) {
+                            const dict = Config.crossAssetDictionary;
+                            if (dict[text]) {
+                                text = dict[text];
+                                modified = true;
+                            } else {
+                                let tempText = text;
+                                let subModified = false;
+                                tempText = tempText.replace(/([.#])([a-zA-Z0-9_-]+)/g, (match, prefix, name) => {
+                                    if (dict[name]) {
+                                        subModified = true;
+                                        return prefix + dict[name];
+                                    }
+                                    return match;
+                                });
+                                if (!subModified && tempText.includes(' ')) {
+                                    const classes = tempText.split(/\s+/);
+                                    if (classes.every(c => dict[c] || c.length < 3)) {
+                                        tempText = classes.map(c => dict[c] || c).join(' ');
+                                        subModified = true;
+                                    }
+                                }
+                                if (subModified) {
+                                    text = tempText;
+                                    modified = true;
+                                }
+                            }
+                        }
+
+                        if (options.golfStringHack) {
+                            for (const rule of Config.extensionRules.strings) {
+                                if (rule.condition(text)) {
+                                    const compiled = rule.apply(text, { Babel, plugins: [] });
+                                    if (compiled !== text) {
+                                        text = compiled;
+                                        modified = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (modified) {
+                            if (isTemplate) {
+                                path.node.value.raw = text;
+                                path.node.value.cooked = text.replace(/\\/g, '\\\\');
+                            } else {
+                                path.node.value = text;
+                            }
+                            state.changed = true;
+                        }
+                    }
+                };
+            }
+        }
+
+        // コスト計算付き GlobalAliasingPass の新設
+        class GlobalAliasingPass {
+            constructor() {
+                // 一般的なビルトインAPIとDOMアクセスを検出対象とする
+                this.targets = [
+                    'document', 'window', 'console', 'Math', 'Object', 'Array', 'String', 'Number',
+                    // 'document.getElementById' などは外し、代わりに 'document' 自体を 'd' にエイリアス化して
+                    // d.getElementById('...') とさせる方が、最終的な文字数効率と安全性のバランスが良い。
+                    'Math.floor', 'Math.random', 'Math.ceil', 'Math.round', 'Math.abs', 'Math.max', 'Math.min',
+                    'Object.keys', 'Object.values', 'Object.assign', 'Array.isArray'
+                ];
+            }
+
+            getStaticMemberExpressionStr(node) {
+                if (node.type === 'MemberExpression' && !node.computed && node.property.type === 'Identifier') {
+                    if (node.object.type === 'Identifier') {
+                        return `${node.object.name}.${node.property.name}`;
+                    } else if (node.object.type === 'MemberExpression') {
+                        const parentStr = this.getStaticMemberExpressionStr(node.object);
+                        if (parentStr) {
+                            return `${parentStr}.${node.property.name}`;
+                        }
+                    }
+                }
+                return null;
+            }
+
+            getVisitor(t, state, options) {
+                const self = this;
+                return {
+                    Program: {
+                        enter(path) {
+                            if (!options.globalAliasingEnabled) return;
+                            const counts = new Map();
+
+                            // AST全体から対象APIの出現回数をカウント
+                            path.traverse({
+                                MemberExpression(p) {
+                                    const exprStr = self.getStaticMemberExpressionStr(p.node);
+                                    if (exprStr && self.targets.includes(exprStr)) {
+                                        counts.set(exprStr, (counts.get(exprStr) || 0) + 1);
+                                    }
+                                },
+                                Identifier(p) {
+                                    const name = p.node.name;
+                                    if (self.targets.includes(name) && !p.scope.hasBinding(name, true)) {
+                                        // windowなどのルート識別子を単体カウント
+                                        counts.set(name, (counts.get(name) || 0) + 1);
+                                    }
+                                }
+                            });
+
+                            const aliasesToInject = [];
+                            let aliasCounter = 0;
+
+                            for (const [exprStr, count] of counts.entries()) {
+                                if (count <= 1) continue;
+
+                                const originalBytes = exprStr.length * count;
+                                const aliasVarName = `_g_${aliasCounter}`; // 後段のマングラーで安全に一文字にされる
+                                // エイリアス宣言文: `let _g_0=document.getElementById;` のコスト + 呼び出し分の参照文字数コスト
+                                const declareCost = 13 + aliasVarName.length + exprStr.length;
+                                const referenceCost = aliasVarName.length * count;
+                                const savedBytes = originalBytes - (declareCost + referenceCost);
+
+                                if (savedBytes > 0) {
+                                    aliasesToInject.push({ exprStr, aliasVarName, savedBytes });
+                                    aliasCounter++;
+                                }
+                            }
+
+                            if (aliasesToInject.length > 0) {
+                                state.globalAliases = aliasesToInject;
+
+                                // 最上部にエイリアス一括宣言を注入
+                                const declarations = aliasesToInject.map(item => {
+                                    // AST値ノードを動的パースして割当
+                                    const parts = item.exprStr.split('.');
+                                    let valNode = t.identifier(parts[0]);
+                                    for (let i = 1; i < parts.length; i++) {
+                                        valNode = t.memberExpression(valNode, t.identifier(parts[i]));
+                                    }
+                                    return t.variableDeclarator(t.identifier(item.aliasVarName), valNode);
+                                });
+                                const varDeclaration = t.variableDeclaration('const', declarations);
+                                path.unshiftContainer('body', varDeclaration);
+                                state.changed = true;
+                            }
+                        },
+                        exit(path, state) {
+                            if (!state.globalAliases || state.globalAliases.length === 0) return;
+                            const aliases = state.globalAliases;
+
+                            path.traverse({
+                                MemberExpression(p) {
+                                    const exprStr = self.getStaticMemberExpressionStr(p.node);
+                                    const found = aliases.find(a => a.exprStr === exprStr);
+                                    if (found) {
+                                        p.replaceWith(t.identifier(found.aliasVarName));
+                                        state.changed = true;
+                                    }
+                                },
+                                Identifier(p) {
+                                    if (p.isReferencedIdentifier()) {
+                                        const name = p.node.name;
+                                        const found = aliases.find(a => a.exprStr === name);
+                                        if (found && !p.scope.hasBinding(name, true)) {
+                                            p.replaceWith(t.identifier(found.aliasVarName));
+                                            state.changed = true;
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                };
+            }
+        }
+
+        // 最終局面フェーズ用変数マングラー (Mangler)
+        class ManglerPass {
+            constructor(extraReserved = []) {
+                this.reservedWords = new Set([
                     'do', 'if', 'in', 'for', 'let', 'new', 'try', 'var', 'case', 'else', 'with', 'await',
                     'break', 'catch', 'class', 'const', 'super', 'throw', 'while', 'yield', 'delete',
                     'export', 'import', 'return', 'switch', 'typeof', 'default', 'extends', 'finally',
@@ -783,349 +1262,77 @@
                     'undefined', 'Math', 'console', 'window', 'document', 'navigator', 'this',
                     'require', 'module', 'exports', '__esModule'
                 ]);
-                extraReserved.forEach(word => reservedWords.add(word));
+                extraReserved.forEach(word => this.reservedWords.add(word));
+            }
 
+            getVisitor(t) {
+                const reserved = this.reservedWords;
                 return {
-                    visitor: {
-                        Program(path) {
-                            const nameFrequency = new Map(); // 出現回数を記録するMap
-                            path.traverse({
-                                Identifier(p) {
-                                    if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
-                                        const name = p.node.name;
-                                        const binding = p.scope.getBinding(name);
-                                        const isGlobal = !binding && !p.scope.hasBinding(name, true);
+                    Program(path) {
+                        const nameFrequency = new Map();
 
-                                        if (isGlobal || name.length === 1 || reservedWords.has(name)) {
-                                            if (isGlobal || name.length === 1) reservedWords.add(name);
-                                        } else {
-                                            nameFrequency.set(name, (nameFrequency.get(name) || 0) + 1);
-                                        }
+                        path.traverse({
+                            Identifier(p) {
+                                if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
+                                    const name = p.node.name;
+                                    const binding = p.scope.getBinding(name);
+                                    const isGlobal = !binding && !p.scope.hasBinding(name, true);
+
+                                    if (isGlobal || name.length === 1 || reserved.has(name)) {
+                                        if (isGlobal || name.length === 1) reserved.add(name);
+                                    } else {
+                                        nameFrequency.set(name, (nameFrequency.get(name) || 0) + 1);
                                     }
                                 }
-                            });
+                            }
+                        });
 
-                            let idCounter = 0;
-                            const generateName = () => {
-                                const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$';
-                                let num = idCounter++;
-                                let name = '';
-                                do {
-                                    name = chars[num % chars.length] + name;
-                                    num = Math.floor(num / chars.length) - 1;
-                                } while (num >= 0);
-                                return name;
-                            };
+                        let idCounter = 0;
+                        const generateMangledName = () => {
+                            const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$';
+                            let num = idCounter++;
+                            let name = '';
+                            do {
+                                name = chars[num % chars.length] + name;
+                                num = Math.floor(num / chars.length) - 1;
+                            } while (num >= 0);
+                            return name;
+                        };
 
-                            const renameMap = new Map();
-                            // 出現頻度の降順で短い名前を割り当て
-                            const sortedNames = Array.from(nameFrequency.keys()).sort((a, b) => nameFrequency.get(b) - nameFrequency.get(a));
+                        const sortedNames = Array.from(nameFrequency.keys())
+                            .sort((a, b) => nameFrequency.get(b) - nameFrequency.get(a));
 
-                            sortedNames.forEach(oldName => {
-                                let newName;
-                                do { newName = generateName(); } while (reservedWords.has(newName));
-                                reservedWords.add(newName);
-                                renameMap.set(oldName, newName);
-                            });
+                        const renameMap = new Map();
+                        sortedNames.forEach(oldName => {
+                            let newName;
+                            do {
+                                newName = generateMangledName();
+                            } while (reserved.has(newName));
+                            reserved.add(newName);
+                            renameMap.set(oldName, newName);
+                        });
 
-                            path.traverse({
-                                Identifier(p) {
-                                    if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
-                                        const name = p.node.name;
-                                        if (renameMap.has(name)) {
-                                            p.node.name = renameMap.get(name);
-                                        }
+                        path.traverse({
+                            Identifier(p) {
+                                if (p.isBindingIdentifier() || p.isReferencedIdentifier()) {
+                                    const name = p.node.name;
+                                    if (renameMap.has(name)) {
+                                        p.node.name = renameMap.get(name);
                                     }
                                 }
-                            });
-                        }
-                    }
-                };
-            },
-            extremeGolfPlugin(babel, state) {
-                const { types: t } = babel;
-                // optionsは state.opts に渡されるBabel標準仕様を遵守
-                const options = state.opts || {};
-
-                //UIの個別のチェックボックスに依存するのをやめ、極限圧縮(Extreme)が有効な場合は、無条件でGLSL等の文字列ハックも発動させる
-                const enableStringHack = true;
-
-                const getExpressionFromStatement = (stmt) => {
-                    if (!stmt) return null;
-                    if (t.isExpressionStatement(stmt)) return stmt.expression;
-                    if (t.isReturnStatement(stmt)) return stmt.argument || t.identifier('undefined');
-                    if (t.isBlockStatement(stmt)) {
-                        if (stmt.body.length === 0) return t.identifier('undefined');
-                        const exprs = [];
-                        for (let i = 0; i < stmt.body.length; i++) {
-                            const s = stmt.body[i];
-                            if (t.isExpressionStatement(s)) exprs.push(s.expression);
-                            else if (i === stmt.body.length - 1 && t.isReturnStatement(s)) exprs.push(s.argument || t.identifier('undefined'));
-                            else return null;
-                        }
-                        return exprs.length === 1 ? exprs[0] : t.sequenceExpression(exprs);
-                    }
-                    return null;
-                };
-
-                const mergeVariablesSafely = (path) => {
-                    const bodyPath = path.get('body');
-                    if (!Array.isArray(bodyPath)) return;
-                    for (let i = 0; i < bodyPath.length - 1; i++) {
-                        const current = bodyPath[i];
-                        const next = bodyPath[i + 1];
-                        if (current.isVariableDeclaration() && next.isVariableDeclaration()) {
-                            if (current.node.kind === next.node.kind || (current.node.kind !== 'var' && next.node.kind !== 'var')) {
-                                const targetKind = (current.node.kind === 'var' && next.node.kind === 'var') ? 'var' : 'let';
-                                current.node.kind = targetKind;
-                                current.node.declarations.push(...next.node.declarations);
-                                next.remove();
-                                i--;
                             }
-                        }
-                    }
-                };
-
-                const mergeReturnAssignment = (path) => {
-                    const bodyPath = path.get('body');
-                    if (!Array.isArray(bodyPath)) return;
-                    for (let i = 0; i < bodyPath.length - 1; i++) {
-                        const p1 = bodyPath[i];
-                        const p2 = bodyPath[i + 1];
-                        if (p1.isExpressionStatement() && t.isAssignmentExpression(p1.node.expression) && p2.isReturnStatement()) {
-                            const assignLeft = p1.node.expression.left;
-                            const retArg = p2.node.argument;
-                            if (t.isIdentifier(assignLeft) && t.isIdentifier(retArg) && assignLeft.name === retArg.name) {
-                                p2.node.argument = p1.node.expression;
-                                p1.remove();
-                            }
-                        }
-                    }
-                };
-                const mergeExpressions = (path) => {
-                    const bodyPath = path.get('body');
-                    if (!Array.isArray(bodyPath)) return;
-                    for (let i = 0; i < bodyPath.length - 1; i++) {
-                        const current = bodyPath[i];
-                        const next = bodyPath[i + 1];
-
-                        if (current.isExpressionStatement() && next.isExpressionStatement()) {
-                            const exprs = [];
-                            if (t.isSequenceExpression(current.node.expression)) exprs.push(...current.node.expression.expressions);
-                            else exprs.push(current.node.expression);
-
-                            if (t.isSequenceExpression(next.node.expression)) exprs.push(...next.node.expression.expressions);
-                            else exprs.push(next.node.expression);
-
-                            current.replaceWith(t.expressionStatement(t.sequenceExpression(exprs)));
-                            next.remove();
-                            i--;
-                        }
-                    }
-                };
-
-                return {
-                    visitor: {
-                        "Program|BlockStatement"(path) {
-                            mergeVariablesSafely(path);
-                            mergeReturnAssignment(path);
-                            mergeExpressions(path);
-                        },
-                        BooleanLiteral(path) {
-                            path.replaceWith(t.unaryExpression('!', t.numericLiteral(path.node.value ? 0 : 1)));
-                        },
-                        NumericLiteral(path) {
-                            const val = path.node.value;
-                            if (Number.isInteger(val) && val >= 1000 && val.toString().endsWith('000')) {
-                                const cleanExp = val.toExponential().replace('+', '');
-                                if (cleanExp.length < val.toString().length) {
-                                    path.node.extra = { raw: cleanExp, rawValue: val };
-                                }
-                            }
-                        },
-                        BinaryExpression(path) {
-                            const { operator, left, right } = path.node;
-                            if (operator === '===' && t.isIdentifier(right, { name: 'undefined' })) {
-                                path.node.operator = '==';
-                                path.node.right = t.nullLiteral();
-                            } else if (operator === '===' && t.isIdentifier(left, { name: 'undefined' })) {
-                                path.node.operator = '==';
-                                path.node.left = t.nullLiteral();
-                            }
-
-                            if (t.isNumericLiteral(left) && t.isNumericLiteral(right)) {
-                                let res;
-                                switch (operator) {
-                                    case '+': res = left.value + right.value; break;
-                                    case '-': res = left.value - right.value; break;
-                                    case '*': res = left.value * right.value; break;
-                                    case '/': res = left.value / right.value; break;
-                                }
-                                if (res !== undefined) path.replaceWith(t.numericLiteral(res));
-                            } else if (operator === '+' && t.isStringLiteral(left) && t.isStringLiteral(right)) {
-                                path.replaceWith(t.stringLiteral(left.value + right.value));
-                            }
-                        },
-                        IfStatement(path) {
-                            const { test, consequent, alternate } = path.node;
-
-                            const getPureExpression = (stmt) => {
-                                if (!stmt) return null;
-                                if (t.isExpressionStatement(stmt)) return stmt.expression;
-                                if (t.isBlockStatement(stmt) && stmt.body.length === 1 && t.isExpressionStatement(stmt.body[0])) {
-                                    return stmt.body[0].expression;
-                                }
-                                return null;
-                            };
-
-                            const getReturnExpression = (stmt) => {
-                                if (!stmt) return null;
-                                if (t.isReturnStatement(stmt)) return stmt.argument || t.identifier('undefined');
-                                if (t.isBlockStatement(stmt) && stmt.body.length === 1 && t.isReturnStatement(stmt.body[0])) {
-                                    return stmt.body[0].argument || t.identifier('undefined');
-                                }
-                                return null;
-                            };
-
-                            const getAssign = (stmt) => {
-                                if (!stmt) return null;
-                                if (t.isExpressionStatement(stmt) && t.isAssignmentExpression(stmt.expression)) return stmt.expression;
-                                if (t.isBlockStatement(stmt) && stmt.body.length === 1 && t.isExpressionStatement(stmt.body[0]) && t.isAssignmentExpression(stmt.body[0].expression)) return stmt.body[0].expression;
-                                return null;
-                            };
-
-                            const consPure = getPureExpression(consequent);
-                            const altPure = alternate ? getPureExpression(alternate) : null;
-                            const consRet = getReturnExpression(consequent);
-                            const altRet = alternate ? getReturnExpression(alternate) : null;
-                            const consAssign = getAssign(consequent);
-                            const altAssign = alternate ? getAssign(alternate) : null;
-
-                            if (consAssign && altAssign && t.isIdentifier(consAssign.left) && t.isIdentifier(altAssign.left) && consAssign.left.name === altAssign.left.name && consAssign.operator === altAssign.operator) {
-                                path.replaceWith(t.expressionStatement(
-                                    t.assignmentExpression(
-                                        consAssign.operator,
-                                        consAssign.left,
-                                        t.conditionalExpression(test, consAssign.right, altAssign.right)
-                                    )
-                                ));
-                                return;
-                            }
-
-                            if (consPure && altPure) {
-                                path.replaceWith(t.expressionStatement(t.conditionalExpression(test, consPure, altPure)));
-                            } else if (consRet && altRet) {
-                                path.replaceWith(t.returnStatement(t.conditionalExpression(test, consRet, altRet)));
-                            } else if (consPure && !alternate) {
-                                if (t.isUnaryExpression(test, { operator: '!' })) {
-                                    path.replaceWith(t.expressionStatement(t.logicalExpression('||', test.argument, consPure)));
-                                } else {
-                                    path.replaceWith(t.expressionStatement(t.logicalExpression('&&', test, consPure)));
-                                }
-                            }
-                        },
-                        Identifier(path) {
-                            if (path.node.name === 'undefined' && !path.scope.hasBinding('undefined')) {
-                                path.replaceWith(t.unaryExpression('void', t.numericLiteral(0)));
-                            }
-                            else if (path.node.name === 'Infinity' && !path.scope.hasBinding('Infinity')) {
-                                path.replaceWith(t.binaryExpression('/', t.numericLiteral(1), t.numericLiteral(0)));
-                                path.skip();
-                            }
-                        },
-                        ArrowFunctionExpression(path) {
-                            const expr = getExpressionFromStatement(path.node.body);
-                            if (expr) path.get('body').replaceWith(expr);
-                        },
-                        FunctionExpression(path) {
-                            if (path.node.id || path.node.generator || path.node.async) return;
-                            const parent = path.parent;
-                            if (t.isNewExpression(parent) || t.isVariableDeclarator(parent) ||
-                                t.isAssignmentExpression(parent) || t.isProperty(parent)) return;
-                            let hasThisOrArgs = false;
-                            path.traverse({
-                                ThisExpression() { hasThisOrArgs = true; },
-                                Identifier(p) { if (p.node.name === 'arguments') hasThisOrArgs = true; }
-                            });
-                            if (!hasThisOrArgs) path.replaceWith(t.arrowFunctionExpression(path.node.params, path.node.body));
-                        },
-                        CallExpression(path) {
-                            const { callee, arguments: args } = path.node;
-                            if (args.length === 1 && t.isIdentifier(callee)) {
-                                // String(x) => ""+x (BigIntでも動作)
-                                if (callee.name === 'String') {
-                                    path.replaceWith(t.binaryExpression('+', t.stringLiteral(""), args[0]));
-                                }
-                                // Number(x) => +x は BigInt と衝突してアプリをクラッシュさせるため削除
-                            }
-                        },
-                        WhileStatement(path) {
-                            const test = path.node.test;
-                            const isTrueLiteral = t.isBooleanLiteral(test, { value: true });
-                            const isNumberOne = t.isNumericLiteral(test) && test.value !== 0;
-                            const isBangZero = t.isUnaryExpression(test, { operator: '!' }) && t.isNumericLiteral(test.argument, { value: 0 });
-                            if (isTrueLiteral || isNumberOne || isBangZero) path.replaceWith(t.forStatement(null, null, null, path.node.body));
-                        },
-                        MemberExpression(path) {
-                            if (t.isIdentifier(path.node.object, { name: 'window' }) && !path.node.computed && t.isIdentifier(path.node.property)) {
-                                const propName = path.node.property.name;
-                                if (!path.scope.hasBinding(propName)) {
-                                    path.replaceWith(t.identifier(propName));
-                                    return;
-                                }
-                            }
-                            if (path.node.computed && t.isStringLiteral(path.node.property)) {
-                                const propName = path.node.property.value;
-                                if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(propName)) {
-                                    path.node.computed = false;
-                                    path.node.property = t.identifier(propName);
-                                }
-                            }
-                        },
-                        "StringLiteral|TemplateElement"(path) {
-                            if (!enableStringHack) return; // 選択的制御を実現
-
-                            const isTemplate = t.isTemplateElement(path.node);
-                            let text = isTemplate ? path.node.value.raw : path.node.value;
-                            if (!text || text.length < 15) return;
-
-                            const isSafeForJsParse = !isTemplate || (path.parentPath.node.expressions && path.parentPath.node.expressions.length === 0);
-
-                            let modified = false;
-                            for (const rule of Config.extensionRules.strings) {
-                                const context = (isSafeForJsParse && window.Babel)
-                                    ? { Babel: window.Babel, plugins: [typeof ASTPlugins.createManglerPlugin !== 'undefined' ? ASTPlugins.createManglerPlugin() : null].filter(Boolean) }
-                                    : null;
-
-                                if (rule.condition(text)) {
-                                    text = rule.apply(text, context);
-                                    modified = true;
-                                    break;
-                                }
-                            }
-
-                            if (modified) {
-                                if (isTemplate) {
-                                    path.node.value.raw = text;
-                                    path.node.value.cooked = text.replace(/\\/g, '\\\\');
-                                } else {
-                                    path.node.value = text;
-                                }
-                            }
-                        }
+                        });
                     }
                 };
             }
-        };
+        }
 
         // ==========================================================================
         // 4. COMPILER CORE (ビルドオーケストレーション、解決、バンドル、リンク処理)
         // ==========================================================================
         class Scanner {
             resolveRelativePath(fromPath, relativePath, store) {
-                // 1. プロジェクトの仮想ルート (Web Root) を推論する
                 let projectRoot = '';
-                // 階層が深くても、ファイル名が _virtual_ で始まるものは完全に無視する
                 const paths = store.getFilePaths().filter(p => !p.split('/').pop().startsWith('_virtual_'));
                 if (paths.length > 0) {
                     const firstSegments = paths.map(p => p.split('/')[0]);
@@ -1135,7 +1342,6 @@
                     }
                 }
 
-                // 2. 正規化アルゴリズム (ドットパスの解決)
                 const normalizePath = (base, target) => {
                     const parts = base ? base.split('/') : [];
                     const targetParts = target.split('/');
@@ -1151,42 +1357,35 @@
                 let searchCandidates = [];
 
                 if (relativePath.startsWith('/')) {
-                    // 絶対パス指定: プロジェクトルートを基準にする
                     const cleanTarget = relativePath.substring(1);
                     searchCandidates.push(projectRoot ? `${projectRoot}/${cleanTarget}` : cleanTarget);
                 } else if (relativePath.startsWith('./') || relativePath.startsWith('../')) {
-                    // 厳格な相対パス指定: fromPath(呼び出し元) のディレクトリを基準にする
-                    const dirParts = fromPath.split('/');
-                    dirParts.pop(); // ファイル名を除去
-                    searchCandidates.push(normalizePath(dirParts.join('/'), relativePath));
-                } else {
-                    // ベアパス指定 ('workers/...' など): 
-                    // HTML等のブラウザ標準挙動に準拠し、相対パスとして試行した後、ルート基準でも試行する
                     const dirParts = fromPath.split('/');
                     dirParts.pop();
-                    searchCandidates.push(normalizePath(dirParts.join('/'), relativePath)); // 相対パスとして
-                    searchCandidates.push(projectRoot ? `${projectRoot}/${relativePath}` : relativePath); // ルート基準として
+                    searchCandidates.push(normalizePath(dirParts.join('/'), relativePath));
+                } else {
+                    const dirParts = fromPath.split('/');
+                    dirParts.pop();
+                    searchCandidates.push(normalizePath(dirParts.join('/'), relativePath));
+                    searchCandidates.push(projectRoot ? `${projectRoot}/${relativePath}` : relativePath);
                 }
 
                 const extensions = ['', '.js', '.mjs', '.ts', '.jsx', '.tsx', '/index.js', '/index.mjs', '.css', '.json'];
 
-                // 3. 厳格な解決処理 (同名ファイルの誤爆を完全に防止)
                 for (const candidate of searchCandidates) {
                     for (const ext of extensions) {
                         const targetPath = candidate + ext;
                         if (store.hasFile(targetPath)) {
-                            return targetPath; // 確固たるファイルの実体を発見
+                            return targetPath;
                         }
                     }
                 }
-
-                // 見つからなければ元の文字列をそのまま返す (外部URLなどの可能性)
                 return relativePath;
             }
 
             extractDependencies(source, fromPath, store) {
                 const deps = new Set();
-                const assets = new Set(); //  アセット依存用のセット
+                const assets = new Set();
 
                 const dependencyCollectorPlugin = ({ types: t }) => {
                     return {
@@ -1205,7 +1404,6 @@
                                     }
                                 }
                             },
-                            // 文字列をアセットとして正規に収集する
                             StringLiteral(path) {
                                 const parent = path.parent;
                                 if (t.isObjectProperty(parent) && parent.key === path.node) return;
@@ -1240,7 +1438,6 @@
                     Babel.transform(source, baseOptions);
                 } catch (err) { throw new Error(`構文解析エラー:\n${err.message}`); }
 
-                // モジュール依存とアセット依存を明確に分離して返す
                 return { modules: Array.from(deps), assets: Array.from(assets) };
             }
 
@@ -1268,195 +1465,216 @@
             }
         }
 
+        // コアエンジン（提案された4フェーズアーキテクチャ）の実装
         class Transformer {
+            mergeVisitors(visitors) {
+                const merged = {};
+                visitors.forEach(v => {
+                    for (const [nodeType, handler] of Object.entries(v)) {
+                        if (typeof handler === 'function') {
+                            if (!merged[nodeType]) merged[nodeType] = [];
+                            merged[nodeType].push(handler);
+                        } else if (typeof handler === 'object' && handler !== null) {
+                            if (!merged[nodeType]) merged[nodeType] = {};
+                            for (const [phase, phaseHandler] of Object.entries(handler)) {
+                                if (!merged[nodeType][phase]) merged[nodeType][phase] = [];
+                                merged[nodeType][phase].push(phaseHandler);
+                            }
+                        }
+                    }
+                });
+
+                const finalVisitor = {};
+                for (const [nodeType, handlers] of Object.entries(merged)) {
+                    if (Array.isArray(handlers)) {
+                        finalVisitor[nodeType] = function (path, state) {
+                            for (const h of handlers) {
+                                if (path.node) h.call(this, path, state);
+                            }
+                        };
+                    } else {
+                        finalVisitor[nodeType] = {};
+                        for (const [phase, phaseHandlers] of Object.entries(handlers)) {
+                            finalVisitor[nodeType][phase] = function (path, state) {
+                                for (const h of phaseHandlers) {
+                                    if (path.node) h.call(this, path, state);
+                                }
+                            };
+                        }
+                    }
+                }
+                return finalVisitor;
+            }
+
             transformESMtoCJS(source, fromPath, resolvedPaths, options, logger) {
-                const golfEnabled = options.golfEnabled;
-                const enableMangle = options.enableMangle;
-                const enableConsoleStrip = options.enableConsoleStrip;
-                const enableExtreme = options.enableExtreme;
+                let babelCtx = null;
+                Babel.transform("()=>{}", {
+                    plugins: [function (api) { babelCtx = api; return { visitor: {} }; }]
+                });
+                if (!babelCtx) throw new Error("Babelコンテキストのキャプチャに失敗しました。");
 
-                const pathRewriterPlugin = ({ types: t }) => {
-                    return {
-                        visitor: {
-                            ImportDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
-                            ExportNamedDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
-                            ExportAllDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
-                            CallExpression(path) {
-                                const node = path.node;
-                                if (node.callee && node.callee.type === 'Identifier' && node.callee.name === 'require' && node.arguments && node.arguments.length === 1 && (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')) {
-                                    if (resolvedPaths[node.arguments[0].value]) node.arguments[0].value = resolvedPaths[node.arguments[0].value];
-                                }
-                                if (node.callee && node.callee.type === 'Import') {
-                                    if (node.arguments && node.arguments.length === 1 && (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')) {
-                                        const origVal = node.arguments[0].value;
-                                        const finalVal = resolvedPaths[origVal] || origVal;
-                                        path.replaceWith(
-                                            t.callExpression(
-                                                t.memberExpression(t.identifier('Promise'), t.identifier('resolve')),
-                                                [t.callExpression(t.identifier('require'), [t.stringLiteral(finalVal)])]
-                                            )
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    };
+                const t = babelCtx.types;
+                const traverse = babelCtx.traverse;
+
+                const parse = (code) => {
+                    const res = Babel.transform(code, { ast: true, code: false, parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] } });
+                    if (!res || !res.ast) throw new Error("Babel.transform が AST を返しませんでした。");
+                    return res.ast;
                 };
 
-                // クラシックスクリプトのグローバル汚染（共有）をエミュレートするスマートプラグイン
-                const globalExportPlugin = ({ types: t }) => {
-                    return {
-                        visitor: {
-                            Program: {
-                                exit(path) {
-                                    // ファイル内にESモジュール構文 (import/export) があるか判定
-                                    let hasModuleSyntax = false;
-                                    for (const node of path.node.body) {
-                                        if (
-                                            t.isImportDeclaration(node) ||
-                                            t.isExportNamedDeclaration(node) ||
-                                            t.isExportDefaultDeclaration(node) ||
-                                            t.isExportAllDeclaration(node)
-                                        ) {
-                                            hasModuleSyntax = true;
-                                            break;
-                                        }
-                                    }
-                                    // モダンなモジュールとして書かれている場合はグローバル汚染しない
-                                    if (hasModuleSyntax) return;
-
-                                    const bindings = path.scope.bindings;
-                                    const windowAssignments = [];
-                                    for (const name in bindings) {
-                                        windowAssignments.push(
-                                            t.expressionStatement(
-                                                t.assignmentExpression(
-                                                    "=",
-                                                    t.memberExpression(t.identifier("globalThis"), t.identifier(name)),
-                                                    t.identifier(name)
-                                                )
-                                            )
-                                        );
-                                    }
-                                    // スクリプトの最後に、トップレベル変数を globalThis に代入する処理を一斉追加
-                                    if (windowAssignments.length > 0) {
-                                        path.node.body.push(...windowAssignments);
-                                    }
-                                }
+                const pathRewriterPlugin = {
+                    ImportDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
+                    ExportNamedDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
+                    ExportAllDeclaration(path) { if (path.node.source && path.node.source.value && resolvedPaths[path.node.source.value]) path.node.source.value = resolvedPaths[path.node.source.value]; },
+                    CallExpression(path) {
+                        const node = path.node;
+                        if (node.callee && node.callee.type === 'Identifier' && node.callee.name === 'require' && node.arguments && node.arguments.length === 1 && (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')) {
+                            if (resolvedPaths[node.arguments[0].value]) node.arguments[0].value = resolvedPaths[node.arguments[0].value];
+                        }
+                        if (node.callee && node.callee.type === 'Import') {
+                            if (node.arguments && node.arguments.length === 1 && (node.arguments[0].type === 'StringLiteral' || node.arguments[0].type === 'Literal')) {
+                                const origVal = node.arguments[0].value;
+                                const finalVal = resolvedPaths[origVal] || origVal;
+                                path.replaceWith(
+                                    t.callExpression(
+                                        t.memberExpression(t.identifier('Promise'), t.identifier('resolve')),
+                                        [t.callExpression(t.identifier('require'), [t.stringLiteral(finalVal)])]
+                                    )
+                                );
                             }
                         }
-                    };
+                    }
                 };
 
-                // 副作用を排除した純粋なデータ駆動の置換プラグイン
-                const assetInlinePlugin = ({ types: t }) => {
-                    return {
-                        visitor: {
-                            StringLiteral: (path) => {
-                                const val = path.node.value;
-                                // Linkerが事前にコンパイル・解決済みのデータ(assetMap)があれば置換するだけ
-                                if (options.assetMap && options.assetMap[val]) {
-                                    const assetData = options.assetMap[val];
-                                    if (assetData.type === 'string') {
-                                        path.replaceWith(t.stringLiteral(assetData.content));
-                                    } else if (assetData.type === 'blob') {
-                                        const blobArray = t.arrayExpression([t.stringLiteral(assetData.content)]);
-                                        const blobOptions = t.objectExpression([
-                                            t.objectProperty(t.identifier('type'), t.stringLiteral(assetData.mime))
-                                        ]);
-                                        const newBlob = t.newExpression(t.identifier('Blob'), [blobArray, blobOptions]);
-                                        const createObjectURL = t.callExpression(
-                                            t.memberExpression(t.identifier('URL'), t.identifier('createObjectURL')),
-                                            [newBlob]
-                                        );
-                                        path.replaceWith(createObjectURL);
-                                    }
-                                    path.skip(); // 置換後の無限ループ防止
-                                }
+                const assetInlinePlugin = {
+                    StringLiteral(path) {
+                        const val = path.node.value;
+                        if (options.assetMap && options.assetMap[val]) {
+                            const assetData = options.assetMap[val];
+                            if (assetData.type === 'string') {
+                                path.replaceWith(t.stringLiteral(assetData.content));
+                            } else if (assetData.type === 'blob') {
+                                const blobArray = t.arrayExpression([t.stringLiteral(assetData.content)]);
+                                const blobOptions = t.objectExpression([
+                                    t.objectProperty(t.identifier('type'), t.stringLiteral(assetData.mime))
+                                ]);
+                                const newBlob = t.newExpression(t.identifier('Blob'), [blobArray, blobOptions]);
+                                const createObjectURL = t.callExpression(
+                                    t.memberExpression(t.identifier('URL'), t.identifier('createObjectURL')),
+                                    [newBlob]
+                                );
+                                path.replaceWith(createObjectURL);
                             }
+                            path.skip();
                         }
-                    };
+                    }
                 };
-                const parsePlugins = ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'objectRestSpread', 'exportDefaultFrom', 'dynamicImport'];
 
-                // フェーズ1: 依存解決と CommonJS 変換
-                let phase1Code = source;
+                let safeSource = source;
+                Config.extensionRules.source.forEach(rule => {
+                    if (rule.condition(safeSource, fromPath || '')) {
+                        safeSource = rule.apply(safeSource);
+                    }
+                });
+
+                let ast;
                 try {
-                    let safeSource = source;
-                    Config.extensionRules.source.forEach(rule => {
-                        if (rule.condition(safeSource, fromPath || '')) {
-                            safeSource = rule.apply(safeSource);
+                    ast = parse(safeSource);
+                } catch (err) {
+                    throw new Error(`[${fromPath}] AST解析エラー:\n${err.message}`);
+                }
+
+                if (!options.skipCjs) {
+                    try {
+                        const baseConfig = {
+                            plugins: [['transform-modules-commonjs', { loose: true, strict: false }]]
+                        };
+                        const configRule = Config.extensionRules.babelConfig.find(r => r.condition(safeSource, fromPath || '', options.store));
+                        if (configRule) configRule.apply(baseConfig);
+
+                        const { code } = Babel.transform(safeSource, {
+                            ...baseConfig,
+                            filename: fromPath.endsWith('.ts') || fromPath.endsWith('.tsx') ? fromPath : fromPath + '.tsx',
+                            parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'objectRestSpread', 'exportDefaultFrom', 'dynamicImport'] },
+                            ast: true, code: false
+                        });
+                        ast = parse(code);
+                    } catch (e) {
+                        //エラーを握り潰さず、確実にビルドを停止させる
+                        throw new Error(`一次共通規格変換(CJS変換)に失敗しました: ${e.message}`);
+                    }
+                }
+
+                const dcePass = new DeadCodeEliminationPass();
+                const foldPass = new ConstantFoldingPass();
+                const structPass = new SafeStructureOptimizationPass();
+                const stringPass = new StringCompressorPass();
+                const aliasingPass = new GlobalAliasingPass();
+                const extremeGolfPass = new ExtremeGolfPass();
+
+                const loopState = { changed: false, globalAliases: [] };
+
+                const mergedVisitor = this.mergeVisitors([
+                    pathRewriterPlugin,
+                    assetInlinePlugin,
+                    dcePass.getVisitor(t, loopState, options),
+                    foldPass.getVisitor(t, loopState, options),
+                    structPass.getVisitor(t, loopState, options),
+                    extremeGolfPass.getVisitor(t, loopState, options),
+                    stringPass.getVisitor(t, loopState, { ...options, crossAssetEnabled: options.crossAssetEnabled }),
+                    aliasingPass.getVisitor(t, loopState, { globalAliasingEnabled: options.globalAliasingEnabled })
+                ]);
+
+                if (options.golfEnabled) {
+                    let isAstChanged = true;
+                    let iteration = 0;
+                    const MAX_ITERATIONS = 60;
+
+                    while (isAstChanged && iteration < MAX_ITERATIONS) {
+                        loopState.changed = false;
+                        traverse(ast, mergedVisitor);
+                        if (loopState.changed) {
+                            isAstChanged = true;
+                            traverse(ast, { Program(path) { path.scope.crawl(); } });
+                        } else {
+                            isAstChanged = false;
                         }
+                        iteration++;
+                    }
+                    logger.info(`[ASTコンパイラ] 最適化ループが ${iteration} 回で完全に収束しました。`);
+                } else {
+                    traverse(ast, this.mergeVisitors([pathRewriterPlugin, assetInlinePlugin]));
+                }
+
+                try {
+                    let { code } = Babel.transformFromAst(ast, null, {
+                        minified: options.golfEnabled,
+                        comments: !options.golfEnabled,
+                        compact: options.golfEnabled,
+                        configFile: false,
+                        babelrc: false
                     });
 
-                    // phase1Plugins の配列に組み込み
-                    const phase1Plugins = [pathRewriterPlugin, globalExportPlugin, assetInlinePlugin];
-                    if (!options.skipCjs) phase1Plugins.push(['transform-modules-commonjs', { loose: true, strict: false }]);
-
-                    const virtualFilename = (fromPath && (fromPath.endsWith('.ts') || fromPath.endsWith('.tsx') || fromPath.endsWith('.jsx')))
-                        ? fromPath
-                        : fromPath + '.tsx';
-
-                    const baseOptions = {
-                        filename: virtualFilename,
-                        plugins: phase1Plugins,
-                        parserOpts: { sourceType: 'module', plugins: parsePlugins },
-                        comments: golfEnabled ? false : options.keepComments,
-                        minified: false,
-                        compact: false
-                    };
-
-                    // options.storeをconditionに渡してルールを適用
-                    const configRule = Config.extensionRules.babelConfig.find(r => r.condition(safeSource, fromPath || '', options.store));
-                    if (configRule) configRule.apply(baseOptions);
-
-                    const { code } = Babel.transform(safeSource, baseOptions);
-                    phase1Code = code;
-                } catch (err) { throw new Error(`[${fromPath}] のモジュール変換(Phase1)エラー:\n${err.message}`); }
-
-                if (!golfEnabled) return phase1Code;
-
-                // フェーズ2: 構造の極限圧縮 (Extreme & Console)
-                let phase2Code = phase1Code;
-                const phase2Plugins = [];
-                if (enableConsoleStrip) phase2Plugins.push(ASTPlugins.consoleStripperPlugin);
-                if (enableExtreme) {
-                    phase2Plugins.push([ASTPlugins.extremeGolfPlugin, { golfStringHack: options.golfStringHack }]);
-                }
-
-                if (phase2Plugins.length > 0) {
-                    try {
-                        const { code } = Babel.transform(phase2Code, { plugins: phase2Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: false, compact: false });
-                        phase2Code = code;
-                    } catch (err) { throw new Error(`[${fromPath}] の極限ゴルフ圧縮(Phase2)エラー:\n${err.message}`); }
-                }
-
-                // フェーズ3: 変数名マングル & 最終出力
-                try {
-                    const phase3Plugins = [];
-                    if (enableMangle) phase3Plugins.push(ASTPlugins.createManglerPlugin(options.extraReserved));
-                    let { code } = Babel.transform(phase2Code, { plugins: phase3Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: true, compact: true });
-
-                    if (enableExtreme) {
+                    if (options.golfEnabled && options.enableExtreme) {
                         code = code.replace(/\breturn\s+([\{\["'`!~])/g, 'return$1');
                         code = code.replace(/\bthrow\s+([\{\["'`!~])/g, 'throw$1');
                         code = code.replace(/\btypeof\s+([\{\["'`!~])/g, 'typeof$1');
                     }
-
                     return code;
-                } catch (err) { throw new Error(`[${fromPath}] の変数マングル(Phase3)エラー:\n${err.message}`); }
+                } catch (err) {
+                    throw new Error(`最終ジェネレータ生成エラー:\n${err.message}`);
+                }
             }
         }
 
         class Linker {
             executeSmartJSBundle(entryPoint, store, addStrict, keepComments, options, logger, scanner, transformer, utils) {
                 if (!entryPoint || !store.hasFile(entryPoint)) throw new Error("起点となるJSが見つかりません。");
-                const bundledModules = {};
-                const visited = new Set();
-                const externalDependencies = new Set();
-                const golfEnabled = options.golfEnabled;
 
-                const buildDependencyTree = (currentPath) => {
+                const visited = new Set();
+                const orderedModules = [];
+
+                const sortModules = (currentPath) => {
                     if (visited.has(currentPath)) return;
                     visited.add(currentPath);
 
@@ -1465,164 +1683,252 @@
                     if (!file) return;
 
                     if (!utils.isJSFile(currentPath)) {
-                        bundledModules[currentPath] = { code: "module.exports={};", path: currentPath };
+                        orderedModules.push({ path: currentPath, code: "/* non-js */", isJS: false });
                         return;
                     }
 
-                    let rawSource = file.content;
-                    Config.extensionRules.source.forEach(rule => {
-                        if (rule.condition(rawSource, currentPath)) rawSource = rule.apply(rawSource);
-                    });
-
-                    // スキャナーからモジュールとアセットの依存を両方取得
+                    const rawSource = file.content;
                     const extracted = scanner.extractDependencies(rawSource, currentPath, store);
-                    const dependencies = Array.isArray(extracted) ? extracted : extracted.modules;
-                    const assets = Array.isArray(extracted) ? [] : extracted.assets;
+                    const dependencies = extracted.modules;
 
-                    const localDependencyPaths = {};
-                    const assetMap = {}; // Transformerに渡すための辞書
-
-                    // 1. 通常モジュールの解決
                     dependencies.forEach(dep => {
                         const resolvedPath = scanner.resolveRelativePath(currentPath, dep, store);
                         if (resolvedPath && store.hasFile(resolvedPath)) {
-                            localDependencyPaths[dep] = resolvedPath;
-                            buildDependencyTree(resolvedPath);
-                        } else {
-                            externalDependencies.add(dep);
-                            logger.info(`外部依存モジュール '${dep}' を検知。ネイティブimportにフォールバックします。`);
+                            sortModules(resolvedPath);
                         }
                     });
-
-                    // 2. アセット(Worker等)の Sub-Bundle 独立コンパイル処理
-                    assets.forEach(assetStr => {
-                        const resolvedPath = scanner.resolveRelativePath(currentPath, assetStr, store);
-                        if (resolvedPath && store.hasFile(resolvedPath) && !resolvedPath.split('/').pop().startsWith('_virtual_')) {
-
-                            // 循環参照ガード (無限ループを物理的に遮断)
-                            if (options._subBundleVisited && options._subBundleVisited.has(resolvedPath)) {
-                                logger.warn(`循環アセット参照を検知してスキップしました: ${resolvedPath}`);
-                                return;
-                            }
-
-                            const assetFile = store.getFile(resolvedPath);
-                            store.addUsedFile(resolvedPath);
-
-                            if (assetFile.isBinary) {
-                                assetMap[assetStr] = { type: 'string', content: assetFile.content };
-                                if (logger) logger.info(`バイナリアセットを登録: ${assetStr}`);
-                            } else {
-                                const ext = resolvedPath.split('.').pop().toLowerCase();
-                                let content = assetFile.content;
-                                let mime = 'text/plain';
-
-                                if (['js', 'mjs'].includes(ext)) {
-                                    mime = 'application/javascript';
-                                    if (logger) logger.info(`サブモジュール(Worker等)の独立コンパイル開始: ${resolvedPath}`);
-
-                                    // 経路履歴の汚染を防ぐため、Setをディープコピー（クローン）して独立した探索パスにする
-                                    const subOptions = { ...options };
-                                    subOptions._subBundleVisited = new Set(options._subBundleVisited || []);
-                                    subOptions._subBundleVisited.add(entryPoint); // 親のルートを記録
-                                    subOptions._subBundleVisited.add(resolvedPath); // 自身を記録
-
-                                    try {
-                                        // 独立したバンドルとして再帰コンパイル（完全なCJSランタイムを内包した独立IIFEコードが返る）
-                                        content = this.executeSmartJSBundle(resolvedPath, store, false, false, subOptions, logger, scanner, transformer, utils);
-                                    } catch (e) {
-                                        if (logger) logger.warn(`アセット [${resolvedPath}] のサブコンパイルに失敗: ${e.message}`);
-                                    }
-                                } else if (ext === 'json') {
-                                    mime = 'application/json';
-                                } else if (['html', 'htm'].includes(ext)) {
-                                    mime = 'text/html';
-                                } else if (ext === 'css') {
-                                    mime = 'text/css';
-                                }
-
-                                assetMap[assetStr] = { type: 'blob', content, mime };
-                                if (logger && !['js', 'mjs'].includes(ext)) logger.info(`テキストアセットを登録: ${assetStr}`);
-                            }
-                        }
-                    });
-
-                    const transpileOptions = {
-                        golfEnabled,
-                        enableMangle: options.enableMangle,
-                        enableConsoleStrip: options.enableConsoleStrip,
-                        enableExtreme: options.enableExtreme,
-                        golfStringHack: options.golfStringHack,
-                        keepComments,
-                        skipCjs: false, // Worker内も通常のバンドルと同じくCJSへ変換し、ESMの仕様違反を防ぐ
-                        extraReserved: options.extraReserved,
-                        store: store,
-                        scanner: scanner,
-                        assetMap: assetMap // 完成した辞書をTransformerに引き渡す
-                    };
-
-                    const transformedSource = transformer.transformESMtoCJS(rawSource, currentPath, localDependencyPaths, transpileOptions, logger);
-                    bundledModules[currentPath] = { code: transformedSource, path: currentPath };
+                    orderedModules.push({ path: currentPath, isJS: true });
                 };
 
-                buildDependencyTree(entryPoint);
+                sortModules(entryPoint);
+                logger.info(`[Scope Hoisting] モジュール境界を全平坦化します。対象モジュール数: ${orderedModules.length}`);
 
-                let finalBundle = "";
-                let extMapStr = "{";
-                const extArray = Array.from(externalDependencies);
-                if (extArray.length > 0) {
-                    extArray.forEach((dep, idx) => {
-                        let depUrl = dep;
-                        if (Config.compilerEnv.importMap[dep]) {
-                            depUrl = dep;
-                        } else if (!/^https?:\/\//.test(dep) && !/^\.?\.\//.test(dep)) {
-                            depUrl = `${Config.compilerEnv.cdnBaseUrl}${dep}`;
+                let babelCtx = null;
+                Babel.transform("()=>{}", {
+                    plugins: [function (api) { babelCtx = api; return { visitor: {} }; }]
+                });
+                if (!babelCtx) throw new Error("Babelコンテキストのキャプチャに失敗しました。");
+
+                const t = babelCtx.types;
+                const traverse = babelCtx.traverse;
+
+                const parse = (code) => {
+                    const res = Babel.transform(code, { ast: true, code: false, parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] } });
+                    if (!res || !res.ast) throw new Error("Babel.transform が AST を返しませんでした。");
+                    return res.ast;
+                };
+
+                let flatBodyNodeList = [];
+                const globalBindingRewriteMap = {};
+                const importResolutions = {};
+                const wildcardExports = {};
+
+                orderedModules.forEach((mod, idx) => {
+                    if (!mod.isJS) return;
+                    const file = store.getFile(mod.path);
+                    const modHash = `_m${idx}`;
+
+                    logger.info(`モジュールスコープ統合: ${mod.path} ➔ [${modHash}]`);
+
+                    let ast;
+                    try {
+                        ast = parse(file.content);
+                    } catch (e) {
+                        throw new Error(`[${mod.path}] リンク時構文エラー: ${e.message}`);
+                    }
+
+                    traverse(ast, {
+                        Program(path) {
+                            path.scope.crawl();
+                            const bindings = Object.keys(path.scope.bindings);
+                            bindings.forEach(key => {
+                                const newName = `${modHash}_${key}`;
+                                globalBindingRewriteMap[`${mod.path}:${key}`] = newName;
+                                path.scope.rename(key, newName);
+                            });
                         }
-                        finalBundle += `import * as __ext_${idx} from ${JSON.stringify(depUrl)};\n`;
-                        extMapStr += `${JSON.stringify(dep)}:__ext_${idx},`;
                     });
-                    // 末尾の不要なカンマ(Trailing comma)を削除し、SyntaxErrorを防止
-                    extMapStr = extMapStr.replace(/,$/, '');
-                }
-                extMapStr += "}";
 
-                if (addStrict) finalBundle = `"use strict";\n` + finalBundle;
+                    traverse(ast, {
+                        ImportDeclaration(path) {
+                            const srcPath = path.node.source.value;
+                            const resolvedSrcPath = scanner.resolveRelativePath(mod.path, srcPath, store);
 
-                if (golfEnabled) {
-                    // 外部のグローバル変数別名辞書データをランタイムに注入
-                    const aliasesStr = JSON.stringify(Config.compilerEnv.globalAliases);
-                    finalBundle += `((m,c,x,a,r,w,g)=>(g=typeof window!=='undefined'?window:globalThis,r=i=>c[i]?c[i].exports:(m[i]?(c[i]={exports:{}},m[i](r,c[i],c[i].exports),c[i].exports):((w=g[a[i]||i]||g[i.toUpperCase()]||x[i])?Object.setPrototypeOf({__esModule:!0,...(w.default?{}:{default:w})},w):w)),r(${JSON.stringify(entryPoint)})))({\n`;
-                    const moduleKeys = Object.keys(bundledModules);
-                    moduleKeys.forEach((path, index) => {
-                        finalBundle += `${JSON.stringify(path)}:(require,module,exports)=>{${bundledModules[path].code}}${index === moduleKeys.length - 1 ? '' : ','}\n`;
+                            path.node.specifiers.forEach(spec => {
+                                const localName = spec.local.name;
+                                let importedName;
+                                if (spec.type === 'ImportSpecifier') {
+                                    importedName = spec.imported.name || spec.imported.value;
+                                } else if (spec.type === 'ImportDefaultSpecifier') {
+                                    importedName = 'default';
+                                } else {
+                                    importedName = '*';
+                                }
+                                importResolutions[localName] = { resolvedSrcPath, importedName };
+                            });
+                            path.remove();
+                        },
+                        ExportNamedDeclaration(path) {
+                            if (path.node.source) {
+                                const resolvedSrcPath = scanner.resolveRelativePath(mod.path, path.node.source.value, store);
+                                path.node.specifiers.forEach(spec => {
+                                    if (spec.type === 'ExportSpecifier') {
+                                        const localName = spec.local.name;
+                                        const exportedName = spec.exported.name || spec.exported.value;
+                                        globalBindingRewriteMap[`${mod.path}:${exportedName}`] = `${resolvedSrcPath}:${localName}`;
+                                    }
+                                });
+                                path.remove();
+                            } else if (path.node.declaration) {
+                                path.replaceWith(path.node.declaration);
+                            } else {
+                                path.node.specifiers.forEach(spec => {
+                                    if (spec.type === 'ExportSpecifier') {
+                                        const localName = spec.local.name;
+                                        const exportedName = spec.exported.name || spec.exported.value;
+                                        globalBindingRewriteMap[`${mod.path}:${exportedName}`] = localName;
+                                    }
+                                });
+                                path.remove();
+                            }
+                        },
+                        ExportAllDeclaration(path) {
+                            // ワイルドカードの参照先を記録してから削除する
+                            const resolvedSrcPath = scanner.resolveRelativePath(mod.path, path.node.source.value, store);
+                            if (!wildcardExports[mod.path]) wildcardExports[mod.path] = [];
+                            wildcardExports[mod.path].push(resolvedSrcPath);
+                            path.remove();
+                        },
+                        ExportDefaultDeclaration(path) {
+                            const dec = path.node.declaration;
+                            const defaultVarName = `${modHash}_default`;
+                            globalBindingRewriteMap[`${mod.path}:default`] = defaultVarName;
+
+                            if (t.isFunctionDeclaration(dec) || t.isClassDeclaration(dec)) {
+                                if (dec.id) {
+                                    globalBindingRewriteMap[`${mod.path}:default`] = dec.id.name;
+                                    path.replaceWith(dec);
+                                } else {
+                                    if (t.isFunctionDeclaration(dec)) {
+                                        path.replaceWith(t.functionDeclaration(t.identifier(defaultVarName), dec.params, dec.body));
+                                    } else {
+                                        path.replaceWith(t.classDeclaration(t.identifier(defaultVarName), dec.superClass, dec.body));
+                                    }
+                                }
+                            } else {
+                                path.replaceWith(t.variableDeclaration('const', [
+                                    t.variableDeclarator(t.identifier(defaultVarName), dec)
+                                ]));
+                            }
+                        }
                     });
-                    finalBundle += `},{},${extMapStr},${aliasesStr});`;
-                } else {
-                    const aliasesStr = JSON.stringify(Config.compilerEnv.globalAliases);
-                    finalBundle += `(function(externals, aliases) {\n  /* Web Asset Bundler - Modules Container */\n  const modules = {\n`;
-                    const moduleKeys = Object.keys(bundledModules);
-                    moduleKeys.forEach((path, index) => {
-                        if (keepComments) finalBundle += `    /* --- Module Boundary: ${path} --- */\n`;
-                        finalBundle += `    ${JSON.stringify(path)}: function(require, module, exports) {\n`;
-                        finalBundle += bundledModules[path].code.split('\n').map(line => '      ' + line).join('\n') + `\n`;
-                        finalBundle += `    }${index === moduleKeys.length - 1 ? '' : ','}\n\n`;
-                    });
-                    finalBundle += `  };\n  const cache = {};\n  function require(moduleId) {\n`;
-                    finalBundle += `    if (cache[moduleId]) return cache[moduleId].exports;\n`;
-                    finalBundle += `    if (!modules[moduleId]) {\n`;
-                    finalBundle += `      let glob = typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : globalThis);\n`;
-                    // グローバル変数優先バインド
-                    finalBundle += `      let globName = aliases[moduleId] || moduleId;\n`;
-                    finalBundle += `      let w = glob[globName] || glob[moduleId.toUpperCase()] || externals[moduleId];\n`;
-                    finalBundle += `      if (w) return Object.setPrototypeOf({__esModule:true, ...(w.default ? {} : {default: w})}, w);\n`;
-                    finalBundle += `      throw new Error("Cannot find module '" + moduleId + "' in dynamic bundle");\n    }\n`;
-                    finalBundle += `    const module = cache[moduleId] = { exports: {} };\n`;
-                    finalBundle += `    modules[moduleId](require, module, module.exports);\n    return module.exports;\n  }\n`;
-                    finalBundle += `  return require(${JSON.stringify(entryPoint)});\n})(${extMapStr}, ${aliasesStr});\n`;
+
+                    if (keepComments) {
+                        const emptyNode = t.emptyStatement();
+                        t.addComment(emptyNode, 'leading', ` Module: ${mod.path} `);
+                        flatBodyNodeList.push(emptyNode);
+                    }
+                    flatBodyNodeList.push(...ast.program.body);
+                });
+
+                // 複数階層の再エクスポートや export * を安全に再帰探索する関数
+                const resolveExport = (basePath, exportName, visited = new Set()) => {
+                    if (visited.has(basePath)) return null; // 循環参照の無限ループ防止
+                    visited.add(basePath);
+
+                    const directKey = `${basePath}:${exportName}`;
+                    if (globalBindingRewriteMap[directKey]) {
+                        return globalBindingRewriteMap[directKey]; // 明示的なエクスポートの発見
+                    }
+
+                    // 明示的なエクスポートがない場合は、export * で取り込まれたファイルを探索
+                    if (wildcardExports[basePath]) {
+                        for (const wildPath of wildcardExports[basePath]) {
+                            const match = resolveExport(wildPath, exportName, visited);
+                            if (match) return match;
+                        }
+                    }
+                    return null;
+                };
+
+                const finalRenameMap = {};
+                for (const [renamedLocal, targetInfo] of Object.entries(importResolutions)) {
+                    let maxDepth = 60; // 複雑なプロジェクト向けに余裕を持たせる
+                    let currTarget = targetInfo;
+                    let resolvedName = null;
+
+                    while (maxDepth-- > 0) {
+                        // 拡張した解決エンジンを通してターゲット変数を探す
+                        const targetVarName = resolveExport(currTarget.resolvedSrcPath, currTarget.importedName, new Set());
+
+                        if (!targetVarName) break;
+
+                        // "元ファイル:エクスポート名" のポインタだった場合はさらに辿る
+                        if (targetVarName.includes(':')) {
+                            const colonIdx = targetVarName.lastIndexOf(':');
+                            currTarget = {
+                                resolvedSrcPath: targetVarName.substring(0, colonIdx),
+                                importedName: targetVarName.substring(colonIdx + 1)
+                            };
+                            continue;
+                        }
+
+                        if (importResolutions[targetVarName]) {
+                            currTarget = importResolutions[targetVarName];
+                        } else {
+                            resolvedName = targetVarName;
+                            break;
+                        }
+                    }
+
+                    if (resolvedName) {
+                        finalRenameMap[renamedLocal] = resolvedName;
+                    }
                 }
-                return finalBundle;
+
+                const finalProgramAst = t.program(flatBodyNodeList);
+                // ProgramノードをFileノードでラップし、Babel仕様に準拠した完全なASTルートを構築する
+                const finalFileAst = t.file(finalProgramAst, [], []);
+
+                // 走査はFileノードを起点として実行する
+                traverse(finalFileAst, {
+                    Identifier(path) {
+                        const name = path.node.name;
+                        if (finalRenameMap[name]) {
+                            if (path.isReferencedIdentifier() || path.isBindingIdentifier()) {
+                                path.node.name = finalRenameMap[name];
+                            }
+                        }
+                    }
+                });
+
+                // コード生成にもFileノードを渡す
+                let flatSourceCode = Babel.transformFromAst(finalFileAst, null, {
+                    minified: false,
+                    comments: keepComments,
+                    configFile: false,
+                    babelrc: false
+                }).code;
+
+                const transpileOptions = {
+                    golfEnabled: options.golfEnabled,
+                    enableMangle: options.enableMangle,
+                    enableConsoleStrip: options.enableConsoleStrip,
+                    enableExtreme: options.enableExtreme,
+                    golfStringHack: options.golfStringHack,
+                    crossAssetEnabled: options.crossAssetEnabled,
+                    globalAliasingEnabled: options.globalAliasingEnabled,
+                    keepComments,
+                    skipCjs: true,
+                    extraReserved: options.extraReserved,
+                    store: store,
+                    scanner: scanner
+                };
+
+                return transformer.transformESMtoCJS(flatSourceCode, "flat_bundle.js", {}, transpileOptions, logger);
             }
 
-            executeSimpleJSBundle(fileOrder, store, addStrict, keepComments, options, logger) {
+            executeSimpleJSBundle(fileOrder, store, addStrict, keepComments, options, logger, transformer) {
                 const iifeWrapped = options.iifeWrapped;
                 let output = "";
 
@@ -1631,7 +1937,6 @@
                 fileOrder.forEach(path => {
                     const file = store.getFile(path);
                     if (!file) return;
-                    // Storeへ使用実績を記録
                     store.addUsedFile(path);
 
                     if (keepComments) {
@@ -1650,29 +1955,74 @@
                 if (golfEnabled) {
                     try {
                         const enableMangle = options.enableMangle;
-                        const enableConsoleStrip = options.enableConsoleStrip;
-                        const enableExtreme = options.enableExtreme;
-                        const parsePlugins = ['jsx', 'typescript', 'classProperties', 'decorators-legacy'];
 
-                        let phase2Code = output;
-                        const phase2Plugins = [];
-                        if (enableConsoleStrip) phase2Plugins.push(ASTPlugins.consoleStripperPlugin);
-                        if (enableExtreme) {
-                            phase2Plugins.push([ASTPlugins.extremeGolfPlugin, { golfStringHack: options.golfStringHack }]);
+                        let babelCtx = null;
+                        Babel.transform("()=>{}", {
+                            plugins: [function (api) { babelCtx = api; return { visitor: {} }; }]
+                        });
+                        if (!babelCtx) throw new Error("Babelコンテキストのキャプチャに失敗しました。");
+
+                        const t = babelCtx.types;
+                        const traverse = babelCtx.traverse;
+
+                        const parse = (code) => {
+                            const res = Babel.transform(code, { ast: true, code: false, parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties', 'decorators-legacy', 'dynamicImport'] } });
+                            if (!res || !res.ast) throw new Error("Babel.transform が AST を返しませんでした。");
+                            return res.ast;
+                        };
+
+                        let ast = parse(output);
+
+                        const dcePass = new DeadCodeEliminationPass();
+                        const foldPass = new ConstantFoldingPass();
+                        const structPass = new SafeStructureOptimizationPass();
+                        const stringPass = new StringCompressorPass();
+                        const aliasingPass = new GlobalAliasingPass();
+                        const extremeGolfPass = new ExtremeGolfPass();
+
+                        const loopState = { changed: false, globalAliases: [] };
+
+                        const mergedVisitor = transformer.mergeVisitors([
+                            dcePass.getVisitor(t, loopState, options),
+                            foldPass.getVisitor(t, loopState, options),
+                            structPass.getVisitor(t, loopState, options),
+                            stringPass.getVisitor(t, loopState, options),
+                            aliasingPass.getVisitor(t, loopState, { globalAliasingEnabled: options.globalAliasingEnabled }),
+                            extremeGolfPass.getVisitor(t, loopState, options)
+                        ]);
+
+                        let isAstChanged = true;
+                        let iteration = 0;
+                        const MAX_ITERATIONS = 60;
+
+                        while (isAstChanged && iteration < MAX_ITERATIONS) {
+                            loopState.changed = false;
+                            traverse(ast, mergedVisitor);
+                            if (loopState.changed) {
+                                isAstChanged = true;
+                                traverse(ast, { Program(path) { path.scope.crawl(); } });
+                            } else {
+                                isAstChanged = false;
+                            }
+                            iteration++;
                         }
 
-                        if (phase2Plugins.length > 0) {
-                            const { code } = Babel.transform(phase2Code, { plugins: phase2Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: false, compact: false });
-                            phase2Code = code;
+                        if (enableMangle) {
+                            const mangler = new ManglerPass();
+                            traverse(ast, mangler.getVisitor(t));
                         }
 
-                        const phase3Plugins = [];
-                        if (enableMangle) phase3Plugins.push(ASTPlugins.createManglerPlugin());
-                        const { code } = Babel.transform(phase2Code, { plugins: phase3Plugins, parserOpts: { sourceType: 'module', plugins: parsePlugins }, comments: false, minified: true, compact: true });
+                        const { code } = Babel.transformFromAst(ast, null, {
+                            minified: true,
+                            comments: false,
+                            compact: true,
+                            configFile: false,
+                            babelrc: false
+                        });
                         output = code;
 
                     } catch (err) {
-                        logger.warn(`コードゴルフ処理中にエラー: ${err.message}`);
+                        throw new Error(`コードゴルフ処理中にエラーが発生しました: ${err.message}`);
                     }
                 }
                 return output;
@@ -1681,7 +2031,7 @@
 
         class Minifier {
             minifyCss(css) {
-                return css
+                let min = css
                     .replace(/\/\*[\s\S]*?\*\//g, '')
                     .replace(/\s*([{}~>;:,!])\s*/g, '$1')
                     .replace(/;}/g, '}')
@@ -1700,6 +2050,18 @@
                     .replace(/:0 0 0(;|}|\s)/g, ':0$1')
                     .replace(/:0 0(;|}|\s)/g, ':0$1')
                     .trim();
+
+                // 3. クロスアセット同期辞書の適用
+                if (Config.crossAssetDictionary) {
+                    const dict = Config.crossAssetDictionary;
+                    min = min.replace(/([.#])([a-zA-Z0-9_-]+)/g, (match, prefix, name) => {
+                        if (dict[name]) {
+                            return prefix + dict[name];
+                        }
+                        return match;
+                    });
+                }
+                return min;
             }
 
             minifyHtml(html, options, logger, scanner, transformer) {
@@ -1752,6 +2114,8 @@
                                         enableConsoleStrip: options.enableConsoleStrip,
                                         enableExtreme: options.enableExtreme,
                                         golfStringHack: options.golfStringHack,
+                                        crossAssetEnabled: options.crossAssetEnabled,
+                                        globalAliasingEnabled: options.globalAliasingEnabled,
                                         keepComments: false,
                                         skipCjs: true,
                                         extraReserved: uniqueReserved,
@@ -1760,7 +2124,7 @@
                                     };
                                     compressedContent = transformer.transformESMtoCJS(content, "inline_script", {}, transpileOptions, logger);
                                 } catch (e) {
-                                    logger.warn(`[HTML圧縮] <script> 内のJS圧縮に失敗しました。元コードを維持します: ${e.message}`);
+                                    throw new Error(`[HTML圧縮] <script> 内のJS圧縮に失敗しました: ${e.message}`);
                                 }
                             }
                         }
@@ -1771,6 +2135,20 @@
                 });
 
                 if (golfEnabled && options.minifyAssets) {
+                    //クォーテーションを剥がす「前」に、確実にidとclassの辞書置換を実行
+                    if (Config.crossAssetDictionary) {
+                        const dict = Config.crossAssetDictionary;
+                        safeHtml = safeHtml.replace(/\bid=(["'])(.*?)\1/gi, (match, quote, val) => {
+                            if (dict[val]) return `id=${quote}${dict[val]}${quote}`;
+                            return match;
+                        });
+                        safeHtml = safeHtml.replace(/\bclass=(["'])(.*?)\1/gi, (match, quote, val) => {
+                            const classes = val.split(/\s+/).map(c => dict[c] || c).join(' ');
+                            return `class=${quote}${classes}${quote}`;
+                        });
+                    }
+
+                    // 辞書置換が終わった安全なHTMLに対して、極限圧縮（クォート剥がし等）を適用する
                     safeHtml = safeHtml
                         .replace(/<!--[\s\S]*?-->/g, '')
                         .replace(/<!DOCTYPE html>/i, '<!doctype html>')
@@ -1800,21 +2178,172 @@
                 this.Minifier = minifier;
             }
 
-            // Strategy(戦略)パターンに基づくビルド分岐・交通整理メソッド
+            // Step 3: クロスアセット辞書構築ロジックの実行
+            buildCrossAssetDictionary(options) {
+                if (!options.crossAssetEnabled) {
+                    Config.crossAssetDictionary = null;
+                    return;
+                }
+
+                this.logger.info("[クロスアセット辞書] HTML/CSSファイルを静的走査して id / class 辞書を構築します...");
+                const paths = this.store.getFilePaths();
+
+                const bypassRule = Config.extensionRules.manglingBypass.find(rule => rule.condition(paths, this.store));
+                if (bypassRule) {
+                    this.logger.success(bypassRule.message);
+                    Config.crossAssetDictionary = null;
+                    return;
+                }
+
+                const counts = new Map();
+
+                // HTMLファイルからのスキャン
+                paths.forEach(p => {
+                    const ext = p.split('.').pop().toLowerCase();
+                    if (['html', 'htm'].includes(ext)) {
+                        const content = this.store.getFile(p).content || "";
+                        // class="..." 属性
+                        const classRegex = /class=["']([^"']+)["']/gi;
+                        let match;
+                        while ((match = classRegex.exec(content)) !== null) {
+                            match[1].split(/\s+/).forEach(c => {
+                                if (c.trim().length >= 3) {
+                                    counts.set(c, (counts.get(c) || 0) + 1);
+                                }
+                            });
+                        }
+                        // id="..." 属性
+                        const idRegex = /id=["']([^"']+)["']/gi;
+                        while ((match = idRegex.exec(content)) !== null) {
+                            const id = match[1].trim();
+                            if (id.length >= 3) {
+                                counts.set(id, (counts.get(id) || 0) + 1);
+                            }
+                        }
+                    } else if (ext === 'css') {
+                        // CSSクラス/IDセレクタのスキャン
+                        const content = this.store.getFile(p).content || "";
+                        const selectorRegex = /([.#])([a-zA-Z0-9_-]+)/g;
+                        let match;
+                        while ((match = selectorRegex.exec(content)) !== null) {
+                            const name = match[2];
+                            if (name.length >= 3) {
+                                counts.set(name, (counts.get(name) || 0) + 1);
+                            }
+                        }
+                    }
+                });
+
+                if (counts.size === 0) {
+                    this.logger.info("[クロスアセット辞書] クラスやIDは検出されませんでした。");
+                    Config.crossAssetDictionary = null;
+                    return;
+                }
+
+                // 頻出頻度順にソートし、一文字変数/クラス名の辞書を作成
+                const sortedNames = Array.from(counts.keys()).sort((a, b) => counts.get(b) - counts.get(a));
+                const dictionary = {};
+                let mangleIdx = 0;
+                const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+                sortedNames.forEach(oldName => {
+                    if (mangleIdx < alphabet.length) {
+                        dictionary[oldName] = alphabet[mangleIdx++];
+                    } else {
+                        // アルファベットを使い切った場合は複合一文字
+                        dictionary[oldName] = alphabet[mangleIdx % alphabet.length] + Math.floor(mangleIdx / alphabet.length);
+                        mangleIdx++;
+                    }
+                });
+
+                Config.crossAssetDictionary = dictionary;
+                this.logger.success(`[クロスアセット辞書] 同期圧縮辞書を生成完了！登録キー数: ${Object.keys(dictionary).length} 件`);
+            }
+
+            // Step 4: RegPack風自己解凍パッカー (LZ置換 eval)
+            packOutput(code, isHtml) {
+                if (isHtml) return code; // パッカーはJS専用
+
+                const asciiList = '`~!@#$%^&*()_+{}|:"<>?-=[]\\;\',./';
+                const unusedChars = [];
+                for (const char of asciiList) {
+                    if (!code.includes(char)) unusedChars.push(char);
+                }
+
+                if (unusedChars.length === 0) return code;
+
+                let packed = code;
+                const dict = [];
+
+                // 2文字〜15文字の部分文字列をスキャン
+                while (unusedChars.length > 0) {
+                    const char = unusedChars.shift();
+                    const subCounts = new Map();
+
+                    for (let len = 3; len <= 12; len++) {
+                        for (let i = 0; i <= packed.length - len; i++) {
+                            const sub = packed.substring(i, i + len);
+                            if (/^[a-zA-Z0-9_\s.()]+$/.test(sub)) {
+                                subCounts.set(sub, (subCounts.get(sub) || 0) + 1);
+                            }
+                        }
+                    }
+
+                    let bestSub = "";
+                    let bestSavings = 0;
+                    for (const [sub, count] of subCounts.entries()) {
+                        if (count < 2) continue;
+                        const savings = (sub.length - 1) * count - (sub.length + 3);
+                        if (savings > bestSavings) {
+                            bestSavings = savings;
+                            bestSub = sub;
+                        }
+                    }
+
+                    if (bestSavings <= 0) break;
+
+                    packed = packed.split(bestSub).join(char);
+                    dict.push([char, bestSub]);
+                }
+
+                if (dict.length === 0) return code;
+
+                const dictStr = dict.map(([char, sub]) => char + sub).join('\x01');
+                const decoder = `_=${JSON.stringify(packed)};for(i of ${JSON.stringify(dictStr)}.split('\\x01'))with(_.split(i[0]))_=join(i.slice(1));eval(_)`;
+
+                if (decoder.length < code.length) {
+                    this.logger.success(`[自己解凍パッカー] 圧縮を適用しました。デコードラッパーを含む ${code.length} ➔ ${decoder.length} バイト (-${((1 - decoder.length / code.length) * 100).toFixed(1)}%)`);
+                    return decoder;
+                }
+                return code;
+            }
+
             build(options) {
                 this.store.clearUsedFiles();
                 const mode = this.store.currentMode;
-                options.store = this.store; // storeを注入
+                options.store = this.store;
+
+                // ビルド最序盤でクロスアセット同期辞書を抽出構築
+                this.buildCrossAssetDictionary(options);
+
+                let resultStr = "";
 
                 if (mode === 'html') {
-                    return this.buildHtml(options);
+                    resultStr = this.buildHtml(options);
                 } else if (mode === 'smart') {
-                    return this.buildSmartJS(options);
+                    resultStr = this.buildSmartJS(options);
                 } else if (mode === 'direct') {
-                    return this.buildDirect(options);
+                    resultStr = this.buildDirect(options);
+                } else {
+                    throw new Error(`未定義のビルドモードです: ${mode}`);
                 }
 
-                throw new Error(`未定義のビルドモードです: ${mode}`);
+                // 最終段階でのパッカー統合の試行
+                if (options.golfEnabled && options.packerEnabled && mode !== 'html') {
+                    resultStr = this.packOutput(resultStr, false);
+                }
+
+                return resultStr;
             }
 
             buildHtml(options) {
@@ -1864,7 +2393,7 @@
                 if (options.htmlOptJs) {
                     this.logger.info("JSアセットの統合スキャンを開始...");
                     const scripts = doc.querySelectorAll('script');
-                    let virtualEntryCode = ""; //文字列結合ではなく、インポート文のリストを作る
+                    let virtualEntryCode = "";
                     let firstScriptNode = null;
                     let inlineCounter = 0;
 
@@ -1872,7 +2401,6 @@
                         const src = script.getAttribute('src');
                         const type = script.getAttribute('type');
 
-                        // 外部CDNやJSONなどのデータは除外 (そのまま残す)
                         if (src && (src.startsWith('http') || src.startsWith('//') || src.startsWith('data:'))) return;
                         if (type && !/^(text\/(javascript|babel)|module|application\/javascript)?$/i.test(type)) return;
 
@@ -1882,7 +2410,6 @@
                             const resolvedPath = this.Scanner.resolveRelativePath(entryHtmlPath, src, this.store);
                             if (this.store.hasFile(resolvedPath)) {
                                 this.store.addUsedFile(resolvedPath);
-                                // スクリプトの中身を結合するのではなく、モジュールとして import
                                 virtualEntryCode += `import "${resolvedPath}";\n`;
                                 script.remove();
                                 this.logger.success(`JSスクリプトをモジュールツリーに追加: ${src}`);
@@ -1890,7 +2417,6 @@
                         } else {
                             const inlineCode = script.textContent;
                             if (inlineCode && inlineCode.trim().length > 0) {
-                                // インラインスクリプトを独立した「仮想ファイル」としてStoreに保存し、それを import
                                 const virtualInlinePath = `_virtual_inline_${inlineCounter++}.js`;
                                 this.store.addFile(virtualInlinePath, inlineCode, 0, false);
                                 virtualEntryCode += `import "./${virtualInlinePath}";\n`;
@@ -1906,11 +2432,11 @@
 
                         let finalJsContent = "";
                         try {
-                            // Linker (Babel AST) に仮想エントリーポイントを渡し、安全なモジュールスコープとして解決させる
+                            // Linker による Scope Hoisting 平坦化が走ります
                             finalJsContent = this.Linker.executeSmartJSBundle(virtualEntry, this.store, false, !options.golfEnabled, options, this.logger, this.Scanner, this.Transformer, this.utils);
                         } catch (err) {
                             this.logger.warn(`JSのスマート統合に失敗しました: ${err.message}`);
-                            finalJsContent = virtualEntryCode; // フォールバック
+                            finalJsContent = virtualEntryCode;
                         }
 
                         const scriptEl = doc.createElement('script');
@@ -1957,7 +2483,6 @@
 
                 const fullHtmlContent = doc.documentElement.innerHTML;
                 Config.extensionRules.dom.forEach(rule => {
-                    // ルールの評価と適用に this.store（プロジェクト全体のファイルシステム）を渡す
                     if (rule.condition(fullHtmlContent, this.store)) {
                         const logMsg = rule.apply(doc, this.store);
                         if (logMsg) this.logger.success(logMsg);
@@ -1973,7 +2498,6 @@
 
             buildSmartJS(options) {
                 let hasModuleSyntax = false;
-                // DIされた this.utils と、軽量な getFilePaths() を使う
                 const jsFiles = this.store.getFilePaths().filter(path => this.utils.isJSFile(path));
 
                 for (const path of jsFiles) {
@@ -1985,11 +2509,12 @@
                 }
 
                 if (hasModuleSyntax || jsFiles.length === 1) {
-                    this.logger.success("[自動判別] ESモジュール構文を検知しました。スマート結合(AST解析)を実行します。");
+                    this.logger.success("[自動判別] ESモジュール構文を検知しました。Scope Hoisting(AST平坦化)によるスマート結合を実行します。");
                     return this.Linker.executeSmartJSBundle(options.jsEntryPoint, this.store, options.addStrict, options.keepComments, options, this.logger, this.Scanner, this.Transformer, this.utils);
                 } else {
                     this.logger.warn("[自動判別] モジュール構文がありません。レガシー結合を実行します。");
-                    return this.Linker.executeSimpleJSBundle(this.store.fileOrder, this.store, options.addStrict, options.keepComments, options, this.logger);
+                    // 末尾に this.Transformer を渡す
+                    return this.Linker.executeSimpleJSBundle(this.store.fileOrder, this.store, options.addStrict, options.keepComments, options, this.logger, this.Transformer);
                 }
             }
 
@@ -2000,7 +2525,6 @@
                 let lang = options.directLang;
                 const trimmed = sourceCode.trim();
 
-                // 大文字小文字を無視し、HTMLコメント (<!--) にも対応する堅牢な正規表現
                 if (/^<(?:!doctype|[a-z]+|!--)/i.test(trimmed)) {
                     if (lang !== 'html') { lang = 'html'; this.logger.success("HTMLを検知。自動で言語を切り替えました。"); }
                 } else if (/^[.#@a-zA-Z0-9_-].*\{/m.test(trimmed) && !trimmed.includes('const ') && !trimmed.includes('let ') && !trimmed.includes('function')) {
@@ -2058,11 +2582,11 @@
             }
 
             getGolfRank(reductionPercent) {
-                if (reductionPercent >= 80) return { rank: "🏆 SSS", color: "bg-red-600" };
-                if (reductionPercent >= 60) return { rank: "💎 SS", color: "bg-orange-500" };
-                if (reductionPercent >= 40) return { rank: "🔥 S", color: "bg-amber-500" };
-                if (reductionPercent >= 25) return { rank: "⭐ A", color: "bg-emerald-500" };
-                if (reductionPercent >= 10) return { rank: "⚡ B", color: "bg-brand-500" };
+                if (reductionPercent >= 85) return { rank: "🏆 SSS", color: "bg-red-600" };
+                if (reductionPercent >= 70) return { rank: "💎 SS", color: "bg-orange-500" };
+                if (reductionPercent >= 50) return { rank: "🔥 S", color: "bg-amber-500" };
+                if (reductionPercent >= 30) return { rank: "⭐ A", color: "bg-emerald-500" };
+                if (reductionPercent >= 15) return { rank: "⚡ B", color: "bg-brand-500" };
                 return { rank: "⛳️ C", color: "bg-slate-500" };
             }
 
@@ -2076,7 +2600,6 @@
                     const resolvedImagePath = scanner.resolveRelativePath(cssPath, urlPath, store);
                     if (store.hasFile(resolvedImagePath)) {
                         const file = store.getFile(resolvedImagePath);
-                        // storeのメソッドを使って使用実績を記録
                         store.addUsedFile(resolvedImagePath);
 
                         if (file.isBinary) {
@@ -2114,7 +2637,7 @@
                 this.cacheElements();
                 this.bindEvents();
                 this.updateView();
-                lucide.createIcons(); // 初期ロード全体
+                lucide.createIcons();
             }
 
             cacheElements() {
@@ -2159,13 +2682,15 @@
                 this.elements.golfMinifyAssets = document.getElementById('golf-minify-assets');
                 this.elements.golfExtreme = document.getElementById('golf-extreme');
                 this.elements.golfStringHack = document.getElementById('golf-string-hack');
-                this.elements.modeHtmlBtn = document.getElementById('mode-mode-html-btn') || document.getElementById('mode-html-btn');
-                this.elements.modeSmartBtn = document.getElementById('mode-mode-smart-btn') || document.getElementById('mode-smart-btn');
-                this.elements.modeDirectBtn = document.getElementById('mode-mode-direct-btn') || document.getElementById('mode-direct-btn');
+                this.elements.golfGlobalAlias = document.getElementById('golf-global-alias');
+                this.elements.golfCrossAsset = document.getElementById('golf-cross-asset');
+                this.elements.golfPacker = document.getElementById('golf-packer');
+                this.elements.modeHtmlBtn = document.getElementById('mode-html-btn');
+                this.elements.modeSmartBtn = document.getElementById('mode-smart-btn');
+                this.elements.modeDirectBtn = document.getElementById('mode-direct-btn');
             }
 
             bindEvents() {
-                // UIからイベントを一括委譲管理（Event Delegation）
                 document.addEventListener('click', (e) => {
                     const target = e.target.closest('[data-action]');
                     if (!target) return;
@@ -2193,7 +2718,6 @@
                     }
                 });
 
-                // ドラッグ＆ドロップ(D&D)イベント制御
                 ['dragenter', 'dragover'].forEach(eventName => {
                     this.elements.dropZone.addEventListener(eventName, (e) => {
                         e.preventDefault();
@@ -2231,14 +2755,11 @@
                     }
                 });
 
-                // 各インプットファイルの変更監視
                 this.elements.folderInput.addEventListener('change', async (e) => this.handleFileSelection(e.target.files));
                 this.elements.filesInput.addEventListener('change', async (e) => this.handleFileSelection(e.target.files));
 
-                // ゴルフ切り替え変更監視
                 this.elements.optGolf.addEventListener('change', () => this.toggleGolfUI());
 
-                // スクロール同期
                 this.elements.inputCode.addEventListener('scroll', () => { this.elements.lineNumbers.scrollTop = this.elements.inputCode.scrollTop; });
                 this.elements.outputCode.addEventListener('scroll', () => { this.elements.lineNumbers.scrollTop = this.elements.outputCode.scrollTop; });
             }
@@ -2273,7 +2794,7 @@
             toggleGolfUI() {
                 if (this.elements.optGolf.checked) {
                     this.elements.golfDetails.classList.remove('opacity-40', 'pointer-events-none');
-                    this.showToast("コードゴルフ機能が有効化されました！⛳️", "info");
+                    this.showToast("極限コードゴルフ機能が有効化されました！⛳️", "info");
                 } else {
                     this.elements.golfDetails.classList.add('opacity-40', 'pointer-events-none');
                     this.elements.golfScoreboard.classList.add('hidden');
@@ -2375,7 +2896,6 @@
                     `;
                     this.elements.detectedFiles.appendChild(div);
                 });
-                // DOMフルスキャンから特定親要素配下のみの高速スキャンへ最適化
                 lucide.createIcons({ root: this.elements.detectedFiles });
             }
 
@@ -2661,7 +3181,6 @@
                 return Object.values(this.store.filesStore).reduce((sum, file) => sum + file.size, 0);
             }
 
-            //ビルドタスクをDI構成された「CompilerEngine」に綺麗に委譲
             runBundle() {
                 this.showLoading(true, "ビルド中...");
                 this.elements.logSection.classList.remove('hidden');
@@ -2671,7 +3190,7 @@
 
                 setTimeout(() => {
                     try {
-                        this.addLog("ビルドタスクを開始します...", "info");
+                        this.addLog("コンパイルタスクを開始します...", "info");
                         Config.analyzeEnvironmentData(this.store.filesStore);
 
                         const logger = {
@@ -2688,8 +3207,11 @@
                             enableMangle: this.elements.golfMangle.checked,
                             enableConsoleStrip: this.elements.golfConsole.checked,
                             enableExtreme: this.elements.golfExtreme.checked,
-                            golfStringHack: this.elements.golfStringHack.checked, // ASTプラグイン用フラグを設定
+                            golfStringHack: this.elements.golfStringHack.checked,
                             minifyAssets: this.elements.golfMinifyAssets.checked,
+                            globalAliasingEnabled: this.elements.golfGlobalAlias.checked,
+                            crossAssetEnabled: this.elements.golfCrossAsset.checked,
+                            packerEnabled: this.elements.golfPacker.checked,
                             iifeWrapped: this.elements.optIife.checked,
 
                             htmlEntryPath: this.elements.htmlEntrySelect.value,
