@@ -325,15 +325,15 @@
                         class="flex flex-col border border-white/5 bg-slate-950/20 rounded-xl gap-2.5 p-3 shadow-inner">
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="html-opt-css" type="checkbox" checked>
-                            <span class="checkmark"></span>CSSファイルをスタイルに変換
+                            <span class="checkmark"></span>CSSファイルをスタイルに変換 <span class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptCss)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="html-opt-js" type="checkbox" checked>
-                            <span class="checkmark"></span>JSを統合してインライン展開
+                            <span class="checkmark"></span>JSを統合してインライン展開 <span class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptJs)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="html-opt-img" type="checkbox" checked>
-                            <span class="checkmark"></span>ローカル画像をDataURLに変換
+                            <span class="checkmark"></span>ローカル画像をDataURLに変換 <span class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptImg)</span>
                         </label>
                     </div>
                 </div>
@@ -359,7 +359,7 @@
                 <div class="flex flex-col border-t border-white/5 gap-3 pt-4">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2 font-bold text-amber-400 text-xs tracking-wider uppercase">
-                            <i class="h-4 w-4" data-lucide="award"></i>ASTコードゴルフオプション
+                            <i class="h-4 w-4" data-lucide="award"></i>ASTコードゴルフオプション <span class="font-mono text-[10px] opacity-50 normal-case ml-1.5">(golfEnabled)</span>
                         </div>
                         <label class="items-center cursor-pointer relative inline-flex">
                             <input class="sr-only peer" id="opt-golf" type="checkbox" checked>
@@ -369,10 +369,10 @@
                         </label>
                     </div>
                     <div class="flex flex-col border border-white/5 rounded-xl gap-2.5 bg-amber-500/5 p-3.5 transition-all shadow-inner"
-                        id="golf-details">
+                         id="golf-details">
                         <div class="flex flex-col gap-1">
                             <div class="flex items-center justify-between text-slate-300 text-xs">
-                                <span class="font-medium">最大探索深度 (収束ループ上限数)</span>
+                                <span class="font-medium">最大探索深度 (収束ループ上限数) <span class="font-mono text-[10px] opacity-50 ml-1">(searchDepth)</span></span>
                                 <span class="font-bold font-mono text-amber-400" id="search-depth-val">10</span>
                             </div>
                             <input class="nop-slider" id="search-depth" type="range" max="50" min="1" value="10">
@@ -380,34 +380,34 @@
                         <div class="my-1 border-white/5 border-t"></div>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-mangle" type="checkbox" checked>
-                            <span class="checkmark"></span>変数の短縮一文字化 (Mangler)
+                            <span class="checkmark"></span>変数の短縮一文字化 (Mangler) <span class="font-mono text-[10px] opacity-50 ml-1.5">(enableMangle)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-console" type="checkbox" checked>
-                            <span class="checkmark"></span>console.log 出力の安全除去
+                            <span class="checkmark"></span>console.log 出力の安全除去 <span class="font-mono text-[10px] opacity-50 ml-1.5">(enableConsoleStrip)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-extreme" type="checkbox" checked>
-                            <span class="checkmark"></span>極限構文短縮 (Boolean / If-else ➔ 単一式)
+                            <span class="checkmark"></span>極限構文短縮 (Boolean / If-else ➔ 単一式) <span class="font-mono text-[10px] opacity-50 ml-1.5">(enableExtreme)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-global-alias" type="checkbox" checked>
-                            <span class="checkmark"></span>APIグローバルエイリアス (Math, document等の短縮)
+                            <span class="checkmark"></span>APIグローバルエイリアス (Math, document等の短縮) <span class="font-mono text-[10px] opacity-50 ml-1.5">(globalAliasingEnabled)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-cross-asset" type="checkbox" checked>
-                            <span class="checkmark"></span>三位一体クロスアセット同期圧縮 (id/class最適化)
+                            <span class="checkmark"></span>三位一体クロスアセット同期圧縮 (id/class最適化) <span class="font-mono text-[10px] opacity-50 ml-1.5">(crossAssetEnabled)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-packer" type="checkbox" checked>
-                            <span class="checkmark"></span>LZ77自己解凍パッカー (RegPack/Crush評価)
+                            <span class="checkmark"></span>LZ77自己解凍パッカー (RegPack/Crush評価) <span class="font-mono text-[10px] opacity-50 ml-1.5">(packerEnabled)</span>
                         </label>
                     </div>
                 </div>
                 <div class="flex flex-col gap-3 border-t border-white/5 pt-4">
                     <label class="nop-checkbox-container text-slate-300">
                         <input id="opt-strict" type="checkbox" checked>
-                        <span class="checkmark"></span>先頭に "use strict"; を宣言する
+                        <span class="checkmark"></span>先頭に "use strict"; を宣言する <span class="font-mono text-[10px] opacity-50 ml-1.5">(addStrict)</span>
                     </label>
                 </div>
                 <button
@@ -484,7 +484,7 @@
                     id="process-log">
                     <div class="flex items-center justify-between border-b border-white/5 mb-2 pb-2 text-slate-400">
                         <span class="flex items-center gap-1.5 font-bold text-amber-400"><i class="h-3.5 w-3.5"
-                                data-lucide="history"></i>Fixpoint Loop Trace (最適化収束追跡ログ)</span><span
+                                data-lucide="history"></i>ビルド・最適化ログ (Build & Optimization Log)</span><span
                             class="text-slate-500 text-[10px]" id="trace-stats">0 走査</span>
                     </div>
                     <div class="space-y-1 flex-1 overflow-y-auto" id="log-content"></div>
@@ -2022,6 +2022,20 @@
                     transforms: ['cse-optimization', 'block-to-comma', 'merge-var-declarations', 'assign-return-merge', 'multi-return-chain', 'switch-to-object', 'sequence-flatten', 'ternary-rotate', 'logical-reassociate'],
                     requiresDFA: false
                 }],
+                // UIオプションと、それをトリガーとして無効化されるルールIDの関連付け設定
+                optionMappings: {
+                    enableExtreme: [
+                        'if-to-ternary', 'if-to-logical', 'bool-literal-shorten', 'block-to-comma',
+                        'assign-return-merge', 'multi-return-chain', 'switch-to-object', 'ternary-rotate',
+                        'logical-reassociate', 'arrow-body-simplify', 'function-to-arrow'
+                    ],
+                    globalAliasingEnabled: [
+                        'window-x-to-x'
+                    ],
+                    crossAssetEnabled: [
+                        'dom-id-hack'
+                    ]
+                },
                 postLoop: [{
                     id: 'mangle-pass',
                     transforms: ['terser-mangle']
@@ -2268,6 +2282,24 @@
                             parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript'] }
                         });
                         context.ast = parsed.ast;
+
+                        // [UI連携] console.log 出力の安全除去
+                        if (options.enableConsoleStrip && options.golfEnabled) {
+                            Babel.packages.traverse.default(context.ast, {
+                                CallExpression(path) {
+                                    const callee = path.node.callee;
+                                    if (
+                                        Babel.types.isMemberExpression(callee) &&
+                                        !callee.computed &&
+                                        Babel.types.isIdentifier(callee.object, { name: 'console' }) &&
+                                        Babel.types.isIdentifier(callee.property)
+                                    ) {
+                                        path.replaceWith(Babel.types.unaryExpression('void', Babel.types.numericLiteral(0)));
+                                    }
+                                }
+                            });
+                        }
+
                         const loopResult = FixpointLoop.execute(context, scheduler, finalConfig.fixpointLoop.maxIterations);
                         logger.success("[最適化ループ] " + loopResult.reason + " - 合計 " + loopResult.iterations + " 周回");
 
@@ -2290,6 +2322,21 @@
                     //PipelineConfig を安全にディープコピーして設定汚染を防止
                     const finalConfig = JSON.parse(JSON.stringify(PipelineConfig));
                     finalConfig.fixpointLoop.maxIterations = options.searchDepth || 10;
+
+                    // UIのチェック状態から無効化リストをPipelineConfigの定義に基づいて動的に構築
+                    const disabledTransforms = [];
+                    if (!options.golfEnabled) {
+                        disabledTransforms.push(...Array.from(registry.keys()));
+                    } else {
+                        const mappings = finalConfig.optionMappings || {};
+                        for (const [optionKey, targetRules] of Object.entries(mappings)) {
+                            if (options[optionKey] === false) {
+                                disabledTransforms.push(...targetRules);
+                            }
+                        }
+                    }
+                    options.overrides = { disabledTransforms };
+
                     const scheduler = new PassScheduler(registry, finalConfig);
                     const scanner = new ProjectScanner();
                     logger.info("[SoC Architecture] コンパイラコア始動完了");
@@ -3082,6 +3129,9 @@
                             opt.value = p; opt.textContent = p;
                             this.elements.htmlEntrySelect.appendChild(opt);
                         });
+                        // index.html があれば自動優先選択
+                        const defaultHtml = htmlKeys.find(k => k.toLowerCase().endsWith('index.html')) || htmlKeys[0];
+                        this.elements.htmlEntrySelect.value = defaultHtml;
                     }
                     this.elements.entryPointSelect.innerHTML = '';
                     if (jsKeys.length === 0) {
@@ -3092,6 +3142,17 @@
                             opt.value = p; opt.textContent = p;
                             this.elements.entryPointSelect.appendChild(opt);
                         });
+                        // index.js / main.js / app.js / index.ts 等があれば自動優先選択
+                        const priorityNames = ['index.js', 'main.js', 'app.js', 'index.ts', 'main.ts', 'app.ts'];
+                        let defaultJs = jsKeys[0];
+                        for (const name of priorityNames) {
+                            const found = jsKeys.find(k => k.toLowerCase().endsWith('/' + name) || k.toLowerCase() === name);
+                            if (found) {
+                                defaultJs = found;
+                                break;
+                            }
+                        }
+                        this.elements.entryPointSelect.value = defaultJs;
                     }
                 }
                 updatePreviewFilename() {
@@ -3152,6 +3213,23 @@
                     this.elements.logSection.classList.add('hidden');
                     this.elements.logContent.innerHTML = '';
                     this.elements.golfScoreboard.classList.add('hidden');
+
+                    // UIのコントロール群の値を初期値に戻す
+                    this.elements.optStrict.checked = true;
+                    this.elements.htmlOptCss.checked = true;
+                    this.elements.htmlOptJs.checked = true;
+                    this.elements.htmlOptImg.checked = true;
+                    this.elements.golfMangle.checked = true;
+                    this.elements.golfConsole.checked = true;
+                    this.elements.golfExtreme.checked = true;
+                    this.elements.golfGlobalAlias.checked = true;
+                    this.elements.golfCrossAsset.checked = true;
+                    this.elements.golfPacker.checked = true;
+                    this.elements.searchDepth.value = 10;
+                    this.elements.searchDepthVal.textContent = "10";
+                    this.elements.optGolf.checked = true;
+                    this.elements.golfDetails.classList.remove('opacity-25', 'pointer-events-none');
+
                     this.switchMode('direct');
                     this.showToast("完全リセット", "info");
                 }
@@ -3195,21 +3273,20 @@
                 }
                 updateGolfScoreboard(originalBytes, finalBytes) {
                     const saved = Math.max(originalBytes - finalBytes, 0);
-                    const reduction = originalBytes > 0 ? ((saved / originalBytes) * 100).toFixed(1) : 0;
+                    const reductionPercent = originalBytes > 0 ? (saved / originalBytes) * 100 : 0;
                     this.elements.golfOrigSize.textContent = (originalBytes / 1024).toFixed(2) + " KB";
                     this.elements.golfFinalSize.textContent = (finalBytes / 1024).toFixed(2) + " KB";
-                    this.elements.golfReduction.textContent = "-" + reduction + "%";
+                    this.elements.golfReduction.textContent = "-" + reductionPercent.toFixed(1) + "%";
                     let rank = "⛳️ C"; let rankColor = "bg-slate-600/80";
-                    if (reduction >= 85) { rank = "🏆 SSS"; rankColor = "bg-red-600/80"; }
-                    else if (reduction >= 70) { rank = "💎 SS"; rankColor = "bg-orange-500/80"; }
-                    else if (reduction >= 50) { rank = "🔥 S"; rankColor = "bg-amber-500/80"; }
-                    else if (reduction >= 30) { rank = "⭐ A"; rankColor = "bg-emerald-500/80"; }
+                    if (reductionPercent >= 85) { rank = "🏆 SSS"; rankColor = "bg-red-600/80"; }
+                    else if (reductionPercent >= 70) { rank = "💎 SS"; rankColor = "bg-orange-500/80"; }
+                    else if (reductionPercent >= 50) { rank = "🔥 S"; rankColor = "bg-amber-500/80"; }
+                    else if (reductionPercent >= 30) { rank = "⭐ A"; rankColor = "bg-emerald-500/80"; }
                     this.elements.golfRankBadge.textContent = rank;
                     this.elements.golfRankBadge.className = "px-2 py-0.5 text-xs text-white rounded font-mono font-bold border border-white/10 shadow-sm animate-pulse " + rankColor;
                     this.elements.golfScoreboard.classList.remove('hidden');
                 }
                 renderTraceExplorer(trace) {
-                    this.elements.logContent.innerHTML = '';
                     if (!trace || trace.length === 0) {
                         this.addLog("[Explorer] 最適化探索空間に適用可能なルール候補は検出されませんでした。");
                         this.elements.traceStats.textContent = "0 適用"; return;
@@ -3224,6 +3301,7 @@
                     });
                 }
                 runBundle() {
+                    this.elements.logContent.innerHTML = ''; // ビルド開始時にログエリアをクリア
                     this.showLoading(true, "SoC パイプライン最適化中...");
                     this.elements.logSection.classList.remove('hidden');
                     const logger = {
