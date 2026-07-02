@@ -367,7 +367,6 @@
             }
         };
     </script>
-
     <header class="border-white/5 backdrop-blur-xl bg-[#2b2f35]/60 border-b sticky top-0 z-50 shadow-md">
         <div class="flex items-center justify-between flex-col gap-4 sm:flex-row max-w-7xl mx-auto px-4 py-4">
             <div class="flex items-center gap-3">
@@ -392,7 +391,6 @@
             </div>
         </div>
     </header>
-
     <main class="gap-6 flex-1 grid grid-cols-1 lg:grid-cols-12 max-w-7xl mx-auto px-4 py-6 w-full">
         <div class="flex flex-col gap-6 lg:col-span-5">
             <div class="flex items-center flex-col justify-center border-2 border-dashed border-white/5 bg-slate-900/10 cursor-pointer group hover:bg-white/5 overflow-hidden p-8 relative rounded-2xl text-center transition-all shadow-xl shadow-black/10"
@@ -413,7 +411,6 @@
                     </button>
                 </div>
             </div>
-
             <div id="settings-card" class="nop-panel p-5 flex flex-col gap-5">
                 <div class="flex items-center justify-between border-b border-white/5 pb-3">
                     <div class="flex items-center gap-2">
@@ -425,14 +422,12 @@
                         <i class="h-3 w-3" data-lucide="rotate-ccw"></i>リセット
                     </button>
                 </div>
-
                 <div class="segmented-switch">
                     <button class="active" data-action="switchMode" id="mode-html-btn" data-value="html">🌐
                         HTML単一化</button>
                     <button data-action="switchMode" id="mode-smart-btn" data-value="smart">📦 JSスマート結合</button>
                     <button data-action="switchMode" id="mode-direct-btn" data-value="direct">直接入力</button>
                 </div>
-
                 <div class="flex flex-col gap-4" id="html-options">
                     <div>
                         <label class="text-xs text-slate-400 font-medium block mb-1.5">エントリーHTML</label>
@@ -457,14 +452,12 @@
                         </label>
                     </div>
                 </div>
-
                 <div class="flex flex-col hidden gap-4" id="smart-options">
                     <div>
                         <label class="text-xs text-slate-400 font-medium block mb-1.5">JSエントリーポイント</label>
                         <select class="nop-select text-xs py-2 px-3 w-full font-mono" id="entry-point-select"></select>
                     </div>
                 </div>
-
                 <div class="flex flex-col hidden gap-4" id="direct-options">
                     <div class="flex items-center gap-2">
                         <label class="text-xs text-slate-400 font-medium">対象言語:</label>
@@ -475,7 +468,6 @@
                         </select>
                     </div>
                 </div>
-
                 <div class="flex flex-col border-t border-white/5 gap-3 pt-4">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2 font-bold text-amber-400 text-xs tracking-wider uppercase">
@@ -499,7 +491,6 @@
                             <div class="setting-desc">Config property: searchDepth — ループの最大探索回数を指定します。</div>
                             <input class="nop-slider" id="search-depth" type="range" max="50" min="1" value="10">
                         </div>
-
                         <div class="flex flex-col">
                             <div class="flex items-center justify-between text-slate-300 text-xs font-medium">
                                 <span>タイムアウト制限 (秒)</span>
@@ -509,7 +500,6 @@
                             <input class="nop-slider" id="timeout-limit" type="range" max="60" min="5" step="5"
                                 value="15">
                         </div>
-
                         <div class="flex items-center justify-between text-slate-300 text-xs pt-1">
                             <div>
                                 <span class="font-medium">非同期実行 (UIハング防止)</span>
@@ -522,11 +512,9 @@
                                 </div>
                             </label>
                         </div>
-
                         <div class="my-0.5 border-white/5 border-t"></div>
                         <div id="golf-options-container" class="flex flex-col gap-2.5"></div>
                         <div class="my-0.5 border-white/5 border-t"></div>
-
                         <div class="flex items-center justify-between text-slate-300 text-xs pt-1">
                             <div>
                                 <span class="font-medium text-brand-300"><i class="h-3 w-3 inline mr-1"
@@ -540,7 +528,6 @@
                                 </div>
                             </label>
                         </div>
-
                         <div class="sub-settings opacity-25 pointer-events-none border-brand-500/30" id="beam-details">
                             <div class="flex items-center justify-between text-slate-300 text-xs">
                                 <span class="font-medium text-[10px]">ビーム幅 (同時探索数)</span>
@@ -568,8 +555,8 @@
             </div>
             <div class="nop-panel p-5 hidden min-h-[250px]" id="file-list-card">
                 <div class="flex items-center justify-between border-b border-white/5 pb-3 mb-3">
-                    <div class="flex items-center gap-2"><i class="h-5 text-[var(--accent)] w-5"
-                            data-lucide="folder-tree"></i>
+                    <div class="flex items-center gap-2">
+                        <i class="h-5 text-[var(--accent)] w-5" data-lucide="folder-tree"></i>
                         <h2 class="font-bold text-sm text-slate-200">検出されたアセット一覧 (<span id="file-count">0</span>)</h2>
                     </div>
                 </div>
@@ -577,7 +564,6 @@
                     id="detected-files"></div>
             </div>
         </div>
-
         <div class="flex flex-col gap-4 h-[calc(100vh-140px)] lg:col-span-7 min-h-[600px]">
             <div class="nop-panel flex items-center justify-between flex-col gap-4 sm:flex-row hidden p-4"
                 id="golf-scoreboard"
@@ -610,7 +596,6 @@
                     </div>
                 </div>
             </div>
-
             <div class="nop-panel p-5 flex flex-col flex-1 overflow-hidden relative">
                 <div class="flex items-center justify-between border-b border-white/5 pb-3 mb-4">
                     <div class="flex items-center gap-2">
@@ -629,7 +614,6 @@
                         </button>
                     </div>
                 </div>
-
                 <div class="flex flex-col border border-white/5 rounded-xl bg-slate-950/50 backdrop-blur-md overflow-hidden font-mono hidden h-[140px] shrink-0 mb-3 p-4 text-xs shadow-inner"
                     id="process-log">
                     <div class="flex items-center justify-between border-b border-white/5 mb-2 pb-2 text-slate-400">
@@ -639,7 +623,6 @@
                     </div>
                     <div class="space-y-1 flex-1 overflow-y-auto" id="log-content"></div>
                 </div>
-
                 <div class="flex flex-col flex-1 min-h-0 overflow-hidden relative">
                     <div class="segmented-switch mb-3 shrink-0">
                         <button class="active" data-action="switchEditorTab" id="tab-input" data-tab="input"><i
@@ -649,10 +632,12 @@
                     </div>
                     <div class="nop-panel-inset flex flex-1 min-h-0 relative overflow-hidden">
                         <div class="text-xs font-mono bg-transparent border-r border-white/5 pr-3 py-4 select-none text-right text-slate-600 w-12 h-full overflow-hidden leading-relaxed select-none shrink-0"
-                            id="line-numbers">1</div><textarea
+                            id="line-numbers">1</div>
+                        <textarea
                             class="text-xs font-mono bg-transparent focus:outline-none text-slate-200 animate-none flex-1 leading-relaxed overflow-x-auto overflow-y-auto p-4 resize-none whitespace-pre relative z-10"
                             id="input-code"
-                            placeholder="// 最最適化したいソースコードをペースト、または左エリアへプロジェクトフォルダをロードしてください。"></textarea><textarea
+                            placeholder="// 最最適化したいソースコードをペースト、または左エリアへプロジェクトフォルダをロードしてください。"></textarea>
+                        <textarea
                             class="text-xs font-mono bg-transparent focus:outline-none flex-1 leading-relaxed overflow-x-auto overflow-y-auto p-4 resize-none whitespace-pre hidden text-emerald-400 relative z-10"
                             id="output-code" placeholder="// 極極限ゴルフ圧縮後のコードがここに出力されます。" readonly=""></textarea>
                         <div class="flex items-center flex-col hidden absolute backdrop-blur-sm bg-slate-950/80 gap-3 inset-0 justify-center z-20"
@@ -680,10 +665,9 @@
         class="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-900/95 border border-white/10 shadow-2xl text-xs backdrop-blur-xl transform translate-y-4 opacity-0 pointer-events-none transition-all duration-300 ease-out">
         <span id="toast-icon"></span><span class="font-medium" id="toast-text">メッセージ</span>
     </div>
-
     <!-- ==========================================================================
-     src/core/ - Layer 1: Infrastructure
-     ========================================================================== -->
+			src/core/ - Layer 1: Infrastructure
+			========================================================================== -->
     <script id="src/core/KnowledgeBase.js">
         window.App.define('src/core/KnowledgeBase.js', () => {
             const SIGNATURES = {
@@ -736,7 +720,6 @@
             };
         });
     </script>
-
     <script id="src/core/Globals.js">
         window.App.define('src/core/Globals.js', () => {
             const BUILTIN_GLOBALS = new Set(['window', 'document', 'Math', 'console', 'navigator', 'location', 'setTimeout', 'setInterval', 'Object', 'Array', 'String', 'Number', 'Boolean', 'RegExp', 'Function', 'Promise', 'Map', 'Set']);
@@ -745,7 +728,6 @@
             };
         });
     </script>
-
     <script id="src/core/ByteEstimator.js">
         window.App.define('src/core/ByteEstimator.js', () => {
             const PREC = {
@@ -949,7 +931,6 @@
             };
         });
     </script>
-
     <script id="src/core/CostModel.js">
         window.App.define('src/core/CostModel.js', () => {
             const {
@@ -1003,7 +984,6 @@
             };
         });
     </script>
-
     <script id="src/core/CompilationContext.js">
         window.App.define('src/core/CompilationContext.js', () => {
             const {
@@ -1056,7 +1036,6 @@
             };
         });
     </script>
-
     <script id="src/core/CompilationTrace.js">
         window.App.define('src/core/CompilationTrace.js', () => {
             class CompilationTrace {
@@ -1111,10 +1090,9 @@
             };
         });
     </script>
-
     <!-- ==========================================================================
-     src/analysis/ - Layer 2: Analysis
-     ========================================================================== -->
+			src/analysis/ - Layer 2: Analysis
+			========================================================================== -->
     <script id="src/analysis/CFGBuilder.js">
         window.App.define('src/analysis/CFGBuilder.js', () => {
             const CFG_BRANCH_RULES = {
@@ -1344,7 +1322,6 @@
             };
         });
     </script>
-
     <script id="src/analysis/DataFlowProblems.js">
         window.App.define('src/analysis/DataFlowProblems.js', () => {
             const ReachingDefinitionsProblem = {
@@ -1433,7 +1410,6 @@
             };
         });
     </script>
-
     <script id="src/analysis/DataFlowAnalyzer.js">
         window.App.define('src/analysis/DataFlowAnalyzer.js', () => {
             function analyzeEscapedVariables(programPath) {
@@ -1602,7 +1578,6 @@
             };
         });
     </script>
-
     <script id="src/analysis/DFAQuery.js">
         window.App.define('src/analysis/DFAQuery.js', () => {
             const {
@@ -1831,10 +1806,9 @@
             };
         });
     </script>
-
     <!-- ==========================================================================
-     src/transforms/ - Layer 3: Transform (Semantic / Lowering / Equivalence / Structure)
-     ========================================================================== -->
+			src/transforms/ - Layer 3: Transform (Semantic / Lowering / Equivalence / Structure)
+			========================================================================== -->
     <script id="src/transforms/semantic/ConstantPropagation.js">
         window.App.define('src/transforms/semantic/ConstantPropagation.js', () => {
             return {
@@ -1857,7 +1831,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/semantic/CopyPropagation.js">
         window.App.define('src/transforms/semantic/CopyPropagation.js', () => {
             return {
@@ -1880,7 +1853,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/semantic/DeadStoreElimination.js">
         window.App.define('src/transforms/semantic/DeadStoreElimination.js', () => {
             return {
@@ -1911,7 +1883,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/semantic/InlineSingleRef.js">
         window.App.define('src/transforms/semantic/InlineSingleRef.js', () => {
             return {
@@ -1934,7 +1905,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/IfToTernary.js">
         window.App.define('src/transforms/lowering/IfToTernary.js', () => {
             const getExpr = (stmt, t) => {
@@ -1969,7 +1939,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/IfToLogical.js">
         window.App.define('src/transforms/lowering/IfToLogical.js', () => {
             const getExpr = (stmt, t) => {
@@ -1997,7 +1966,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/BlockToComma.js">
         window.App.define('src/transforms/lowering/BlockToComma.js', () => {
             return {
@@ -2022,7 +1990,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/ArrowBodySimplify.js">
         window.App.define('src/transforms/lowering/ArrowBodySimplify.js', () => {
             return {
@@ -2041,7 +2008,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/SwitchToObject.js">
         window.App.define('src/transforms/lowering/SwitchToObject.js', () => {
             return {
@@ -2093,7 +2059,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/FunctionToArrow.js">
         window.App.define('src/transforms/lowering/FunctionToArrow.js', () => {
             return {
@@ -2127,7 +2092,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/MergeVarDeclarations.js">
         window.App.define('src/transforms/lowering/MergeVarDeclarations.js', () => {
             return {
@@ -2166,7 +2130,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/AssignReturnMerge.js">
         window.App.define('src/transforms/lowering/AssignReturnMerge.js', () => {
             return {
@@ -2211,7 +2174,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/lowering/MultiReturnChain.js">
         window.App.define('src/transforms/lowering/MultiReturnChain.js', () => {
             // return文の引数が空(null)の場合、JSの等価表現である void 0 を補完する
@@ -2258,7 +2220,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/MathHacks.js">
         window.App.define('src/transforms/equivalence/MathHacks.js', () => {
             return {
@@ -2282,7 +2243,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/MathRoundHack.js">
         window.App.define('src/transforms/equivalence/MathRoundHack.js', () => {
             return {
@@ -2306,7 +2266,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/ParseIntHack.js">
         window.App.define('src/transforms/equivalence/ParseIntHack.js', () => {
             return {
@@ -2329,7 +2288,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/BooleanShortening.js">
         window.App.define('src/transforms/equivalence/BooleanShortening.js', () => {
             return {
@@ -2348,7 +2306,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/UndefinedShortening.js">
         window.App.define('src/transforms/equivalence/UndefinedShortening.js', () => {
             return {
@@ -2367,7 +2324,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/InfinityShorten.js">
         window.App.define('src/transforms/equivalence/InfinityShorten.js', () => {
             return {
@@ -2386,7 +2342,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/StringCastShortening.js">
         window.App.define('src/transforms/equivalence/StringCastShortening.js', () => {
             return {
@@ -2407,7 +2362,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/DomIdHack.js">
         window.App.define('src/transforms/equivalence/DomIdHack.js', () => {
             return {
@@ -2434,7 +2388,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/WhileTrueToFor.js">
         window.App.define('src/transforms/equivalence/WhileTrueToFor.js', () => {
             return {
@@ -2456,7 +2409,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/ComputedToDot.js">
         window.App.define('src/transforms/equivalence/ComputedToDot.js', () => {
             return {
@@ -2478,7 +2430,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/WindowXToX.js">
         window.App.define('src/transforms/equivalence/WindowXToX.js', () => {
             return {
@@ -2501,7 +2452,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/ConstantFold.js">
         window.App.define('src/transforms/equivalence/ConstantFold.js', () => {
             return {
@@ -2569,7 +2519,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/NumericShortening.js">
         window.App.define('src/transforms/equivalence/NumericShortening.js', () => {
             return {
@@ -2598,7 +2547,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/equivalence/ArrayToSplit.js">
         window.App.define('src/transforms/equivalence/ArrayToSplit.js', () => {
             return {
@@ -2619,7 +2567,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/structure/CSE.js">
         window.App.define('src/transforms/structure/CSE.js', () => {
             // ブロック内の深い部分木を走査し、純粋な参照式をカウントするヘルパー
@@ -2709,7 +2656,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/structure/SequenceFlatten.js">
         window.App.define('src/transforms/structure/SequenceFlatten.js', () => {
             return {
@@ -2733,7 +2679,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/structure/TernaryRotate.js">
         window.App.define('src/transforms/structure/TernaryRotate.js', () => {
             return {
@@ -2754,7 +2699,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/structure/LogicalReassociate.js">
         window.App.define('src/transforms/structure/LogicalReassociate.js', () => {
             return {
@@ -2777,7 +2721,6 @@
             };
         });
     </script>
-
     <script id="src/transforms/registry.js">
         window.App.define('src/transforms/registry.js', () => {
             // 【重要】Transform層全体で使われている `Babel.cloneDeep` がクラッシュしないよう、
@@ -2830,7 +2773,6 @@
             };
         });
     </script>
-
     <script id="src/engine/PipelineConfig.js">
         window.App.define('src/engine/PipelineConfig.js', () => {
             const PipelineConfig = {
@@ -2884,7 +2826,6 @@
             };
         });
     </script>
-
     <script id="src/engine/PassScheduler.js">
         window.App.define('src/engine/PassScheduler.js', () => {
             const {
@@ -3140,7 +3081,6 @@
             };
         });
     </script>
-
     <script id="src/engine/FixpointLoop.js">
         window.App.define('src/engine/FixpointLoop.js', () => {
             class BeamSearchOrchestrator {
@@ -3293,7 +3233,6 @@
             };
         });
     </script>
-
     <script id="src/engine/CompilerFacade.js">
         window.App.define('src/engine/CompilerFacade.js', () => {
             const {
@@ -3521,7 +3460,6 @@
             };
         });
     </script>
-
     <script id="src/compression/TerserBackend.js">
         window.App.define('src/compression/TerserBackend.js', () => {
             class TerserBackend {
@@ -3586,7 +3524,6 @@
             };
         });
     </script>
-
     <script id="src/compression/CssCompressor.js">
         window.App.define('src/compression/CssCompressor.js', () => {
             class CssCompressor {
@@ -3599,7 +3536,6 @@
             };
         });
     </script>
-
     <script id="src/compression/HtmlCompressor.js">
         window.App.define('src/compression/HtmlCompressor.js', () => {
             class HtmlCompressor {
@@ -3607,7 +3543,7 @@
                     let processed = html;
                     if (options.golfEnabled) {
                         processed = processed.replace(/<!--[\s\S]*?-->/g, '') // コメント削除
-        .replace(/<!DOCTYPE html>/i, '<!doctype html>') // DOCTYPEの小文字化（1バイト節約）
+			        .replace(/<!DOCTYPE html>/i, '<!doctype html>') // DOCTYPEの小文字化（1バイト節約）
                                 .replace(/>\s+</g, '><') // タグ間の空白削除
                                 .replace(/=(["'])([^"'=<>\s\x60]+)\1/g, '=$2') // 属性の不要なクォート削除
                                 .replace(/<\/(html|body|head|p|li|td|tr|th)>/gi, '') // 省略可能な閉じタグの削除
@@ -3621,7 +3557,6 @@
             };
         });
     </script>
-
     <script id="src/encoding/RegPackEncoder.js">
         window.App.define('src/encoding/RegPackEncoder.js', () => {
             class RegPackEncoder {
@@ -3683,7 +3618,6 @@
             };
         });
     </script>
-
     <script id="src/encoding/JSCrushEncoder.js">
         window.App.define('src/encoding/JSCrushEncoder.js', () => {
             class JSCrushEncoder {
@@ -3696,7 +3630,6 @@
             };
         });
     </script>
-
     <script id="src/encoding/EncodingSelector.js">
         window.App.define('src/encoding/EncodingSelector.js', () => {
             const {
@@ -3717,7 +3650,6 @@
             };
         });
     </script>
-
     <script id="src/bundler/Resolver.js">
         window.App.define('src/bundler/Resolver.js', () => {
             class Resolver {
@@ -3737,7 +3669,6 @@
             };
         });
     </script>
-
     <script id="src/bundler/Scanner.js">
         window.App.define('src/bundler/Scanner.js', () => {
             const {
@@ -3820,7 +3751,6 @@
             };
         });
     </script>
-
     <script id="src/bundler/Linker.js">
         window.App.define('src/bundler/Linker.js', () => {
             class Linker {
@@ -4052,7 +3982,6 @@
             };
         });
     </script>
-
     <script id="src/ui/Store.js">
         window.App.define('src/ui/Store.js', () => {
             class UIStore {
@@ -4107,7 +4036,6 @@
             };
         });
     </script>
-
     <script id="src/ui/UIManager.js">
         window.App.define('src/ui/UIManager.js', () => {
             const UI_PRESENTATION_SCHEMA = {
@@ -4985,8 +4913,6 @@
             manager.init();
         });
     </script>
-
-
 </body>
 
 </html>
