@@ -549,6 +549,43 @@
     <!-- ==========================================================================
      src/core/ - Layer 1: Infrastructure
      ========================================================================== -->
+    <script id="src/core/KnowledgeBase.js">
+        window.App.define('src/core/KnowledgeBase.js', () => {
+            const SIGNATURES = {
+                MATH_FLOOR: 'global.Math.floor',
+                MATH_ROUND: 'global.Math.round',
+                MATH_TRUNC: 'global.Math.trunc',
+                PARSE_INT: 'global.parseInt',
+                DOCUMENT: 'global.document',
+                DOCUMENT_GET_ELEMENT_BY_ID: 'global.document.getElementById'
+            };
+
+            const BrowserEnvironment = {
+                globals: {
+                    'Math': {
+                        type: 'Object',
+                        signature: 'global.Math',
+                        properties: {
+                            'floor': { signature: SIGNATURES.MATH_FLOOR, pure: true },
+                            'round': { signature: SIGNATURES.MATH_ROUND, pure: true },
+                            'trunc': { signature: SIGNATURES.MATH_TRUNC, pure: true }
+                        }
+                    },
+                    'parseInt': { signature: SIGNATURES.PARSE_INT, pure: true },
+                    'document': {
+                        type: 'Object',
+                        signature: SIGNATURES.DOCUMENT,
+                        properties: {
+                            'getElementById': { signature: SIGNATURES.DOCUMENT_GET_ELEMENT_BY_ID, pure: false }
+                        }
+                    }
+                }
+            };
+
+            return { SIGNATURES, BrowserEnvironment };
+        });
+    </script>
+
     <script id="src/core/Globals.js">
         window.App.define('src/core/Globals.js', () => {
             const BUILTIN_GLOBALS = new Set([
@@ -908,134 +945,651 @@
      ========================================================================== -->
     <script id="src/analysis/CFGBuilder.js">
         window.App.define('src/analysis/CFGBuilder.js', () => {
-            class CFGNode {
-                constructor(id, astNode) {
+            const CFG_BRANCH_RULES = {
+                'IfStatement': { type: 'branch', conditionKey: 'test', trueKey: 'consequent', falseKey: 'alternate' },
+                'ConditionalExpression': { type: 'branch', conditionKey: 'test', trueKey: 'consequent', falseKey: 'alternate' },
+                'LogicalExpression': { type: 'short-circuit', leftKey: 'left', rightKey: 'right' },
+                'WhileStatement': { type: 'loop-while', conditionKey: 'test', bodyKey: 'body' },
+                'ForStatement': { type: 'loop-for', initKey: 'init', conditionKey: 'test', updateKey: 'update', bodyKey: 'body' },
+                'DoWhileStatement': { type: 'loop-dowhile', bodyKey: 'body', conditionKey: 'test' }
+            };
+
+            class BasicBlock {
+                constructor(id) {
                     this.id = id;
-                    this.astNode = astNode;
+                    this.events = [];
                     this.succs = [];
                     this.preds = [];
                 }
             }
+
             class CFGBuilder {
-                build(ast) {
-                    const nodes = [];
-                    let counter = 0;
-                    const traverse = Babel.traverse;
-                    try {
-                        traverse(ast, {
-                            enter(path) {
-                                if (path.isStatement()) {
-                                    const node = new CFGNode(counter++, path.node);
-                                    nodes.push(node);
+                constructor() {
+                    this.blockCounter = 0;
+                    this.nodeMap = new WeakMap();
+                    this.loopStack = [];
+                }
+
+                createBlock() {
+                    return new BasicBlock(this.blockCounter++);
+                }
+
+                link(from, to) {
+                    if (!from || !to) return;
+                    if (!from.succs.includes(to)) from.succs.push(to);
+                    if (!to.preds.includes(from)) to.preds.push(from);
+                }
+
+                build(programPath) {
+                    const entryBlock = this.createBlock();
+                    let currentBlock = entryBlock;
+                    const allBlocks = [entryBlock];
+
+                    const walk = (path) => {
+                        if (!path || !path.node) return;
+
+                        const nodeType = path.node.type;
+                        const rule = CFG_BRANCH_RULES[nodeType];
+
+                        if (!currentBlock) {
+                            currentBlock = this.createBlock();
+                            allBlocks.push(currentBlock);
+                        }
+
+                        if (rule) {
+                            if (rule.type === 'branch') {
+                                const condPath = path.get(rule.conditionKey);
+                                walk(condPath);
+
+                                const preBranchBlock = currentBlock;
+
+                                const trueBlock = this.createBlock();
+                                allBlocks.push(trueBlock);
+                                this.link(preBranchBlock, trueBlock);
+                                currentBlock = trueBlock;
+                                walk(path.get(rule.trueKey));
+                                const postTrueBlock = currentBlock;
+
+                                const falseBlock = this.createBlock();
+                                allBlocks.push(falseBlock);
+                                this.link(preBranchBlock, falseBlock);
+                                currentBlock = falseBlock;
+                                walk(path.get(rule.falseKey));
+                                const postFalseBlock = currentBlock;
+
+                                const mergeBlock = this.createBlock();
+                                allBlocks.push(mergeBlock);
+                                this.link(postTrueBlock, mergeBlock);
+                                this.link(postFalseBlock, mergeBlock);
+
+                                currentBlock = mergeBlock;
+                            } else if (rule.type === 'short-circuit') {
+                                walk(path.get(rule.leftKey));
+                                const preRightBlock = currentBlock;
+
+                                const rightBlock = this.createBlock();
+                                allBlocks.push(rightBlock);
+                                this.link(preRightBlock, rightBlock);
+                                currentBlock = rightBlock;
+                                walk(path.get(rule.rightKey));
+                                const postRightBlock = currentBlock;
+
+                                const mergeBlock = this.createBlock();
+                                allBlocks.push(mergeBlock);
+                                this.link(preRightBlock, mergeBlock);
+                                this.link(postRightBlock, mergeBlock);
+
+                                currentBlock = mergeBlock;
+                            } else if (rule.type === 'loop-while') {
+                                const headerBlock = this.createBlock();
+                                const bodyBlock = this.createBlock();
+                                const exitBlock = this.createBlock();
+                                allBlocks.push(headerBlock, bodyBlock, exitBlock);
+
+                                this.link(currentBlock, headerBlock);
+
+                                currentBlock = headerBlock;
+                                walk(path.get(rule.conditionKey));
+                                this.link(currentBlock, bodyBlock);
+                                this.link(currentBlock, exitBlock);
+
+                                currentBlock = bodyBlock;
+                                this.loopStack.push({ continueTarget: headerBlock, breakTarget: exitBlock });
+                                walk(path.get(rule.bodyKey));
+                                this.loopStack.pop();
+
+                                this.link(currentBlock, headerBlock);
+
+                                currentBlock = exitBlock;
+                            } else if (rule.type === 'loop-for') {
+                                if (path.node.init) {
+                                    walk(path.get(rule.initKey));
+                                }
+
+                                const headerBlock = this.createBlock();
+                                const bodyBlock = this.createBlock();
+                                const updateBlock = this.createBlock();
+                                const exitBlock = this.createBlock();
+                                allBlocks.push(headerBlock, bodyBlock, updateBlock, exitBlock);
+
+                                this.link(currentBlock, headerBlock);
+
+                                currentBlock = headerBlock;
+                                if (path.node.test) {
+                                    walk(path.get(rule.conditionKey));
+                                }
+                                this.link(currentBlock, bodyBlock);
+                                this.link(currentBlock, exitBlock);
+
+                                currentBlock = bodyBlock;
+                                this.loopStack.push({ continueTarget: updateBlock, breakTarget: exitBlock });
+                                walk(path.get(rule.bodyKey));
+                                this.loopStack.pop();
+                                this.link(currentBlock, updateBlock);
+
+                                currentBlock = updateBlock;
+                                if (path.node.update) {
+                                    walk(path.get(rule.updateKey));
+                                }
+                                this.link(currentBlock, headerBlock);
+
+                                currentBlock = exitBlock;
+                            } else if (rule.type === 'loop-dowhile') {
+                                const bodyBlock = this.createBlock();
+                                const testBlock = this.createBlock();
+                                const exitBlock = this.createBlock();
+                                allBlocks.push(bodyBlock, testBlock, exitBlock);
+
+                                this.link(currentBlock, bodyBlock);
+
+                                currentBlock = bodyBlock;
+                                this.loopStack.push({ continueTarget: testBlock, breakTarget: exitBlock });
+                                walk(path.get(rule.bodyKey));
+                                this.loopStack.pop();
+                                this.link(currentBlock, testBlock);
+
+                                currentBlock = testBlock;
+                                walk(path.get(rule.conditionKey));
+                                this.link(currentBlock, bodyBlock);
+                                this.link(currentBlock, exitBlock);
+
+                                currentBlock = exitBlock;
+                            }
+                        } else if (nodeType === 'BreakStatement') {
+                            if (this.loopStack.length > 0) {
+                                const target = this.loopStack[this.loopStack.length - 1].breakTarget;
+                                this.link(currentBlock, target);
+                            }
+                            currentBlock = null;
+                        } else if (nodeType === 'ContinueStatement') {
+                            if (this.loopStack.length > 0) {
+                                const target = this.loopStack[this.loopStack.length - 1].continueTarget;
+                                this.link(currentBlock, target);
+                            }
+                            currentBlock = null;
+                        } else {
+                            const isEvent = this.isEventNode(path);
+
+                            const visitorKeys = Babel.types.VISITOR_KEYS[nodeType];
+                            if (visitorKeys) {
+                                for (const key of visitorKeys) {
+                                    const childPath = path.get(key);
+                                    if (Array.isArray(childPath)) {
+                                        for (const c of childPath) walk(c);
+                                    } else if (childPath && childPath.node) {
+                                        walk(childPath);
+                                    }
                                 }
                             }
-                        });
-                    } catch (e) {
-                        throw new Error(`CFG構築中のAST走査に失敗しました: ${e.message}`);
-                    }
-                    for (let i = 0; i < nodes.length - 1; i++) {
-                        nodes[i].succs.push(nodes[i + 1]);
-                        nodes[i + 1].preds.push(nodes[i]);
-                    }
-                    return nodes;
+
+                            if (isEvent && currentBlock) {
+                                const idx = currentBlock.events.length;
+                                currentBlock.events.push(path);
+                                this.nodeMap.set(path.node, { block: currentBlock, index: idx });
+                            }
+                        }
+                    };
+
+                    walk(programPath);
+                    return { entryBlock, allBlocks, nodeMap: this.nodeMap };
+                }
+
+                isEventNode(path) {
+                    return path.isIdentifier() ||
+                           path.isAssignmentExpression() ||
+                           path.isVariableDeclarator() ||
+                           path.isCallExpression() ||
+                           path.isNewExpression() ||
+                           path.isUpdateExpression();
                 }
             }
-            return { CFGBuilder, CFGNode };
+
+            return { CFGBuilder, BasicBlock };
+        });
+    </script>
+
+    <script id="src/analysis/DataFlowProblems.js">
+        window.App.define('src/analysis/DataFlowProblems.js', () => {
+            const ReachingDefinitionsProblem = {
+                direction: 'forward',
+                meet(states) {
+                    const result = new Map();
+                    for (const state of states) {
+                        for (const [varName, defs] of state.entries()) {
+                            if (!result.has(varName)) {
+                                result.set(varName, new Set());
+                            }
+                            const resSet = result.get(varName);
+                            for (const def of defs) {
+                                resSet.add(def);
+                            }
+                        }
+                    }
+                    return result;
+                },
+                transfer(path, inState, context) {
+                    const outState = new Map();
+                    for (const [k, v] of inState.entries()) {
+                        outState.set(k, new Set(v));
+                    }
+
+                    let definedVars = null;
+                    if (path.isVariableDeclarator()) {
+                        definedVars = path.get('id').getBindingIdentifiers();
+                    } else if (path.isAssignmentExpression()) {
+                        definedVars = path.get('left').getBindingIdentifiers();
+                    } else if (path.isUpdateExpression()) {
+                        definedVars = path.get('argument').getBindingIdentifiers();
+                    }
+
+                    if (definedVars) {
+                        for (const varName of Object.keys(definedVars)) {
+                            outState.set(varName, new Set([path]));
+                        }
+                    }
+
+                    if (path.isCallExpression() || path.isNewExpression()) {
+                        for (const varName of context.escapedVars) {
+                            outState.set(varName, new Set([null]));
+                        }
+                    }
+
+                    return outState;
+                }
+            };
+
+            const LiveVariablesProblem = {
+                direction: 'backward',
+                meet(states) {
+                    const result = new Set();
+                    for (const state of states) {
+                        for (const varName of state) {
+                            result.add(varName);
+                        }
+                    }
+                    return result;
+                },
+                transfer(path, outState, context) {
+                    const inState = new Set(outState);
+
+                    if (path.isCallExpression() || path.isNewExpression()) {
+                        for (const varName of context.escapedVars) {
+                            inState.add(varName);
+                        }
+                    }
+
+                    if (path.isIdentifier() && path.isReferencedIdentifier()) {
+                        inState.add(path.node.name);
+                    }
+
+                    let definedVars = null;
+                    if (path.isVariableDeclarator()) {
+                        definedVars = path.get('id').getBindingIdentifiers();
+                    } else if (path.isAssignmentExpression()) {
+                        definedVars = path.get('left').getBindingIdentifiers();
+                    } else if (path.isUpdateExpression()) {
+                        definedVars = path.get('argument').getBindingIdentifiers();
+                    }
+
+                    if (definedVars) {
+                        for (const varName of Object.keys(definedVars)) {
+                            inState.delete(varName);
+                        }
+                    }
+
+                    return inState;
+                }
+            };
+
+            return { ReachingDefinitionsProblem, LiveVariablesProblem };
         });
     </script>
 
     <script id="src/analysis/DataFlowAnalyzer.js">
         window.App.define('src/analysis/DataFlowAnalyzer.js', () => {
-            const { CFGBuilder } = window.App.require('src/analysis/CFGBuilder.js');
-            class DataFlowAnalyzer {
-                constructor(ast) {
-                    this.cfgBuilder = new CFGBuilder();
-                    this.cfg = this.cfgBuilder.build(ast);
-                    this.bindings = new Map();
-                    this.analyze(ast);
-                }
-                analyze(ast) {
-                    const self = this;
-                    const traverse = Babel.traverse;
-                    try {
-                        traverse(ast, {
-                            Program(path) {
-                                path.scope.crawl();
-                            },
-                            Scope(path) {
-                                for (const [name, binding] of Object.entries(path.scope.bindings)) {
-                                    self.bindings.set(name, {
-                                        constant: binding.constant,
-                                        constantValue: binding.constantViolations.length === 0 && binding.path.node && binding.path.node.init ? binding.path.node.init : null,
-                                        references: binding.referencePaths.length,
-                                        referencePaths: binding.referencePaths
-                                    });
+            function analyzeEscapedVariables(programPath) {
+                const escapedVars = new Set();
+
+                programPath.traverse({
+                    CallExpression(path) {
+                        if (path.get('callee').isIdentifier({ name: 'eval' })) {
+                            let scope = path.scope;
+                            while (scope) {
+                                for (const name of Object.keys(scope.bindings)) {
+                                    escapedVars.add(name);
                                 }
+                                scope = scope.parent;
+                            }
+                        }
+                    },
+                    WithStatement(path) {
+                        let scope = path.scope;
+                        while (scope) {
+                            for (const name of Object.keys(scope.bindings)) {
+                                escapedVars.add(name);
+                            }
+                            scope = scope.parent;
+                        }
+                    },
+                    Identifier(path) {
+                        if (path.node.name === 'arguments') {
+                            let scope = path.scope;
+                            while (scope) {
+                                for (const name of Object.keys(scope.bindings)) {
+                                    escapedVars.add(name);
+                                }
+                                scope = scope.parent;
+                            }
+                        }
+                    }
+                });
+
+                programPath.traverse({
+                    Scope(path) {
+                        Object.values(path.scope.bindings).forEach(binding => {
+                            const declScope = binding.scope.getFunctionParent();
+                            const allRefs = [...binding.referencePaths, ...binding.constantViolations];
+                            
+                            const isEscaped = allRefs.some(ref => {
+                                const refFuncScope = ref.scope.getFunctionParent();
+                                return refFuncScope !== declScope;
+                            });
+
+                            if (isEscaped) {
+                                escapedVars.add(binding.identifier.name);
                             }
                         });
-                    } catch (e) {
-                        throw new Error(`DFA(データフロー解析)構築中の走査に失敗しました: ${e.message}`);
                     }
+                });
+
+                return escapedVars;
+            }
+
+            class DataFlowAnalyzer {
+                constructor(cfgResult) {
+                    this.entryBlock = cfgResult.entryBlock;
+                    this.allBlocks = cfgResult.allBlocks;
+                    this.nodeMap = cfgResult.nodeMap;
+                }
+
+                solve(problem, context) {
+                    const direction = problem.direction;
+                    const meet = problem.meet;
+                    const transfer = problem.transfer;
+
+                    const blockIn = new Map();
+                    const blockOut = new Map();
+
+                    const equals = (a, b) => {
+                        if (a === b) return true;
+                        if (!a || !b) return false;
+                        if (a instanceof Map && b instanceof Map) {
+                            if (a.size !== b.size) return false;
+                            for (const [k, v] of a.entries()) {
+                                if (!b.has(k)) return false;
+                                const v2 = b.get(k);
+                                if (v instanceof Set && v2 instanceof Set) {
+                                    if (v.size !== v2.size) return false;
+                                    for (const item of v) if (!v2.has(item)) return false;
+                                } else if (v !== v2) {
+                                    return false;
+                                }
+                            }
+                            return true;
+                        }
+                        if (a instanceof Set && b instanceof Set) {
+                            if (a.size !== b.size) return false;
+                            for (const item of a) if (!b.has(item)) return false;
+                            return true;
+                        }
+                        return false;
+                    };
+
+                    const defaultState = () => (direction === 'forward' ? new Map() : new Set());
+                    for (const block of this.allBlocks) {
+                        blockIn.set(block.id, defaultState());
+                        blockOut.set(block.id, defaultState());
+                    }
+
+                    const worklist = [...this.allBlocks];
+
+                    while (worklist.length > 0) {
+                        const block = worklist.shift();
+
+                        if (direction === 'forward') {
+                            if (block.preds.length > 0) {
+                                const predsOut = block.preds.map(p => blockOut.get(p.id));
+                                blockIn.set(block.id, meet(predsOut));
+                            }
+
+                            let currentState = blockIn.get(block.id);
+                            for (const event of block.events) {
+                                currentState = transfer(event, currentState, context);
+                            }
+
+                            const oldOut = blockOut.get(block.id);
+                            if (!equals(currentState, oldOut)) {
+                                blockOut.set(block.id, currentState);
+                                for (const succ of block.succs) {
+                                    if (!worklist.includes(succ)) worklist.push(succ);
+                                }
+                            }
+                        } else {
+                            if (block.succs.length > 0) {
+                                const succsIn = block.succs.map(s => blockIn.get(s.id));
+                                blockOut.set(block.id, meet(succsIn));
+                            }
+
+                            let currentState = blockOut.get(block.id);
+                            for (let i = block.events.length - 1; i >= 0; i--) {
+                                currentState = transfer(block.events[i], currentState, context);
+                            }
+
+                            const oldIn = blockIn.get(block.id);
+                            if (!equals(currentState, oldIn)) {
+                                blockIn.set(block.id, currentState);
+                                for (const pred of block.preds) {
+                                    if (!worklist.includes(pred)) worklist.push(pred);
+                                }
+                            }
+                        }
+                    }
+
+                    const nodeStates = new WeakMap();
+
+                    for (const block of this.allBlocks) {
+                        if (direction === 'forward') {
+                            let currentState = blockIn.get(block.id);
+                            for (const event of block.events) {
+                                const nextState = transfer(event, currentState, context);
+                                nodeStates.set(event.node, { inState: currentState, outState: nextState });
+                                currentState = nextState;
+                            }
+                        } else {
+                            let currentState = blockOut.get(block.id);
+                            for (let i = block.events.length - 1; i >= 0; i--) {
+                                const event = block.events[i];
+                                const nextState = transfer(event, currentState, context);
+                                nodeStates.set(event.node, { inState: nextState, outState: currentState });
+                                currentState = nextState;
+                            }
+                        }
+                    }
+
+                    return nodeStates;
                 }
             }
-            return { DataFlowAnalyzer };
+
+            return { DataFlowAnalyzer, analyzeEscapedVariables };
         });
     </script>
 
     <script id="src/analysis/DFAQuery.js">
         window.App.define('src/analysis/DFAQuery.js', () => {
             class DFAQuery {
-                constructor(dfa) {
-                    this.dfa = dfa;
+                constructor(reachingDefStates = new WeakMap(), liveVarStates = new WeakMap(), nodeMap = new WeakMap(), escapedVars = new Set()) {
+                    const { BrowserEnvironment } = window.App.require('src/core/KnowledgeBase.js');
+                    this.env = BrowserEnvironment;
+                    this.reachingDefStates = reachingDefStates;
+                    this.liveVarStates = liveVarStates;
+                    this.nodeMap = nodeMap;
+                    this.escapedVars = escapedVars;
                 }
-                isConstant(name) {
-                    const b = this.dfa.bindings.get(name);
-                    return b ? b.constant : false;
+
+                _getInState(path) {
+                    if (!path || !path.node) return null;
+                    const state = this.reachingDefStates.get(path.node);
+                    return state ? state.inState : null;
                 }
-                getConstantValue(name) {
-                    const b = this.dfa.bindings.get(name);
-                    return b ? b.constantValue : null;
+
+                _getOutState(path) {
+                    if (!path || !path.node) return null;
+                    const state = this.liveVarStates.get(path.node);
+                    return state ? state.outState : null;
                 }
-                getReferencesCount(name) {
-                    const b = this.dfa.bindings.get(name);
-                    return b ? b.references : 0;
+
+                _isLiteralConstant(node) {
+                    const t = Babel.types;
+                    if (!node) return false;
+                    if (t.isLiteral(node)) return true;
+                    if (t.isIdentifier(node, { name: 'undefined' }) || t.isIdentifier(node, { name: 'NaN' })) return true;
+                    if (t.isUnaryExpression(node) && ['-', '+', '!', '~'].includes(node.operator)) {
+                        return this._isLiteralConstant(node.argument);
+                    }
+                    return false;
                 }
-                canInline(name) {
-                    const val = this.getConstantValue(name);
-                    // valがnull(未初期化)の場合はインライン化を禁止する
-                    return val !== null && this.isConstant(name) && this.getReferencesCount(name) === 1 && this.isPure(val);
+
+                _evaluateUnary(node) {
+                    const t = Babel.types;
+                    if (t.isLiteral(node)) return node.value;
+                    if (t.isIdentifier(node, { name: 'undefined' })) return undefined;
+                    if (t.isIdentifier(node, { name: 'NaN' })) return NaN;
+                    if (t.isUnaryExpression(node)) {
+                        const argVal = this._evaluateUnary(node.argument);
+                        switch (node.operator) {
+                            case '-': return -argVal;
+                            case '+': return +argVal;
+                            case '!': return !argVal;
+                            case '~': return ~argVal;
+                        }
+                    }
+                    return null;
                 }
+
+                isConstant(name, path) {
+                    if (!path || !path.node || !this.nodeMap.has(path.node)) {
+                        return false;
+                    }
+
+                    const inState = this._getInState(path);
+                    if (!inState) return false;
+
+                    const defs = inState.get(name);
+                    if (!defs || defs.size === 0) return false;
+
+                    let commonValue = null;
+                    let commonType = null;
+                    const t = Babel.types;
+
+                    for (const defPath of defs) {
+                        if (!defPath) return false;
+
+                        const valueNode = this._getAssignValue(defPath);
+                        if (!this._isLiteralConstant(valueNode)) return false;
+
+                        let val;
+                        let type;
+                        if (t.isIdentifier(valueNode)) {
+                            val = valueNode.name;
+                            type = 'identifier';
+                        } else if (t.isUnaryExpression(valueNode)) {
+                            val = this._evaluateUnary(valueNode);
+                            type = typeof val;
+                        } else {
+                            val = valueNode.value;
+                            type = typeof val;
+                        }
+
+                        if (commonValue === null && commonType === null) {
+                            commonValue = val;
+                            commonType = type;
+                        } else if (commonValue !== val || commonType !== type) {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                }
+
+                getConstantValue(name, path) {
+                    if (!path || !path.node || !this.nodeMap.has(path.node)) {
+                        return null;
+                    }
+
+                    const inState = this._getInState(path);
+                    if (!inState) return null;
+
+                    const defs = inState.get(name);
+                    if (!defs || defs.size === 0) return null;
+
+                    if (!this.isConstant(name, path)) return null;
+
+                    const defPath = [...defs][0];
+                    return this._getAssignValue(defPath);
+                }
+
+                _getAssignValue(defPath) {
+                    if (defPath.isVariableDeclarator()) {
+                        return defPath.node.init;
+                    }
+                    if (defPath.isAssignmentExpression()) {
+                        return defPath.node.right;
+                    }
+                    return null;
+                }
+
+                getReferencesCount(name, path) {
+                    if (!path || !path.scope) return 0;
+                    const b = path.scope.getBinding(name);
+                    return b ? b.referencePaths.length : 0;
+                }
+
+                canInline(name, path) {
+                    const val = this.getConstantValue(name, path);
+                    return val !== null && val !== undefined && this.isConstant(name, path) && this.getReferencesCount(name, path) === 1 && this.isPure(val);
+                }
+
                 isPure(node) {
                     const t = Babel.types;
                     if (!node) return true;
                     if (t.isLiteral(node)) return true;
                     if (t.isIdentifier(node)) return true;
-                    if (t.isBinaryExpression(node)) {
-                        return this.isPure(node.left) && this.isPure(node.right);
-                    }
-                    if (t.isUnaryExpression(node)) {
-                        return this.isPure(node.argument);
-                    }
-                    if (t.isMemberExpression(node)) {
-                        return this.isPure(node.object) && (!node.computed || this.isPure(node.property));
-                    }
+                    if (t.isBinaryExpression(node)) return this.isPure(node.left) && this.isPure(node.right);
+                    if (t.isUnaryExpression(node)) return this.isPure(node.argument);
+                    if (t.isMemberExpression(node)) return this.isPure(node.object) && (!node.computed || this.isPure(node.property));
                     return false;
                 }
-                isLiveAfter(varName, afterPath) {
-                    const b = this.dfa.bindings.get(varName);
-                    if (!b) return false;
-                    const afterStart = afterPath.node.start;
-                    if (afterStart === undefined) return true;
-                    return b.referencePaths.some(p => p.node.start === undefined || p.node.start > afterStart);
-                }
-                getVariableState(varName, atPath) {
-                    const b = this.dfa.bindings.get(varName);
-                    if (!b) return { type: 'bottom' };
-                    if (b.constant) {
-                        return { type: 'constant', value: b.constantValue };
-                    }
-                    return { type: 'top' };
-                }
+
                 isSafeGlobalAccess(name, atPath) {
                     if (!atPath || !atPath.scope) return false;
                     if (atPath.scope.hasBinding(name)) return false;
@@ -1048,10 +1602,83 @@
                     const { BUILTIN_GLOBALS } = window.App.require('src/core/Globals.js');
                     return isUsedAsFreeGlobal || BUILTIN_GLOBALS.has(name);
                 }
+
+                resolveOrigin(path, visited = new Set()) {
+                    if (!path) return null;
+                    const t = Babel.types;
+
+                    if (path.isMemberExpression()) {
+                        if (path.node.computed) {
+                            const propertyPath = path.get('property');
+                            if (!propertyPath.isStringLiteral()) return null;
+                        }
+                        
+                        const objOrigin = this.resolveOrigin(path.get('object'), visited);
+                        if (!objOrigin) return null;
+                        
+                        const propName = path.node.computed ? path.node.property.value : path.node.property.name;
+                        return this._resolvePropertySignature(objOrigin, propName);
+                    }
+
+                    if (path.isIdentifier()) {
+                        const name = path.node.name;
+                        const binding = path.scope.getBinding(name);
+                        
+                        if (binding) {
+                            if (visited.has(binding.path)) return null;
+                            
+                            if (binding.constant && binding.path.isVariableDeclarator()) {
+                                visited.add(binding.path);
+                                const initPath = binding.path.get('init');
+                                return this.resolveOrigin(initPath, visited);
+                            }
+                            return null;
+                        } else {
+                            if (this.env.globals[name]) {
+                                return this.env.globals[name].signature || `global.${name}`;
+                            }
+                            if (name === 'window' || name === 'globalThis' || name === 'self') {
+                                return 'global';
+                            }
+                        }
+                    }
+
+                    return null;
+                }
+
+                _resolvePropertySignature(objSignature, propName) {
+                    if (objSignature === 'global') {
+                        const globalDef = this.env.globals[propName];
+                        return globalDef ? (globalDef.signature || `global.${propName}`) : null;
+                    }
+                    
+                    const parts = objSignature.split('.');
+                    if (parts[0] !== 'global') return null;
+                    
+                    let current = this.env.globals[parts[1]];
+                    for (let i = 2; i < parts.length; i++) {
+                        if (!current || !current.properties) return null;
+                        current = current.properties[parts[i]];
+                    }
+                    
+                    if (current && current.properties && current.properties[propName]) {
+                        return current.properties[propName].signature;
+                    }
+                    return null;
+                }
+
+                isLiveAfter(name, currentPath) {
+                    if (!currentPath || !currentPath.node || !this.nodeMap.has(currentPath.node)) {
+                        return true;
+                    }
+
+                    const outState = this._getOutState(currentPath);
+                    if (!outState) return true;
+
+                    return outState.has(name);
+                }
             }
-            return {
-                DFAQuery
-            };
+            return { DFAQuery };
         });
     </script>
 
@@ -1071,10 +1698,10 @@
                     if (!dfaQuery || !path) return false;
                     //  参照（Read）されているIdentifierのみ対象とし、定義（Write）は除外
                     if (!path.isReferencedIdentifier()) return false;
-                    return dfaQuery.isConstant(node.name) && dfaQuery.getConstantValue(node.name) !== null;
+                    return dfaQuery.isConstant(node.name, path) && dfaQuery.getConstantValue(node.name, path) !== null;
                 },
-                candidates(node, t, dfaQuery) {
-                    const val = dfaQuery.getConstantValue(node.name);
+                candidates(node, t, dfaQuery, path) {
+                    const val = dfaQuery.getConstantValue(node.name, path);
                     return [node, Babel.cloneDeep(val)];
                 }
             };
@@ -1093,11 +1720,11 @@
                 match(node, t, dfaQuery, path) {
                     if (!dfaQuery || !path) return false;
                     if (!path.isReferencedIdentifier()) return false;
-                    const val = dfaQuery.getConstantValue(node.name);
-                    return val && t.isIdentifier(val) && dfaQuery.isConstant(val.name);
+                    const val = dfaQuery.getConstantValue(node.name, path);
+                    return val && t.isIdentifier(val) && dfaQuery.isConstant(val.name, path);
                 },
-                candidates(node, t, dfaQuery) {
-                    const val = dfaQuery.getConstantValue(node.name);
+                candidates(node, t, dfaQuery, path) {
+                    const val = dfaQuery.getConstantValue(node.name, path);
                     return [node, Babel.cloneDeep(val)];
                 }
             };
@@ -1114,27 +1741,24 @@
                 unsafe: false,
                 tags: ['semantic', 'cleanup'],
                 match(node, t, dfaQuery, path) {
-                    if (!dfaQuery) return false;
-                    let leftNode = null;
+                    if (!dfaQuery || !path) return false;
+
+                    if (t.isVariableDeclarator(node) && t.isIdentifier(node.id)) {
+                        if (path.parentPath && path.parentPath.parentPath && path.parentPath.parentPath.isExportDeclaration()) return false;
+                        return !dfaQuery.isLiveAfter(node.id.name, path);
+                    }
 
                     if (t.isExpressionStatement(node) && t.isAssignmentExpression(node.expression)) {
-                        leftNode = node.expression.left;
-                    } else if (t.isAssignmentExpression(node)) {
-                        leftNode = node.left;
-                    } else if (t.isVariableDeclarator(node)) {
-                        leftNode = node.id;
+                        const left = node.expression.left;
+                        if (t.isIdentifier(left) && node.expression.operator === '=') {
+                            return !dfaQuery.isLiveAfter(left.name, path);
+                        }
                     }
 
-                    if (leftNode && t.isIdentifier(leftNode)) {
-                        if (t.isVariableDeclarator(node)) {
-                            return dfaQuery.getReferencesCount(leftNode.name) === 0;
-                        }
-                        return !dfaQuery.isLiveAfter(leftNode.name, path);
-                    }
                     return false;
                 },
                 candidates(node, t) {
-                    return []; // ノード除去のシグナル = 空配列 []
+                    return [];
                 }
             };
         });
@@ -1152,11 +1776,11 @@
                 match(node, t, dfaQuery, path) {
                     if (!dfaQuery || !path) return false;
                     if (!path.isReferencedIdentifier()) return false;
-                    const val = dfaQuery.getConstantValue(node.name);
-                    return val !== null && val !== undefined && dfaQuery.canInline(node.name);
+                    const val = dfaQuery.getConstantValue(node.name, path);
+                    return val !== null && val !== undefined && dfaQuery.canInline(node.name, path);
                 },
-                candidates(node, t, dfaQuery) {
-                    const val = dfaQuery.getConstantValue(node.name);
+                candidates(node, t, dfaQuery, path) {
+                    const val = dfaQuery.getConstantValue(node.name, path);
                     return [node, Babel.cloneDeep(val)];
                 }
             };
@@ -1289,24 +1913,52 @@
                 description: '静的マッピング型 switch-case の HashObject キー参照置換',
                 unsafe: false,
                 tags: ['lowering', 'switch'],
-                match(node, t) {
+                match(node, t, dfaQuery, path) {
                     if (node.cases.length < 2) return false;
-                    return node.cases.every(c => {
-                        if (!c.test || (!t.isStringLiteral(c.test) && !t.isNumericLiteral(c.test))) return false;
+
+                    let hasDefault = false;
+                    const allCasesReturn = node.cases.every(c => {
+                        if (c.test === null) hasDefault = true; // defaultケースを検知
+                        else if (!t.isStringLiteral(c.test) && !t.isNumericLiteral(c.test)) return false;
+
                         if (c.consequent.length !== 1) return false;
-                        const st = c.consequent[0];
-                        return t.isReturnStatement(st) && st.argument !== null;
+                        return t.isReturnStatement(c.consequent[0]);
                     });
+
+                    if (!allCasesReturn) return false;
+
+                    // defaultがない場合、変換により早期return(undefined)が発生するリスクの評価
+                    if (!hasDefault) {
+                        // switch文がブロックの最後の文でない場合は後続処理を殺すため棄却
+                        if (!path.inList || path.key !== path.container.length - 1) return false;
+                        // さらに親が関数の直下ブロックであることを確認（関数の末尾なら暗黙的undefinedリターンと同義）
+                        if (!path.parentPath.isBlockStatement() || !path.parentPath.parentPath.isFunction()) return false;
+                    }
+
+                    return true;
                 },
                 candidates(node, t) {
-                    const properties = node.cases.map(c => {
-                        return t.objectProperty(Babel.cloneDeep(c.test), Babel.cloneDeep(c.consequent[0].argument));
+                    const properties = [];
+                    let defaultReturnArg = null;
+
+                    node.cases.forEach(c => {
+                        if (c.test === null) {
+                            defaultReturnArg = Babel.cloneDeep(c.consequent[0].argument);
+                        } else {
+                            properties.push(t.objectProperty(Babel.cloneDeep(c.test), Babel.cloneDeep(c.consequent[0].argument)));
+                        }
                     });
+
                     const objExpr = t.objectExpression(properties);
                     const lookupExpr = t.memberExpression(objExpr, Babel.cloneDeep(node.discriminant), true);
+
+                    // default が存在し、かつ fallback の必要がある場合は ?? 演算子で補完（ES2020）
+                    // ただし今回はすべてリターンなので JSの性質上 ({})[x] は undefined を返すためそのままでOK
                     return [
                         node,
-                        t.returnStatement(lookupExpr)
+                        t.returnStatement(defaultReturnArg
+                            ? t.logicalExpression('||', lookupExpr, defaultReturnArg) // 厳密なフォールバック
+                            : lookupExpr)
                     ];
                 }
             };
@@ -1433,6 +2085,11 @@
 
     <script id="src/transforms/lowering/MultiReturnChain.js">
         window.App.define('src/transforms/lowering/MultiReturnChain.js', () => {
+            // return文の引数が空(null)の場合、JSの等価表現である void 0 を補完する
+            const getArg = (retStmt, t) => {
+                return retStmt.argument ? Babel.cloneDeep(retStmt.argument) : t.unaryExpression('void', t.numericLiteral(0));
+            };
+
             return {
                 id: 'multi-return-chain',
                 phase: 'lowering',
@@ -1458,8 +2115,14 @@
                         if (i < node.body.length - 1) {
                             const next = node.body[i + 1];
                             if (t.isIfStatement(current) && !current.alternate && t.isReturnStatement(current.consequent) && t.isReturnStatement(next)) {
-                                newBody.push(t.returnStatement(t.conditionalExpression(Babel.cloneDeep(current.test), Babel.cloneDeep(current.consequent.argument), Babel.cloneDeep(next.argument))));
-                                i++;
+                                // nullクラッシュを回避し、void 0 を組み込んだ三項演算子を生成
+                                const ternary = t.conditionalExpression(
+                                    Babel.cloneDeep(current.test),
+                                    getArg(current.consequent, t),
+                                    getArg(next, t)
+                                );
+                                newBody.push(t.returnStatement(ternary));
+                                i++; // 次のreturn文は吸収したためスキップ
                                 continue;
                             }
                         }
@@ -1480,14 +2143,13 @@
                 description: 'Math.floor(x) / Math.trunc ➔ x|0 へのビットワイズ代替展開',
                 unsafe: true,
                 tags: ['equivalence', 'math'],
-                match(node, t) {
-                    return (t.isCallExpression(node) && t.isMemberExpression(node.callee) && t.isIdentifier(node.callee.object, {
-                        name: 'Math'
-                    }) && (t.isIdentifier(node.callee.property, {
-                        name: 'floor'
-                    }) || t.isIdentifier(node.callee.property, {
-                        name: 'trunc'
-                    })) && node.arguments.length === 1);
+                match(node, t, dfaQuery, path) {
+                    if (!dfaQuery || !path) return false;
+                    if (!t.isCallExpression(node) || node.arguments.length !== 1) return false;
+
+                    const origin = dfaQuery.resolveOrigin(path.get('callee'));
+                    const { SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
+                    return origin === SIGNATURES.MATH_FLOOR || origin === SIGNATURES.MATH_TRUNC;
                 },
                 candidates(node, t) {
                     const arg = node.arguments[0];
@@ -1509,8 +2171,13 @@
                 description: 'Math.round(x) ➔ x + 0.5 | 0 ビットワイズ代替展開',
                 unsafe: true,
                 tags: ['equivalence', 'math'],
-                match(node, t) {
-                    return (t.isCallExpression(node) && t.isMemberExpression(node.callee) && t.isIdentifier(node.callee.object, { name: 'Math' }) && t.isIdentifier(node.callee.property, { name: 'round' }) && node.arguments.length === 1);
+                match(node, t, dfaQuery, path) {
+                    if (!dfaQuery || !path) return false;
+                    if (!t.isCallExpression(node) || node.arguments.length !== 1) return false;
+
+                    const origin = dfaQuery.resolveOrigin(path.get('callee'));
+                    const { SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
+                    return origin === SIGNATURES.MATH_ROUND;
                 },
                 candidates(node, t) {
                     const arg = node.arguments[0];
@@ -1532,8 +2199,13 @@
                 description: 'parseInt(x) ➔ x|0 ビットワイズ高速ゴルフ展開',
                 unsafe: true,
                 tags: ['equivalence', 'cast'],
-                match(node, t) {
-                    return (t.isCallExpression(node) && t.isIdentifier(node.callee, { name: 'parseInt' }) && node.arguments.length === 1);
+                match(node, t, dfaQuery, path) {
+                    if (!dfaQuery || !path) return false;
+                    if (!t.isCallExpression(node) || node.arguments.length !== 1) return false;
+
+                    const origin = dfaQuery.resolveOrigin(path.get('callee'));
+                    const { SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
+                    return origin === SIGNATURES.PARSE_INT;
                 },
                 candidates(node, t) {
                     return [
@@ -1645,12 +2317,15 @@
                 unsafe: true,
                 tags: ['equivalence', 'dom'],
                 match(node, t, dfaQuery, path) {
-                    if (!(t.isCallExpression(node) && t.isMemberExpression(node.callee) &&
-                        t.isIdentifier(node.callee.object, { name: 'document' }) &&
-                        t.isIdentifier(node.callee.property, { name: 'getElementById' }) &&
-                        node.arguments.length === 1 && t.isStringLiteral(node.arguments[0]))) {
+                    if (!dfaQuery || !path) return false;
+                    if (!t.isCallExpression(node) || node.arguments.length !== 1 || !t.isStringLiteral(node.arguments[0])) {
                         return false;
                     }
+
+                    const origin = dfaQuery.resolveOrigin(path.get('callee'));
+                    const { SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
+                    if (origin !== SIGNATURES.DOCUMENT_GET_ELEMENT_BY_ID) return false;
+
                     const idName = node.arguments[0].value;
                     return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(idName) && !path.scope.hasBinding(idName);
                 },
@@ -1719,10 +2394,12 @@
                 unsafe: false,
                 tags: ['equivalence', 'member'],
                 match(node, t, dfaQuery, path) {
-                    if (!dfaQuery) return false;
-                    if (node.computed || !t.isIdentifier(node.object, { name: 'window' }) || !t.isIdentifier(node.property)) {
-                        return false;
-                    }
+                    if (!dfaQuery || !path) return false;
+                    if (node.computed || !t.isIdentifier(node.property)) return false;
+
+                    const objOrigin = dfaQuery.resolveOrigin(path.get('object'));
+                    if (objOrigin !== 'global') return false;
+
                     return dfaQuery.isSafeGlobalAccess(node.property.name, path);
                 },
                 candidates(node, t) {
@@ -1827,30 +2504,41 @@
 
     <script id="src/transforms/structure/CSE.js">
         window.App.define('src/transforms/structure/CSE.js', () => {
+            // ブロック内の深い部分木を走査し、純粋な参照式をカウントするヘルパー
+            const collectExpressions = (path, t) => {
+                const subExprs = new Map();
+                path.traverse({
+                    MemberExpression(p) {
+                        // obj.prop 形式の静的参照のみを安全に抽出
+                        if (!p.node.computed && t.isIdentifier(p.node.object) && t.isIdentifier(p.node.property)) {
+                            // 代入式の左辺(LHS)である場合（obj.prop = 1など）は状態を破壊するため除外
+                            if (p.parentPath.isAssignmentExpression() && p.parentPath.node.left === p.node) return;
+                            // 関数呼び出しの主体(obj.method())はthisバインディングが壊れるため除外
+                            if (p.parentPath.isCallExpression() && p.parentPath.node.callee === p.node) return;
+
+                            const key = p.node.object.name + "." + p.node.property.name;
+                            subExprs.set(key, (subExprs.get(key) || 0) + 1);
+                        }
+                    }
+                });
+                return subExprs;
+            };
+
             return {
                 id: 'cse-optimization',
                 phase: 'structure',
                 visitorKey: 'BlockStatement',
-                description: '同一ブロック内の重複した共通部分式 (Common Subexpression) 統合抽出',
+                description: 'ブロック内ディープ走査による共通部分式 (Common Subexpression) 抽出',
                 unsafe: false,
                 tags: ['structure', 'cse'],
-                match(node, t) {
+                match(node, t, dfaQuery, path) {
                     if (!node.body || node.body.length < 2) return false;
-                    const subExprs = new Map();
-                    node.body.forEach(stmt => {
-                        if (t.isExpressionStatement(stmt)) {
-                            const expr = stmt.expression;
-                            if (t.isMemberExpression(expr) && t.isIdentifier(expr.object) && t.isIdentifier(expr.property)) {
-                                const key = expr.object.name + "." + expr.property.name;
-                                subExprs.set(key, (subExprs.get(key) || 0) + 1);
-                            }
-                        }
-                    });
 
+                    const subExprs = collectExpressions(path, t);
                     for (const [key, count] of subExprs.entries()) {
                         if (count >= 2) {
                             const exprBytes = key.length;
-                            const extractedCost = 7 + exprBytes + count;
+                            const extractedCost = 7 + exprBytes + count; // let a=x.y; + a の参照コスト
                             const currentCost = exprBytes * count;
                             if (extractedCost < currentCost) {
                                 return true;
@@ -1860,16 +2548,7 @@
                     return false;
                 },
                 candidates(node, t, dfaQuery, path) {
-                    const subExprs = new Map();
-                    node.body.forEach(stmt => {
-                        if (t.isExpressionStatement(stmt)) {
-                            const expr = stmt.expression;
-                            if (t.isMemberExpression(expr) && t.isIdentifier(expr.object) && t.isIdentifier(expr.property)) {
-                                const key = expr.object.name + "." + expr.property.name;
-                                subExprs.set(key, (subExprs.get(key) || 0) + 1);
-                            }
-                        }
-                    });
+                    const subExprs = collectExpressions(path, t);
 
                     let targetKey = null;
                     for (const [key, count] of subExprs.entries()) {
@@ -1887,36 +2566,34 @@
                     if (!targetKey) return [node];
 
                     const [objName, propName] = targetKey.split('.');
-
-                    // CQSを守るため generateUidIdentifier を使用せず、固定の擬似乱数名を使用。
-                    // 実際に名前が競合してもManglePassで安全な名前に圧縮されるため問題ない。
                     const safeIdString = "__cse_" + objName + "_" + propName + "_" + Math.floor(Math.random() * 1000);
                     const aliasId = t.identifier(safeIdString);
 
-                    const newBody = [];
-                    newBody.push(
+                    // ブロック全体をディープクローンしてから書き換える（CQSの遵守）
+                    const clonedBlock = Babel.cloneDeep(node);
+
+                    // クローンしたノードから一時的なASTツリーを構築してトラバース置換
+                    const tempProgram = t.program([clonedBlock]);
+                    Babel.traverse(tempProgram, {
+                        noScope: true,
+                        MemberExpression(p) {
+                            if (!p.node.computed && t.isIdentifier(p.node.object, { name: objName }) && t.isIdentifier(p.node.property, { name: propName })) {
+                                if (p.parentPath.isAssignmentExpression() && p.parentPath.node.left === p.node) return;
+                                if (p.parentPath.isCallExpression() && p.parentPath.node.callee === p.node) return;
+
+                                p.replaceWith(Babel.cloneDeep(aliasId));
+                            }
+                        }
+                    }, null, null);
+
+                    // 宣言文をブロックの先頭に注入
+                    clonedBlock.body.unshift(
                         t.variableDeclaration('let', [
                             t.variableDeclarator(aliasId, t.memberExpression(t.identifier(objName), t.identifier(propName)))
                         ])
                     );
 
-                    node.body.forEach(stmt => {
-                        if (t.isExpressionStatement(stmt)) {
-                            const expr = stmt.expression;
-                            if (t.isMemberExpression(expr) && t.isIdentifier(expr.object, { name: objName }) && t.isIdentifier(expr.property, { name: propName })) {
-                                newBody.push(t.expressionStatement(Babel.cloneDeep(aliasId)));
-                            } else {
-                                newBody.push(Babel.cloneDeep(stmt));
-                            }
-                        } else {
-                            newBody.push(Babel.cloneDeep(stmt));
-                        }
-                    });
-
-                    return [
-                        node,
-                        t.blockStatement(newBody)
-                    ];
+                    return [node, clonedBlock];
                 }
             };
         });
@@ -2126,7 +2803,9 @@
 
     <script id="src/engine/PassScheduler.js">
         window.App.define('src/engine/PassScheduler.js', () => {
-            const { DataFlowAnalyzer } = window.App.require('src/analysis/DataFlowAnalyzer.js');
+            const { CFGBuilder } = window.App.require('src/analysis/CFGBuilder.js');
+            const { DataFlowAnalyzer, analyzeEscapedVariables } = window.App.require('src/analysis/DataFlowAnalyzer.js');
+            const { ReachingDefinitionsProblem, LiveVariablesProblem } = window.App.require('src/analysis/DataFlowProblems.js');
             const { DFAQuery } = window.App.require('src/analysis/DFAQuery.js');
             const { PREC } = window.App.require('src/core/ByteEstimator.js');
 
@@ -2169,9 +2848,27 @@
                     this.config = config;
                 }
                 rebuildDFA(ctx) {
-                    const dfa = new DataFlowAnalyzer(ctx.ast);
-                    ctx.dfa = dfa;
-                    ctx.dfaQuery = new DFAQuery(dfa);
+                    let programPath = null;
+                    Babel.traverse(ctx.ast, {
+                        Program(path) {
+                            programPath = path;
+                            path.stop();
+                        }
+                    });
+                    if (!programPath) {
+                        throw new Error("rebuildDFA: Program path not found");
+                    }
+
+                    const cfgBuilder = new CFGBuilder();
+                    const cfgResult = cfgBuilder.build(programPath);
+
+                    const escapedVars = analyzeEscapedVariables(programPath);
+
+                    const analyzer = new DataFlowAnalyzer(cfgResult);
+                    const reachingDefStates = analyzer.solve(ReachingDefinitionsProblem, { escapedVars });
+                    const liveVarStates = analyzer.solve(LiveVariablesProblem, { escapedVars });
+
+                    ctx.dfaQuery = new DFAQuery(reachingDefStates, liveVarStates, cfgResult.nodeMap, escapedVars);
                 }
                 runPhase(phase, ctx, iteration) {
                     const disabledList = (ctx.options.overrides && ctx.options.overrides.disabledTransforms) || [];
@@ -2208,7 +2905,6 @@
                                             const beforeCost = ctx.costModel.estimateCost(path.node, parentPrec, path.scope);
                                             const snippet = safeSnippet(path.node, t);
 
-                                            // Declaratorの最後の1つなら親のDeclarationごと消す
                                             if (path.isVariableDeclarator() && path.parentPath && path.parentPath.node.declarations.length === 1) {
                                                 path.parentPath.remove();
                                             } else {
@@ -2217,12 +2913,11 @@
 
                                             ctx.markDirty();
                                             ctx.trace.record(rule.id, iteration, phase.id, snippet, beforeCost, 0, true, 'dead-store removal');
-                                            break;
+                                            throw new Error('ABORT_TRAVERSAL_DIRTY');
                                         }
 
                                         if (candidates.length <= 1) continue;
 
-                                        // 投機的探索 (Beam Search) の分岐ロジック
                                         const specTriggers = ctx.options.overrides?.speculativeTriggers || [];
                                         const isSpeculative = ctx.options.enableBeamSearch && specTriggers.includes(rule.id);
 
@@ -2249,7 +2944,7 @@
                                                 ctx.orchestrator.addNewWorlds(newWorlds);
                                             }
                                             path.skip();
-                                            break;
+                                            throw new Error('ABORT_TRAVERSAL_DIRTY');
                                         }
 
                                         const costs = candidates.map(cand => ctx.costModel.estimateCost(cand, parentPrec, path.scope));
@@ -2268,8 +2963,9 @@
                                         ctx.trace.record(rule.id, iteration, phase.id, snippet, costs[0], costs[bestIdx], true, 'Optimized');
 
                                         path.skip();
-                                        break;
+                                        throw new Error('ABORT_TRAVERSAL_DIRTY');
                                     } catch (e) {
+                                        if (e.message === 'ABORT_TRAVERSAL_DIRTY') throw e;
                                         const snippet = safeSnippet(path.node, t);
                                         ctx.trace.record(rule.id, iteration, phase.id, snippet, 0, 0, false, `[ERROR] ${e.message}`);
                                         console.error(`[PassScheduler] Rule '${rule.id}' failed on node:`, path.node, e);
@@ -2280,6 +2976,9 @@
                         try {
                             traverse(ctx.ast, unifiedVisitor);
                         } catch (e) {
+                            if (e.message === 'ABORT_TRAVERSAL_DIRTY') {
+                                return;
+                            }
                             throw new Error(`[Phase: ${phase.id}] AST traverse failed: ${e.message}`);
                         }
                     } else if (phase.type === 'block') {
@@ -2318,7 +3017,7 @@
                                                     ctx.orchestrator.addNewWorlds(newWorlds);
                                                 }
                                                 path.skip();
-                                                break;
+                                                throw new Error('ABORT_TRAVERSAL_DIRTY');
                                             }
 
                                             const bestIdx = costs.indexOf(Math.min(...costs));
@@ -2330,10 +3029,11 @@
                                                 ctx.markDirty();
                                                 ctx.trace.record(rule.id, iteration, phase.id, snippet, beforeCost, costs[bestIdx], true, 'Optimized');
                                                 path.skip();
-                                                break;
+                                                throw new Error('ABORT_TRAVERSAL_DIRTY');
                                             }
                                         }
                                     } catch (e) {
+                                        if (e.message === 'ABORT_TRAVERSAL_DIRTY') throw e;
                                         const snippet = safeSnippet(path.node, t);
                                         ctx.trace.record(rule.id, iteration, phase.id, snippet, 0, 0, false, `[ERROR] ${e.message}`);
                                         console.error(`[PassScheduler] Block Rule '${rule.id}' failed:`, e);
@@ -2344,6 +3044,9 @@
                         try {
                             traverse(ctx.ast, blockVisitor);
                         } catch (e) {
+                            if (e.message === 'ABORT_TRAVERSAL_DIRTY') {
+                                return;
+                            }
                             throw new Error(`[Phase: ${phase.id} - Block] AST traverse failed: ${e.message}`);
                         }
                     }
