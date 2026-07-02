@@ -10,6 +10,23 @@
         tailwind.config = { darkMode: "class", theme: { extend: { colors: { brand: { 50: "#f0f9ff", 100: "#e0f2fe", 500: "#0ea5e9", 600: "#0284c7", 700: "#0369a1", 900: "#0c4a6e" } } } } }
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
+    <script>
+        // Babel Standalone 7.x/8.x/6.x の環境差を吸収し、Babel.traverse / Babel.types を安全に自動抽出
+        if (typeof Babel !== 'undefined') {
+            try {
+                let extractedCtx = null;
+                Babel.transform("()=>{}", {
+                    plugins: [function (api) { extractedCtx = api; return { visitor: {} }; }]
+                });
+                if (extractedCtx) {
+                    if (!Babel.traverse) Babel.traverse = extractedCtx.traverse;
+                    if (!Babel.types) Babel.types = extractedCtx.types;
+                }
+            } catch (e) {
+                console.error("Babel context extraction failed:", e);
+            }
+        }
+    </script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         :root {
@@ -325,15 +342,18 @@
                         class="flex flex-col border border-white/5 bg-slate-950/20 rounded-xl gap-2.5 p-3 shadow-inner">
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="html-opt-css" type="checkbox" checked>
-                            <span class="checkmark"></span>CSSファイルをスタイルに変換 <span class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptCss)</span>
+                            <span class="checkmark"></span>CSSファイルをスタイルに変換 <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptCss)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="html-opt-js" type="checkbox" checked>
-                            <span class="checkmark"></span>JSを統合してインライン展開 <span class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptJs)</span>
+                            <span class="checkmark"></span>JSを統合してインライン展開 <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptJs)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="html-opt-img" type="checkbox" checked>
-                            <span class="checkmark"></span>ローカル画像をDataURLに変換 <span class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptImg)</span>
+                            <span class="checkmark"></span>ローカル画像をDataURLに変換 <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(htmlOptImg)</span>
                         </label>
                     </div>
                 </div>
@@ -359,7 +379,8 @@
                 <div class="flex flex-col border-t border-white/5 gap-3 pt-4">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2 font-bold text-amber-400 text-xs tracking-wider uppercase">
-                            <i class="h-4 w-4" data-lucide="award"></i>ASTコードゴルフオプション <span class="font-mono text-[10px] opacity-50 normal-case ml-1.5">(golfEnabled)</span>
+                            <i class="h-4 w-4" data-lucide="award"></i>ASTコードゴルフオプション <span
+                                class="font-mono text-[10px] opacity-50 normal-case ml-1.5">(golfEnabled)</span>
                         </div>
                         <label class="items-center cursor-pointer relative inline-flex">
                             <input class="sr-only peer" id="opt-golf" type="checkbox" checked>
@@ -369,10 +390,11 @@
                         </label>
                     </div>
                     <div class="flex flex-col border border-white/5 rounded-xl gap-2.5 bg-amber-500/5 p-3.5 transition-all shadow-inner"
-                         id="golf-details">
+                        id="golf-details">
                         <div class="flex flex-col gap-1">
                             <div class="flex items-center justify-between text-slate-300 text-xs">
-                                <span class="font-medium">最大探索深度 (収束ループ上限数) <span class="font-mono text-[10px] opacity-50 ml-1">(searchDepth)</span></span>
+                                <span class="font-medium">最大探索深度 (収束ループ上限数) <span
+                                        class="font-mono text-[10px] opacity-50 ml-1">(searchDepth)</span></span>
                                 <span class="font-bold font-mono text-amber-400" id="search-depth-val">10</span>
                             </div>
                             <input class="nop-slider" id="search-depth" type="range" max="50" min="1" value="10">
@@ -380,34 +402,41 @@
                         <div class="my-1 border-white/5 border-t"></div>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-mangle" type="checkbox" checked>
-                            <span class="checkmark"></span>変数の短縮一文字化 (Mangler) <span class="font-mono text-[10px] opacity-50 ml-1.5">(enableMangle)</span>
+                            <span class="checkmark"></span>変数の短縮一文字化 (Mangler) <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(enableMangle)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-console" type="checkbox" checked>
-                            <span class="checkmark"></span>console.log 出力の安全除去 <span class="font-mono text-[10px] opacity-50 ml-1.5">(enableConsoleStrip)</span>
+                            <span class="checkmark"></span>console.log 出力の安全除去 <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(enableConsoleStrip)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-extreme" type="checkbox" checked>
-                            <span class="checkmark"></span>極限構文短縮 (Boolean / If-else ➔ 単一式) <span class="font-mono text-[10px] opacity-50 ml-1.5">(enableExtreme)</span>
+                            <span class="checkmark"></span>極限構文短縮 (Boolean / If-else ➔ 単一式) <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(enableExtreme)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-global-alias" type="checkbox" checked>
-                            <span class="checkmark"></span>APIグローバルエイリアス (Math, document等の短縮) <span class="font-mono text-[10px] opacity-50 ml-1.5">(globalAliasingEnabled)</span>
+                            <span class="checkmark"></span>APIグローバルエイリアス (Math, document等の短縮) <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(globalAliasingEnabled)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-cross-asset" type="checkbox" checked>
-                            <span class="checkmark"></span>三位一体クロスアセット同期圧縮 (id/class最適化) <span class="font-mono text-[10px] opacity-50 ml-1.5">(crossAssetEnabled)</span>
+                            <span class="checkmark"></span>三位一体クロスアセット同期圧縮 (id/class最適化) <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(crossAssetEnabled)</span>
                         </label>
                         <label class="nop-checkbox-container text-slate-300">
                             <input id="golf-packer" type="checkbox" checked>
-                            <span class="checkmark"></span>LZ77自己解凍パッカー (RegPack/Crush評価) <span class="font-mono text-[10px] opacity-50 ml-1.5">(packerEnabled)</span>
+                            <span class="checkmark"></span>LZ77自己解凍パッカー (RegPack/Crush評価) <span
+                                class="font-mono text-[10px] opacity-50 ml-1.5">(packerEnabled)</span>
                         </label>
                     </div>
                 </div>
                 <div class="flex flex-col gap-3 border-t border-white/5 pt-4">
                     <label class="nop-checkbox-container text-slate-300">
                         <input id="opt-strict" type="checkbox" checked>
-                        <span class="checkmark"></span>先頭に "use strict"; を宣言する <span class="font-mono text-[10px] opacity-50 ml-1.5">(addStrict)</span>
+                        <span class="checkmark"></span>先頭に "use strict"; を宣言する <span
+                            class="font-mono text-[10px] opacity-50 ml-1.5">(addStrict)</span>
                     </label>
                 </div>
                 <button
@@ -874,7 +903,7 @@
                 build(ast) {
                     const nodes = [];
                     let counter = 0;
-                    const traverse = Babel.packages.traverse.default;
+                    const traverse = Babel.traverse;
                     try {
                         traverse(ast, {
                             enter(path) {
@@ -910,7 +939,7 @@
                 }
                 analyze(ast) {
                     const self = this;
-                    const traverse = Babel.packages.traverse.default;
+                    const traverse = Babel.traverse;
                     try {
                         traverse(ast, {
                             Program(path) {
@@ -956,7 +985,8 @@
                 }
                 canInline(name) {
                     const val = this.getConstantValue(name);
-                    return this.isConstant(name) && this.getReferencesCount(name) === 1 && this.isPure(val);
+                    // valがnull(未初期化)の場合はインライン化を禁止する
+                    return val !== null && this.isConstant(name) && this.getReferencesCount(name) === 1 && this.isPure(val);
                 }
                 isPure(node) {
                     const t = Babel.types;
@@ -1093,7 +1123,10 @@
                 match(node, t, dfaQuery, path) {
                     if (!dfaQuery || !path) return false;
                     if (!path.isReferencedIdentifier()) return false;
-                    return dfaQuery.canInline(node.name);
+                    
+                    const val = dfaQuery.getConstantValue(node.name);
+                    // 値が null/undefined のFalsyノードによるAST破壊を防ぐ
+                    return val !== null && val !== undefined && dfaQuery.canInline(node.name);
                 },
                 candidates(node, t, dfaQuery) {
                     const val = dfaQuery.getConstantValue(node.name);
@@ -1313,7 +1346,8 @@
                         const curr = node.body[i];
                         if (t.isVariableDeclaration(curr)) {
                             if (newBody.length > 0 && t.isVariableDeclaration(newBody[newBody.length - 1]) && newBody[newBody.length - 1].kind === curr.kind) {
-                                newBody[newBody.length - 1].declarations.push(...Babel.cloneDeep(curr.declarations));
+                                // Babel.cloneDeep に配列を直接渡さず、要素ごとに確実にクローンする
+                                newBody[newBody.length - 1].declarations.push(...curr.declarations.map(d => Babel.cloneDeep(d)));
                             } else {
                                 newBody.push(Babel.cloneDeep(curr));
                             }
@@ -1939,9 +1973,12 @@
         window.App.define('src/transforms/registry.js', () => {
 
             // 【重要】Transform層全体で使われている `Babel.cloneDeep` がクラッシュしないよう、
-            // Babel.types.cloneNode への安全なエイリアスを張るポリフィル（モンキーパッチ）
+            // Babel.types.cloneNode への安全なエイリアスを張るポリフィル
             if (typeof Babel !== 'undefined' && !Babel.cloneDeep) {
-                Babel.cloneDeep = function (node) {
+                Babel.cloneDeep = function cloneDeepSafe(node) {
+                    if (!node) return node;
+                    // 配列が渡された場合は要素ごとに再帰クローンする
+                    if (Array.isArray(node)) return node.map(n => cloneDeepSafe(n));
                     return Babel.types.cloneNode(node, true);
                 };
             }
@@ -1981,6 +2018,7 @@
             const seqFlat = window.App.require('src/transforms/structure/SequenceFlatten.js');
             const ternRot = window.App.require('src/transforms/structure/TernaryRotate.js');
             const logReassoc = window.App.require('src/transforms/structure/LogicalReassociate.js');
+
             [
                 cProp, copyProp, dse, inlineRef,
                 ifTernary, ifLogical, blockComma, arrowBody, switchToObj, funcToArrow, mergeVarDecl, assignRetMerge, multiRetChain,
@@ -2109,7 +2147,7 @@
                     if (phase.requiresDFA || !ctx.dfaQuery) this.rebuildDFA(ctx);
 
                     const t = Babel.types;
-                    const traverse = Babel.packages.traverse.default;
+                    const traverse = Babel.traverse;
 
                     if (phase.type === 'visitor') {
                         const visitor = {};
@@ -2234,6 +2272,18 @@
                         ctx.resetDirty();
                         for (const phase of scheduler.config.phases) {
                             scheduler.runPhase(phase, ctx, iteration);
+
+                            // [アサーション] 開発モード(厳格検証)用のAST整合性チェック
+                            // ※ 本番環境では重いのでオプション(例: options.debugStrict)でトグルできるように
+                            if (ctx.options.debugStrict) {
+                                try {
+                                    // ASTからコードを生成し、再度パースできるかテスト
+                                    const testCode = Babel.transformFromAst(ctx.ast, null, { code: true, ast: false }).code;
+                                    Babel.transform(testCode, { ast: true, code: false });
+                                } catch (e) {
+                                    throw new Error(`[AST破損] フェーズ '${phase.id}' 実行後に構文木が破壊されました: ${e.message}`);
+                                }
+                            }
                         }
                         if (!ctx.isDirty()) {
                             reason = "正常収束 (これ以上の最適化なし)";
@@ -2272,10 +2322,17 @@
             const { TerserBackend } = window.App.require('src/compression/TerserBackend.js');
             const { EncodingSelector } = window.App.require('src/encoding/EncodingSelector.js');
 
+
+
             class CompilerFacade {
-                //context は処理ブロックごとに生成し、状態汚染を防ぐ
-                static runJsOptimization(sourceCode, options, scheduler, finalConfig, logger) {
+                // contextName 引数を追加し、エラー時にソースプレビューを出力
+                static runJsOptimization(sourceCode, options, scheduler, finalConfig, logger, contextName = "Unknown") {
                     try {
+                        const trimmedSource = sourceCode.trim();
+                        if (trimmedSource.startsWith('<') && (trimmedSource.toLowerCase().includes('<!doctype html') || trimmedSource.toLowerCase().startsWith('<html'))) {
+                            logger.error(`[アサーション違反] ${contextName} にHTMLが渡されました。JSコンパイラへの不正入力です。`);
+                            return { code: sourceCode, trace: [] };
+                        }
                         const context = new CompilationContext(options);
                         const parsed = Babel.transform(sourceCode, {
                             ast: true, code: false,
@@ -2283,9 +2340,9 @@
                         });
                         context.ast = parsed.ast;
 
-                        // [UI連携] console.log 出力の安全除去
                         if (options.enableConsoleStrip && options.golfEnabled) {
-                            Babel.packages.traverse.default(context.ast, {
+                            const traverse = Babel.traverse;
+                            traverse(context.ast, {
                                 CallExpression(path) {
                                     const callee = path.node.callee;
                                     if (
@@ -2301,7 +2358,7 @@
                         }
 
                         const loopResult = FixpointLoop.execute(context, scheduler, finalConfig.fixpointLoop.maxIterations);
-                        logger.success("[最適化ループ] " + loopResult.reason + " - 合計 " + loopResult.iterations + " 周回");
+                        logger.success(`[最適化ループ (${contextName})] ` + loopResult.reason + " - 合計 " + loopResult.iterations + " 周回");
 
                         let { code } = Babel.transformFromAst(context.ast, null, {
                             minified: options.golfEnabled, comments: !options.golfEnabled, compact: options.golfEnabled
@@ -2313,17 +2370,17 @@
                         }
                         return { code, trace: context.trace.getEntries() };
                     } catch (e) {
-                        logger.error("JS最適化例外: " + e.message);
+                        // 構文エラー時に、Babelがパースしようとした実際のテキスト先頭を可視化
+                        const preview = (sourceCode || "").substring(0, 100).replace(/\n/g, ' ↵ ');
+                        logger.error(`[JS最適化例外 - ${contextName}] ${e.message}\n(対象コードプレビュー: ${preview}...)`);
                         return { code: sourceCode, trace: [] };
                     }
                 }
 
                 static compile(options, logger) {
-                    //PipelineConfig を安全にディープコピーして設定汚染を防止
                     const finalConfig = JSON.parse(JSON.stringify(PipelineConfig));
                     finalConfig.fixpointLoop.maxIterations = options.searchDepth || 10;
 
-                    // UIのチェック状態から無効化リストをPipelineConfigの定義に基づいて動的に構築
                     const disabledTransforms = [];
                     if (!options.golfEnabled) {
                         disabledTransforms.push(...Array.from(registry.keys()));
@@ -2344,39 +2401,58 @@
                     let outputCode = "";
                     let combinedTrace = [];
 
-                    //Linker のための CSS 圧縮コールバックを注入（Linkerの依存を排除）
                     options.minifyCss = (css) => CssCompressor.minify(css);
 
                     if (options.mode === 'direct') {
-                        if (options.directLang === 'js') {
-                            const res = this.runJsOptimization(options.directSourceCode, options, scheduler, finalConfig, logger);
+                        let actualLang = options.directLang;
+
+                        // [追加] オートデテクト: JSモードのままHTMLが入力された場合の自動ルーティング
+                        const trimmed = (options.directSourceCode || "").trim();
+                        if (actualLang === 'js' && trimmed.startsWith('<') && (trimmed.toLowerCase().includes('<!doctype html') || trimmed.toLowerCase().startsWith('<html'))) {
+                            logger.info("[自動判別]HTML構造を検出したためHTMLモードとして最適化を実行します。");
+                            actualLang = 'html';
+                        }
+
+                        if (actualLang === 'js') {
+                            const res = this.runJsOptimization(options.directSourceCode, options, scheduler, finalConfig, logger, "Direct JS");
                             outputCode = res.code;
                             combinedTrace = res.trace;
-                        } else if (options.directLang === 'css') {
+                        } else if (actualLang === 'css') {
                             outputCode = CssCompressor.minify(options.directSourceCode);
-                        } else if (options.directLang === 'html') {
-                            outputCode = HtmlCompressor.minify(options.directSourceCode, options, logger);
+                        } else if (actualLang === 'html') {
+                            //直接入力されたHTMLもフルスペックの解析(JS抽出・CSS最適化)ができるよう仮想ファイル化する
+                            const virtualEntry = "_direct_input.html";
+                            options.fs.addFile(virtualEntry, options.directSourceCode, options.directSourceCode.length, false);
+
+                            const linkedHtml = Linker.linkSingleHTML(virtualEntry, options.fs, scanner, options, logger);
+                            const scriptMatchRegex = new RegExp('<script([^>]*)>\\/\\* __BUNDLE_TARGET__ \\*\\/([\\s\\S]*?)<\\/script>', 'gi');
+
+                            const optimizedHtml = linkedHtml.replace(scriptMatchRegex, (m, attrs, content) => {
+                                const res = this.runJsOptimization(content, options, scheduler, finalConfig, logger, "Direct HTML Inline Script");
+                                combinedTrace.push(...res.trace);
+                                return "<script" + attrs + ">" + res.code + "</" + "script>";
+                            });
+
+                            outputCode = HtmlCompressor.minify(optimizedHtml, options, logger);
                         }
                     } else if (options.mode === 'smart') {
-                        //store 直渡しをやめ、options.fs を使用
                         const bundledSource = Linker.link(options.jsEntryPoint, options.fs, scanner, options, logger);
-                        const res = this.runJsOptimization(bundledSource, options, scheduler, finalConfig, logger);
+                        // コンテキスト名を渡す
+                        const res = this.runJsOptimization(bundledSource, options, scheduler, finalConfig, logger, "Smart Bundler");
                         outputCode = res.code;
                         combinedTrace = res.trace;
                     } else if (options.mode === 'html') {
                         const linkedHtml = Linker.linkSingleHTML(options.htmlEntryPath, options.fs, scanner, options, logger);
-
-                        // HTMLパーサーの衝突を防ぐため、RegExp コンストラクタで終了タグの判定を行います
                         const scriptMatchRegex = new RegExp('<script([^>]*)>\\/\\* __BUNDLE_TARGET__ \\*\\/([\\s\\S]*?)<\\/script>', 'gi');
                         const optimizedHtml = linkedHtml.replace(scriptMatchRegex, (m, attrs, content) => {
-                            const res = this.runJsOptimization(content, options, scheduler, finalConfig, logger);
+                            // コンテキスト名を渡す
+                            const res = this.runJsOptimization(content, options, scheduler, finalConfig, logger, "HTML Inline Script");
                             combinedTrace.push(...res.trace);
                             return "<script" + attrs + ">" + res.code + "</" + "script>";
                         });
                         outputCode = HtmlCompressor.minify(optimizedHtml, options, logger);
                     }
 
-                    // エンコーディング（パッカー）
                     const hasRegPack = finalConfig.encoding && finalConfig.encoding.strategies.includes('regpack');
                     if (hasRegPack && options.golfEnabled && options.packerEnabled && options.mode !== 'html' && options.directLang !== 'css' && options.directLang !== 'html') {
                         outputCode = EncodingSelector.evaluate(outputCode, logger);
@@ -2400,8 +2476,11 @@
                     try {
                         const parsed = Babel.transform(code, { ast: true, code: false });
                         const traverse = Babel.packages.traverse.default;
+                        
+                        // 標準的な予約語
                         const reserved = new Set(['do', 'if', 'in', 'for', 'let', 'new', 'try', 'var', 'case', 'else', 'with', 'class', 'const', 'super', 'catch', 'break', 'throw', 'while', 'yield', 'return', 'delete', 'switch', 'typeof', 'default', 'extends', 'finally', 'continue', 'debugger', 'function', 'arguments', 'null', 'true', 'false', 'NaN', 'undefined', 'window', 'document', 'Math', 'console', 'navigator', 'App']);
 
+                        // AST内にすでに存在する識別子を全て予約語としてロックする
                         traverse(parsed.ast, {
                             Identifier(path) {
                                 if (!path.scope.hasBinding(path.node.name, true)) {
@@ -2412,7 +2491,9 @@
 
                         let counter = 0;
                         const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$';
-                        const getNextName = () => {
+                        
+                        // 対象スコープのBindingも確認し、絶対に衝突しない名前を払い出す
+                        const getNextName = (scope) => {
                             let name;
                             do {
                                 let num = counter++;
@@ -2421,7 +2502,9 @@
                                     name = chars[num % chars.length] + name;
                                     num = Math.floor(num / chars.length) - 1;
                                 } while (num >= 0);
-                            } while (reserved.has(name));
+                            } while (reserved.has(name) || (scope && scope.hasBinding(name)));
+                            
+                            // 一度払い出した名前は即座に予約語に入れて二重発番を防ぐ
                             reserved.add(name);
                             return name;
                         };
@@ -2430,7 +2513,7 @@
                             Scope(path) {
                                 for (const [name, binding] of Object.entries(path.scope.bindings)) {
                                     if (name.length > 1 && !reserved.has(name)) {
-                                        path.scope.rename(name, getNextName());
+                                        path.scope.rename(name, getNextName(path.scope));
                                     }
                                 }
                             }
@@ -2646,6 +2729,9 @@
                                 ExportNamedDeclaration(path) {
                                     if (path.node.source) deps.add(path.node.source.value);
                                 },
+                                ExportAllDeclaration(path) {
+                                    if (path.node.source) deps.add(path.node.source.value);
+                                },
                                 CallExpression(path) {
                                     const node = path.node;
                                     if (node.callee && node.callee.name === 'require' && node.arguments.length === 1 && node.arguments[0].type === 'StringLiteral') {
@@ -2676,74 +2762,139 @@
 
     <script id="src/bundler/Linker.js">
         window.App.define('src/bundler/Linker.js', () => {
-            // CssCompressor の直接 import を削除し SoC を遵守
             class Linker {
                 static link(entryPoint, fs, scanner, options, logger) {
                     const visited = new Set();
                     const orderedModules = [];
-                    const collect = (curr) => {
+                    // 探索経路 (chain) を追跡して循環参照を検知
+                    const collect = (curr, chain = []) => {
+                        if (chain.includes(curr)) {
+                            const cycle = [...chain, curr].join(' ➔ ');
+                            logger.warn(`[Linker警告] 循環参照を検出しました。実行時エラーの原因になる可能性があります: ${cycle}`);
+                            return;
+                        }
                         if (visited.has(curr)) return;
+
                         visited.add(curr);
                         fs.addUsedFile(curr);
                         const file = fs.getFile(curr);
                         if (!file || file.isBinary) return;
+
                         const deps = scanner.extractDependencies(file.content, curr, fs);
                         deps.forEach(d => {
                             const resolved = scanner.resolveRelativePath(curr, d, fs);
                             if (fs.hasFile(resolved)) {
-                                collect(resolved);
+                                collect(resolved, [...chain, curr]); // chainを渡す
                             }
                         });
                         orderedModules.push(curr);
                     };
-                    collect(entryPoint);
+
+                    collect(entryPoint, []); // 初回呼び出し
                     logger.info("[依存グラフ解決] 結合順序: " + orderedModules.join(' ➔ '));
 
-                    let bundledCode = `const __m = {};\nconst require = (id) => {\n  if(!__m[id].e) {\n    __m[id].e = {};\n    __m[id].f(require, __m[id].e, __m[id]);\n  }\n  return __m[id].e;\n};\n`;
+                    let runtimeCode = `(function(){\nconst __m = {};\nconst __req = (id) => {\n  if(!__m[id]) throw new Error("Bundler Error: Module '" + id + "' not found.");\n  if(!__m[id].e) {\n    __m[id].e = {};\n    __m[id].f(__req, __m[id].e, __m[id]);\n  }\n  return __m[id].e;\n};\n`;
+
+                    const externalImports = [];
+                    let extCounter = 0;
 
                     orderedModules.forEach((path) => {
                         const file = fs.getFile(path);
                         let moduleCode = "";
-                        try {
-                            // CJS変換プラグインがStandalone環境にない場合のフォールバック
-                            const plugins = [
-                                function (babel) {
-                                    return {
-                                        visitor: {
-                                            ImportDeclaration(p) {
-                                                const relPath = p.node.source.value;
-                                                p.node.source.value = scanner.resolveRelativePath(path, relPath, fs);
-                                            },
-                                            CallExpression(p) {
-                                                if (p.node.callee.name === 'require' && p.node.arguments.length === 1 && babel.types.isStringLiteral(p.node.arguments[0])) {
-                                                    const relPath = p.node.arguments[0].value;
-                                                    p.node.arguments[0].value = scanner.resolveRelativePath(path, relPath, fs);
+
+                        if (path.endsWith('.html') || path.endsWith('.css') || path.endsWith('.json')) {
+                            logger.info(`[Linker] 非JSファイル (${path}) を文字列モジュールとしてバンドル化`);
+                            moduleCode = `module.exports = ${JSON.stringify(file.content)};`;
+                        } else {
+                            try {
+                                const plugins = [
+                                    function (babel) {
+                                        const t = babel.types;
+                                        return {
+                                            visitor: {
+                                                ImportDeclaration(p) {
+                                                    const source = p.node.source.value;
+                                                    const resolvedPath = scanner.resolveRelativePath(path, source, fs);
+
+                                                    // URLだけでなく、ローカル(fs)に見つからないパスも外部モジュールとしてトップレベルのimportに退避させる
+                                                    if (source.startsWith('http') || source.startsWith('//') || source.startsWith('data:') || !fs.hasFile(resolvedPath)) {
+                                                        const declarations = [];
+                                                        p.node.specifiers.forEach(spec => {
+                                                            const localName = spec.local.name;
+                                                            const globalAlias = `__ext_module_${extCounter++}`;
+
+                                                            if (t.isImportDefaultSpecifier(spec)) {
+                                                                externalImports.push(`import ${globalAlias} from "${source}";`);
+                                                            } else if (t.isImportNamespaceSpecifier(spec)) {
+                                                                externalImports.push(`import * as ${globalAlias} from "${source}";`);
+                                                            } else {
+                                                                const importedName = spec.imported.name;
+                                                                externalImports.push(`import { ${importedName} as ${globalAlias} } from "${source}";`);
+                                                            }
+
+                                                            declarations.push(
+                                                                t.variableDeclarator(t.identifier(localName), t.identifier(globalAlias))
+                                                            );
+                                                        });
+
+                                                        if (declarations.length > 0) {
+                                                            p.replaceWith(t.variableDeclaration('const', declarations));
+                                                        } else {
+                                                            externalImports.push(`import "${source}";`);
+                                                            p.remove();
+                                                        }
+                                                        return;
+                                                    }
+
+                                                    // ローカルに存在する場合はパスを解決済みのものに書き換える
+                                                    p.node.source.value = resolvedPath;
+                                                },
+                                                CallExpression(p) {
+                                                    if (p.node.callee.name === 'require' && p.node.arguments.length === 1 && babel.types.isStringLiteral(p.node.arguments[0])) {
+                                                        const relPath = p.node.arguments[0].value;
+                                                        if (!(relPath.startsWith('http') || relPath.startsWith('//') || relPath.startsWith('data:'))) {
+                                                            p.node.arguments[0].value = scanner.resolveRelativePath(path, relPath, fs);
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                            ];
-                            if (Babel.availablePlugins && Babel.availablePlugins['transform-modules-commonjs']) {
-                                plugins.push(['transform-modules-commonjs', { loose: true }]);
-                            } else {
-                                plugins.push(['env', { modules: 'commonjs' }]);
-                            }
+                                ];
 
-                            moduleCode = Babel.transform(file.content, {
-                                plugins: plugins,
-                                parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript'] }
-                            }).code;
-                        } catch (e) {
-                            logger.warn(`[${path}] モジュール変換に失敗: ${e.message}`);
-                            moduleCode = file.content;
+                                if (Babel.availablePlugins && Babel.availablePlugins['transform-modules-commonjs']) {
+                                    plugins.push(['transform-modules-commonjs', { loose: true }]);
+                                } else {
+                                    plugins.push(['env', { modules: 'commonjs' }]);
+                                }
+
+                                moduleCode = Babel.transform(file.content, {
+                                    plugins: plugins,
+                                    parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript'] },
+                                    compact: options.golfEnabled,
+                                    minified: options.golfEnabled,
+                                    comments: !options.golfEnabled
+                                }).code;
+                            } catch (e) {
+                                logger.error(`[Linker] モジュール '${path}' の変換に失敗。バンドル破損を防ぐためエラー処理に置換: ${e.message}`);
+                                moduleCode = `throw new Error("Module parsing failed: ${path}");`;
+                            }
                         }
-                        bundledCode += `\n__m[${JSON.stringify(path)}] = { f: function(require, exports, module) { \n${moduleCode}\n } };\n`;
+                        runtimeCode += `\n__m[${JSON.stringify(path)}] = { f: function(require, exports, module) { \n${moduleCode}\n } };\n`;
                     });
 
-                    bundledCode += `\nrequire(${JSON.stringify(entryPoint)});`;
-                    if (options.addStrict) bundledCode = `"use strict";\n` + bundledCode;
+                    // 即時実行関数を閉じる
+                    runtimeCode += `\n__req(${JSON.stringify(entryPoint)});\n})();`;
 
+                    let bundledCode = "";
+                    if (externalImports.length > 0) {
+                        const uniqueImports = [...new Set(externalImports)].join('\n');
+                        bundledCode = uniqueImports + '\n\n' + runtimeCode;
+                    } else {
+                        bundledCode = runtimeCode;
+                    }
+
+                    if (options.addStrict) bundledCode = `"use strict";\n` + bundledCode;
                     return bundledCode;
                 }
 
@@ -2763,7 +2914,6 @@
                             if (fs.hasFile(resolved)) {
                                 fs.addUsedFile(resolved);
                                 const style = doc.createElement('style');
-                                // Facadeから注入された minifyCss を使用
                                 style.textContent = options.minifyCss ? options.minifyCss(fs.getFile(resolved).content) : fs.getFile(resolved).content;
                                 link.replaceWith(style);
                                 logger.success("[CSS統合] スタイルブロック化インライン置換: " + href);
@@ -2778,6 +2928,11 @@
                             const src = script.getAttribute('src');
                             const type = script.getAttribute('type');
 
+                            // 【重要】 importmap や WebGLシェーダーなど、JS以外のスクリプトは保護してスキップする
+                            if (type && !['module', 'text/javascript', 'application/javascript'].includes(type.toLowerCase())) {
+                                return;
+                            }
+
                             if (src) {
                                 if (src.startsWith('http') || src.startsWith('//')) return;
                                 const resolved = scanner.resolveRelativePath(entryHtml, src, fs);
@@ -2785,10 +2940,12 @@
                                     fs.addUsedFile(resolved);
                                     if (type === 'module') script.removeAttribute('type');
 
-                                    //this.link -> Linker.link に統一
                                     const bundledCode = Linker.link(resolved, fs, scanner, options, logger);
                                     const newScript = doc.createElement('script');
                                     newScript.textContent = `/* __BUNDLE_TARGET__ */\n${bundledCode}`;
+                                    if (bundledCode.includes('import ') || type === 'module') {
+                                        newScript.setAttribute('type', 'module');
+                                    }
                                     script.replaceWith(newScript);
                                     logger.info("[JS統合] 外部スクリプトをバンドルしてインライン化: " + src);
                                 }
@@ -2802,11 +2959,13 @@
 
                                 if (isModule || hasImports) {
                                     const virtualPath = `${entryHtml.replace('.html', '')}_virtual_${virtualCounter++}.js`;
-                                    // 仮想ファイルのサイズとバイナリフラグを正しくセット
                                     fs.addFile(virtualPath, content, content.length, false);
 
                                     const bundledCode = Linker.link(virtualPath, fs, scanner, options, logger);
                                     script.textContent = `/* __BUNDLE_TARGET__ */\n${bundledCode}`;
+                                    if (bundledCode.includes('import ') || isModule) {
+                                        script.setAttribute('type', 'module');
+                                    }
                                     logger.info("[JS統合] インラインモジュールを仮想ファイルとしてバンドル化しました");
                                 } else {
                                     script.textContent = `/* __BUNDLE_TARGET__ */\n${content}`;
@@ -2892,8 +3051,21 @@
                 init() {
                     this.cacheElements();
                     this.bindEvents();
+                    this.setupGlobalErrorHandlers();
                     this.updateView();
                     lucide.createIcons();
+                }
+                setupGlobalErrorHandlers() {
+                    window.addEventListener('error', (event) => {
+                        this.elements.logSection.classList.remove('hidden');
+                        this.addLog(`[システムエラー] ${event.message} (行: ${event.lineno})`, 'error');
+                        this.showToast("システムエラーが発生しました", "error");
+                    });
+
+                    window.addEventListener('unhandledrejection', (event) => {
+                        this.elements.logSection.classList.remove('hidden');
+                        this.addLog(`[非同期エラー] ${event.reason?.message || event.reason}`, 'error');
+                    });
                 }
                 cacheElements() {
                     this.elements.dropZone = document.getElementById('drop-zone');
@@ -3074,12 +3246,21 @@
                         const file = this.store.getFile(keys[0]);
                         if (!file.isBinary) {
                             const ext = keys[0].split('.').pop().toLowerCase();
-                            if (['js', 'ts', 'jsx', 'tsx'].includes(ext)) this.elements.directLangSelect.value = 'js';
-                            else if (['html', 'htm'].includes(ext)) this.elements.directLangSelect.value = 'html';
-                            else if (ext === 'css') this.elements.directLangSelect.value = 'css';
                             this.elements.inputCode.value = file.content;
                             this.switchEditorTab('input');
-                            this.switchMode('direct');
+
+                            // 単一ファイルでもHTMLなら「HTMLモード(バンドル・最適化対応)」に自動切替
+                            if (['html', 'htm'].includes(ext)) {
+                                this.switchMode('html');
+                            } else if (['js', 'ts', 'jsx', 'tsx'].includes(ext)) {
+                                this.elements.directLangSelect.value = 'js';
+                                this.switchMode('direct');
+                            } else if (ext === 'css') {
+                                this.elements.directLangSelect.value = 'css';
+                                this.switchMode('direct');
+                            } else {
+                                this.switchMode('direct');
+                            }
                         }
                     } else {
                         const jsKeys = keys.filter(k => ['js', 'ts'].includes(k.split('.').pop().toLowerCase()));
