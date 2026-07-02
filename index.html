@@ -33,10 +33,10 @@
             --bg-main: #2b2f35;
             --text-main: #e0e6ed;
             --text-muted: #8b9bb4;
-            --u-shadow-light: -5px -5px 12px rgba(255, 255, 255, 0.05);
-            --u-shadow-dark: 5px 5px 12px rgba(0, 0, 0, 0.35);
-            --u-inset-light: inset -4px -4px 8px rgba(255, 255, 255, 0.04);
-            --u-inset-dark: inset 4px 4px 8px rgba(0, 0, 0, 0.45);
+            --u-shadow-light: -6px -6px 12px rgba(255, 255, 255, 0.08);
+            --u-shadow-dark: 6px 6px 12px rgba(0, 0, 0, 0.4);
+            --u-inset-light: inset -4px -4px 8px rgba(255, 255, 255, 0.05);
+            --u-inset-dark: inset 4px 4px 8px rgba(0, 0, 0, 0.5);
             --accent: #4da6ff;
             --danger: #ff5c5c;
             --success: #5cff85;
@@ -82,7 +82,7 @@
         /* Neumorphic Buttons */
         .nop-btn {
             background: var(--bg-main);
-            border: none;
+            border: 1px solid rgba(255, 255, 255, 0.03);
             border-radius: var(--r-sm);
             box-shadow: var(--u-shadow-light), var(--u-shadow-dark);
             color: var(--text-muted);
@@ -93,6 +93,43 @@
             align-items: center;
             justify-content: center;
             user-select: none;
+            outline: none;
+        }
+
+        /* ボタンのサイズ・カラーバリエーションの追加*/
+        .nop-btn.small {
+            padding: 6px 12px;
+            font-size: 12px;
+            min-width: auto;
+        }
+
+        .nop-btn.danger {
+            color: var(--danger);
+        }
+
+        .nop-btn.danger:hover:not(:disabled) {
+            background: rgba(255, 92, 92, 0.1);
+            color: var(--danger);
+        }
+
+        /* スライダー値の横並び用フロートクラス */
+        .slider-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            text-slate-300: var(--text-main);
+            font-size: 12px;
+        }
+
+        /* セレクトボックスのパディングと余白の適正化 */
+        .nop-select {
+            width: 100%;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        .nop-btn:focus-visible {
+            box-shadow: 0 0 0 2px var(--accent);
         }
 
         .nop-btn:hover:not(:disabled) {
@@ -118,17 +155,19 @@
         .nop-input,
         .nop-select {
             background: #1e2125;
-            border: none;
+            border: 1px solid rgba(0, 0, 0, 0.2);
             border-radius: var(--r-sm);
             box-shadow: var(--u-inset-light), var(--u-inset-dark);
-            color: var(--accent);
+            color: var(--text-main);
             outline: none;
-            transition: box-shadow 0.2s;
+            transition: all 0.2s;
         }
 
         .nop-input:focus,
         .nop-select:focus {
             box-shadow: var(--u-inset-light), var(--u-inset-dark), 0 0 0 1px var(--accent);
+            color: var(--accent);
+            border-color: rgba(77, 166, 255, 0.3);
         }
 
         /* Segmented Switch */
@@ -251,6 +290,41 @@
             border-width: 0 2px 2px 0;
             transform: rotate(45deg);
         }
+
+        /* 補足テキストと子設定の階層化 (From app.css) */
+        .setting-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            opacity: 0.65;
+            margin-top: 1px;
+            margin-bottom: 6px;
+            line-height: 1.4;
+            font-style: italic;
+        }
+
+        .sub-settings {
+            margin-left: 16px;
+            padding-left: 14px;
+            border-left: 2px solid rgba(255, 255, 255, 0.08);
+            margin-top: 6px;
+            margin-bottom: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .nop-checkbox-container:hover input~.checkmark {
+            background-color: #32363d;
+        }
+
+        /* ドロップゾーン内のマウスイベント干渉（チラつき）を防止 */
+        #drop-zone * {
+            pointer-events: none;
+        }
+
+        /* 中にあるボタンだけはクリック可能にする */
+        #drop-zone button,
+        #drop-zone .flex.gap-3 {
+            pointer-events: auto;
+        }
     </style>
 </head>
 
@@ -320,7 +394,7 @@
                         <i class="h-5 text-[var(--accent)] w-5" data-lucide="sliders"></i>
                         <h2 class="font-bold text-sm text-slate-200">ビルド・ゴルフ設定</h2>
                     </div>
-                    <button class="flex items-center text-xs transition-colors gap-1 hover:text-red-300 text-red-400"
+                    <button class="nop-btn text-[11px] px-2.5 py-1 gap-1 text-red-400 hover:text-red-300"
                         data-action="resetAll" id="clear-btn">
                         <i class="h-3 w-3" data-lucide="rotate-ccw"></i>リセット
                     </button>
@@ -389,28 +463,32 @@
                             </div>
                         </label>
                     </div>
-                    <div class="flex flex-col border border-white/5 rounded-xl gap-2.5 bg-amber-500/5 p-3.5 transition-all shadow-inner"
+                    <div class="flex flex-col border border-white/5 rounded-xl gap-3 bg-amber-500/5 p-3.5 transition-all shadow-inner"
                         id="golf-details">
-                        <div class="flex flex-col gap-1">
-                            <div class="flex items-center justify-between text-slate-300 text-xs">
-                                <span class="font-medium">最大探索深度 (収束ループ上限数) <span
-                                        class="font-mono text-[10px] opacity-50 ml-1">(searchDepth)</span></span>
+                        <div class="flex flex-col">
+                            <div class="flex items-center justify-between text-slate-300 text-xs font-medium">
+                                <span>最大探索深度 (収束ループ上限数)</span>
                                 <span class="font-bold font-mono text-amber-400" id="search-depth-val">10</span>
                             </div>
+                            <div class="setting-desc">Config property: searchDepth — ループの最大探索回数を指定します。</div>
                             <input class="nop-slider" id="search-depth" type="range" max="50" min="1" value="10">
                         </div>
-                        <div class="flex flex-col gap-1 mt-1.5">
-                            <div class="flex items-center justify-between text-slate-300 text-xs">
-                                <span class="font-medium">タイムアウト制限 (秒) <span
-                                        class="font-mono text-[10px] opacity-50 ml-1">(timeoutLimit)</span></span>
+
+                        <div class="flex flex-col">
+                            <div class="flex items-center justify-between text-slate-300 text-xs font-medium">
+                                <span>タイムアウト制限 (秒)</span>
                                 <span class="font-bold font-mono text-amber-400" id="timeout-limit-val">15</span>
                             </div>
+                            <div class="setting-desc">Config property: timeoutLimit — 処理がハングしたとみなす秒数です。</div>
                             <input class="nop-slider" id="timeout-limit" type="range" max="60" min="5" step="5"
                                 value="15">
                         </div>
-                        <div class="flex items-center justify-between text-slate-300 text-xs mt-1.5">
-                            <span class="font-medium">非同期実行 (UIハング防止) <span
-                                    class="font-mono text-[10px] opacity-50 ml-1">(enableAsyncGolf)</span></span>
+
+                        <div class="flex items-center justify-between text-slate-300 text-xs pt-1">
+                            <div>
+                                <span class="font-medium">非同期実行 (UIハング防止)</span>
+                                <div class="setting-desc !mb-0">Config property: enableAsyncGolf</div>
+                            </div>
                             <label class="relative inline-flex items-center cursor-pointer">
                                 <input type="checkbox" id="enable-async-golf" class="sr-only peer" checked>
                                 <div
@@ -418,13 +496,17 @@
                                 </div>
                             </label>
                         </div>
-                        <div class="my-1 border-white/5 border-t"></div>
+
+                        <div class="my-0.5 border-white/5 border-t"></div>
                         <div id="golf-options-container" class="flex flex-col gap-2.5"></div>
-                        <div class="my-1 border-white/5 border-t"></div>
-                        <div class="flex items-center justify-between text-slate-300 text-xs mt-1">
-                            <span class="font-medium text-brand-300"><i class="h-3 w-3 inline mr-1"
-                                    data-lucide="split"></i>投機的探索 (Beam Search) <span
-                                    class="font-mono text-[10px] opacity-50 ml-1">(enableBeamSearch)</span></span>
+                        <div class="my-0.5 border-white/5 border-t"></div>
+
+                        <div class="flex items-center justify-between text-slate-300 text-xs pt-1">
+                            <div>
+                                <span class="font-medium text-brand-300"><i class="h-3 w-3 inline mr-1"
+                                        data-lucide="split"></i>投機的探索 (Beam Search)</span>
+                                <div class="setting-desc !mb-0">Config property: enableBeamSearch</div>
+                            </div>
                             <label class="relative inline-flex items-center cursor-pointer">
                                 <input type="checkbox" id="golf-beam-search" class="sr-only peer">
                                 <div
@@ -432,14 +514,14 @@
                                 </div>
                             </label>
                         </div>
-                        <div class="flex flex-col gap-1 mt-1 pl-4 border-l-2 border-brand-500/20 opacity-25 pointer-events-none transition-all"
-                            id="beam-details">
+
+                        <div class="sub-settings opacity-25 pointer-events-none border-brand-500/30" id="beam-details">
                             <div class="flex items-center justify-between text-slate-300 text-xs">
-                                <span class="font-medium text-[10px]">ビーム幅 (同時探索数) <span
-                                        class="font-mono text-[8px] opacity-50 ml-1">(beamWidth)</span></span>
+                                <span class="font-medium text-[10px]">ビーム幅 (同時探索数)</span>
                                 <span class="font-bold font-mono text-brand-400 text-[10px]"
                                     id="beam-width-val">3</span>
                             </div>
+                            <div class="setting-desc">Config property: beamWidth</div>
                             <input class="nop-slider" id="beam-width" type="range" max="10" min="1" value="3">
                             <div id="beam-options-container" class="flex flex-col gap-2.5 mt-1"></div>
                         </div>
@@ -470,7 +552,7 @@
             </div>
         </div>
 
-        <div class="flex flex-col gap-6 h-[calc(100vh-120px)] lg:col-span-7 min-h-[500px]">
+        <div class="flex flex-col gap-4 h-[calc(100vh-140px)] lg:col-span-7 min-h-[600px]">
             <div class="nop-panel flex items-center justify-between flex-col gap-4 sm:flex-row hidden p-4"
                 id="golf-scoreboard"
                 style="background: rgba(245, 158, 11, 0.03); border-color: rgba(245, 158, 11, 0.15);">
@@ -522,7 +604,7 @@
                     </div>
                 </div>
 
-                <div class="flex flex-col border border-white/5 rounded-xl bg-slate-950/50 backdrop-blur-md overflow-hidden font-mono hidden max-h-[180px] mb-4 p-4 text-xs shadow-inner"
+                <div class="flex flex-col border border-white/5 rounded-xl bg-slate-950/50 backdrop-blur-md overflow-hidden font-mono hidden h-[140px] shrink-0 mb-3 p-4 text-xs shadow-inner"
                     id="process-log">
                     <div class="flex items-center justify-between border-b border-white/5 mb-2 pb-2 text-slate-400">
                         <span class="flex items-center gap-1.5 font-bold text-amber-400"><i class="h-3.5 w-3.5"
@@ -532,21 +614,21 @@
                     <div class="space-y-1 flex-1 overflow-y-auto" id="log-content"></div>
                 </div>
 
-                <div class="flex flex-col flex-1 overflow-hidden relative">
-                    <div class="segmented-switch mb-3">
+                <div class="flex flex-col flex-1 min-h-0 overflow-hidden relative">
+                    <div class="segmented-switch mb-3 shrink-0">
                         <button class="active" data-action="switchEditorTab" id="tab-input" data-tab="input"><i
                                 class="h-3.5 w-3.5 inline mr-1" data-lucide="pencil"></i>入力 (Input)</button>
                         <button data-action="switchEditorTab" id="tab-output" data-tab="output"><i
                                 class="h-3.5 w-3.5 inline mr-1" data-lucide="terminal"></i>出力 (Output)</button>
                     </div>
-                    <div class="nop-panel-inset flex flex-1 relative overflow-hidden">
-                        <div class="text-xs font-mono bg-transparent border-r border-white/5 pr-3 py-4 select-none text-right text-slate-600 w-12 h-full overflow-hidden leading-relaxed"
+                    <div class="nop-panel-inset flex flex-1 min-h-0 relative overflow-hidden">
+                        <div class="text-xs font-mono bg-transparent border-r border-white/5 pr-3 py-4 select-none text-right text-slate-600 w-12 h-full overflow-hidden leading-relaxed select-none shrink-0"
                             id="line-numbers">1</div><textarea
-                            class="text-xs font-mono bg-transparent focus:outline-none text-slate-200 animate-none flex-1 leading-relaxed overflow-auto p-4 resize-none whitespace-pre relative z-10"
+                            class="text-xs font-mono bg-transparent focus:outline-none text-slate-200 animate-none flex-1 leading-relaxed overflow-x-auto overflow-y-auto p-4 resize-none whitespace-pre relative z-10"
                             id="input-code"
                             placeholder="// 最最適化したいソースコードをペースト、または左エリアへプロジェクトフォルダをロードしてください。"></textarea><textarea
-                            class="text-xs font-mono bg-transparent focus:outline-none flex-1 leading-relaxed overflow-auto p-4 resize-none whitespace-pre hidden text-emerald-400 relative z-10"
-                            id="output-code" placeholder="// 極限ゴルフ圧縮後のコードがここに出力されます。" readonly></textarea>
+                            class="text-xs font-mono bg-transparent focus:outline-none flex-1 leading-relaxed overflow-x-auto overflow-y-auto p-4 resize-none whitespace-pre hidden text-emerald-400 relative z-10"
+                            id="output-code" placeholder="// 極極限ゴルフ圧縮後のコードがここに出力されます。" readonly></textarea>
                         <div class="flex items-center flex-col hidden absolute backdrop-blur-sm bg-slate-950/80 gap-3 inset-0 justify-center z-20"
                             id="loading-overlay">
                             <div
@@ -568,8 +650,10 @@
     <footer class="text-xs py-4 bg-transparent border-t border-white/5 text-center text-slate-600">
         <p>JS Folder Bundler SoC Edition </p>
     </footer>
-    <div class="flex items-center gap-2 py-3 rounded-xl transition-all bg-slate-900 border border-white/10 bottom-6 duration-300 fixed opacity-0 px-4 right-6 shadow-2xl text-xs transform translate-y-10 z-50"
-        id="toast"><span id="toast-icon"></span><span class="font-medium" id="toast-text">メッセージ</span></div>
+    <div id="toast"
+        class="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-900/95 border border-white/10 shadow-2xl text-xs backdrop-blur-xl transform translate-y-4 opacity-0 pointer-events-none transition-all duration-300 ease-out">
+        <span id="toast-icon"></span><span class="font-medium" id="toast-text">メッセージ</span>
+    </div>
 
     <!-- ==========================================================================
      src/core/ - Layer 1: Infrastructure
@@ -4094,6 +4178,8 @@
                     this.setupGlobalErrorHandlers();
                     this.updateView();
                     lucide.createIcons();
+
+                    this.switchMode('direct');
                 }
                 setupGlobalErrorHandlers() {
                     window.addEventListener('error', (event) => {
@@ -4157,6 +4243,7 @@
                     this.elements.loadingMessage = document.getElementById('loading-message');
                     this.elements.loadingProgress = document.getElementById('loading-progress');
                     this.elements.abortBtn = document.getElementById('abort-btn');
+                    this.elements.bundleBtn = document.getElementById('bundle-btn');
                 }
                 renderDynamicSettings() {
                     const { PipelineConfig } = window.App.require('src/engine/PipelineConfig.js');
@@ -4170,41 +4257,41 @@
                         optionKeys.forEach(key => {
                             const config = UI_PRESENTATION_SCHEMA.options[key];
                             const label = document.createElement('label');
-                            label.className = 'nop-checkbox-container text-slate-300';
+                            label.className = 'nop-checkbox-container text-slate-300 items-start';
 
                             const input = document.createElement('input');
                             input.type = 'checkbox';
                             input.id = `dynamic-${key}`;
-                            input.checked = true; // デフォルトチェック
+                            input.checked = true;
 
                             const spanCheck = document.createElement('span');
-                            spanCheck.className = 'checkmark';
+                            spanCheck.className = 'checkmark !top-2';
 
                             const spanText = document.createElement('span');
-                            spanText.innerHTML = `${config.label} <span class="font-mono text-[10px] opacity-50 ml-1.5">(${config.optionKey})</span>`;
+                            spanText.className = 'flex flex-col pl-1';
+                            spanText.innerHTML = `<span class="font-medium text-slate-200">${config.label}</span><span class="setting-desc !mb-0">Config property: ${config.optionKey}</span>`;
 
                             label.appendChild(input);
                             label.appendChild(spanCheck);
                             label.appendChild(spanText);
-
                             golfContainer.appendChild(label);
                             this.dynamicCheckboxes[key] = input;
                         });
 
-                        // PipelineConfig.optionMappings のキーに対する自動フォールバック描画
                         const mappings = PipelineConfig.optionMappings || {};
                         Object.keys(mappings).forEach(key => {
                             if (!this.dynamicCheckboxes[key] && !Object.values(UI_PRESENTATION_SCHEMA.options).some(o => o.optionKey === key)) {
                                 const label = document.createElement('label');
-                                label.className = 'nop-checkbox-container text-slate-300';
+                                label.className = 'nop-checkbox-container text-slate-300 items-start';
                                 const input = document.createElement('input');
                                 input.type = 'checkbox';
                                 input.id = `dynamic-${key}`;
                                 input.checked = true;
                                 const spanCheck = document.createElement('span');
-                                spanCheck.className = 'checkmark';
+                                spanCheck.className = 'checkmark !top-2';
                                 const spanText = document.createElement('span');
-                                spanText.innerHTML = `${key} (自動定義) <span class="font-mono text-[10px] opacity-50 ml-1.5">(${key})</span>`;
+                                spanText.className = 'flex flex-col pl-1';
+                                spanText.innerHTML = `<span class="font-medium text-slate-200">${key} (自動定義)</span><span class="setting-desc !mb-0">Config property: ${key}</span>`;
 
                                 label.appendChild(input);
                                 label.appendChild(spanCheck);
@@ -4223,45 +4310,41 @@
                         beamKeys.forEach(key => {
                             const config = UI_PRESENTATION_SCHEMA.beamTriggers[key];
                             const label = document.createElement('label');
-                            label.className = 'nop-checkbox-container text-slate-300 mt-1';
+                            label.className = 'nop-checkbox-container text-slate-300 items-start mt-1.5';
 
                             const input = document.createElement('input');
                             input.type = 'checkbox';
                             input.id = `dynamic-${key}`;
-                            input.checked = true; // デフォルトチェック
+                            input.checked = true;
 
                             const spanCheck = document.createElement('span');
-                            spanCheck.className = 'checkmark';
-                            spanCheck.style.cssText = 'width:12px;height:12px;top:2px;';
+                            spanCheck.className = 'checkmark !w-3 !h-3 !top-1.5';
 
                             const spanText = document.createElement('span');
-                            spanText.className = 'text-[10px] leading-[14px] inline-block mt-0.5';
-                            spanText.textContent = config.label;
+                            spanText.className = 'flex flex-col pl-1 text-[11px] leading-tight';
+                            spanText.innerHTML = `<span class="font-medium text-slate-300">${config.label}</span><span class="setting-desc !text-[9px] !mb-0">Branch rule: ${config.optionKey}</span>`;
 
                             label.appendChild(input);
                             label.appendChild(spanCheck);
                             label.appendChild(spanText);
-
                             beamContainer.appendChild(label);
                             this.dynamicCheckboxes[key] = input;
                         });
 
-                        // PipelineConfig.speculativeMappings のキーに対する自動フォールバック描画
                         const specMappings = PipelineConfig.speculativeMappings || {};
                         Object.keys(specMappings).forEach(key => {
                             if (!this.dynamicCheckboxes[key] && !Object.values(UI_PRESENTATION_SCHEMA.beamTriggers).some(b => b.optionKey === key)) {
                                 const label = document.createElement('label');
-                                label.className = 'nop-checkbox-container text-slate-300 mt-1';
+                                label.className = 'nop-checkbox-container text-slate-300 items-start mt-1.5';
                                 const input = document.createElement('input');
                                 input.type = 'checkbox';
                                 input.id = `dynamic-${key}`;
                                 input.checked = true;
                                 const spanCheck = document.createElement('span');
-                                spanCheck.className = 'checkmark';
-                                spanCheck.style.cssText = 'width:12px;height:12px;top:2px;';
+                                spanCheck.className = 'checkmark !w-3 !h-3 !top-1.5';
                                 const spanText = document.createElement('span');
-                                spanText.className = 'text-[10px] leading-[14px] inline-block mt-0.5';
-                                spanText.textContent = `${key} (自動定義)`;
+                                spanText.className = 'flex flex-col pl-1 text-[11px] leading-tight';
+                                spanText.innerHTML = `<span class="font-medium text-slate-300">${key} (自動定義)</span><span class="setting-desc !text-[9px] !mb-0">Branch rule: ${key}</span>`;
 
                                 label.appendChild(input);
                                 label.appendChild(spanCheck);
@@ -4273,12 +4356,22 @@
                     }
                 }
                 bindEvents() {
+                    // 画面外への誤ドロップによるページ離脱（ファイル展開）を防ぐ
+                    window.addEventListener('dragover', (e) => e.preventDefault(), false);
+                    window.addEventListener('drop', (e) => e.preventDefault(), false);
+
                     document.addEventListener('click', (e) => {
                         const target = e.target.closest('[data-action]');
                         if (!target) return;
                         const action = target.getAttribute('data-action');
-                        if (action === 'triggerFolderInput') this.elements.folderInput.click();
-                        else if (action === 'triggerFilesInput') this.elements.filesInput.click();
+                        if (action === 'triggerFolderInput') {
+                            this.elements.folderInput.value = ''; // 連続選択できないバグを防止
+                            this.elements.folderInput.click();
+                        }
+                        else if (action === 'triggerFilesInput') {
+                            this.elements.filesInput.value = '';
+                            this.elements.filesInput.click();
+                        }
                         else if (action === 'resetAll') this.resetAll();
                         else if (action === 'switchMode') this.switchMode(target.getAttribute('data-value'));
                         else if (action === 'runBundle') this.runBundle();
@@ -4354,12 +4447,33 @@
                     });
                     this.elements.inputCode.addEventListener('input', () => {
                         this.updateLineNumbers(this.elements.inputCode.value);
+                        // 入力によってテキストエリアが自動スクロールした際にも行番号を強制追従させる
+                        this.elements.lineNumbers.scrollTop = this.elements.inputCode.scrollTop;
                     });
                     this.elements.inputCode.addEventListener('scroll', () => {
                         this.elements.lineNumbers.scrollTop = this.elements.inputCode.scrollTop;
                     });
+
+                    //テキストエリア内で Tab キーを押した時にインデントを挿入する
+                    this.elements.inputCode.addEventListener('keydown', (e) => {
+                        if (e.key === 'Tab') {
+                            e.preventDefault();
+                            const start = e.target.selectionStart;
+                            const end = e.target.selectionEnd;
+                            // 2スペースのインデントを挿入
+                            e.target.value = e.target.value.substring(0, start) + "  " + e.target.value.substring(end);
+                            e.target.selectionStart = e.target.selectionEnd = start + 2;
+                            // 行番号を更新
+                            this.updateLineNumbers(e.target.value);
+                        }
+                    });
                     this.elements.outputCode.addEventListener('scroll', () => {
                         this.elements.lineNumbers.scrollTop = this.elements.outputCode.scrollTop;
+                    });
+
+                    // 直接入力時の言語変更イベントをキャッチしてUI表示を連動
+                    this.elements.directLangSelect.addEventListener('change', () => {
+                        this.updateOptionsAvailability();
                     });
                 }
                 async scanEntry(entry, path = "") {
@@ -4431,11 +4545,14 @@
                             } else if (['js', 'ts', 'jsx', 'tsx'].includes(ext)) {
                                 this.elements.directLangSelect.value = 'js';
                                 this.switchMode('direct');
+                                this.updateOptionsAvailability();
                             } else if (ext === 'css') {
                                 this.elements.directLangSelect.value = 'css';
                                 this.switchMode('direct');
+                                this.updateOptionsAvailability();
                             } else {
                                 this.switchMode('direct');
+                                this.updateOptionsAvailability();
                             }
                         }
                     } else {
@@ -4449,6 +4566,9 @@
                 updateDetectedFilesList() {
                     this.elements.detectedFiles.innerHTML = '';
                     this.store.getFilePaths().sort().forEach(path => {
+                        // 内部処理用の仮想ファイルを一覧から隠す
+                        if (path.includes('_virtual_') || path === '_direct_input.html') return;
+
                         const file = this.store.getFile(path);
                         const sizeKB = (file.size / 1024).toFixed(1);
                         const ext = path.split('.').pop().toLowerCase();
@@ -4474,7 +4594,8 @@
                     lucide.createIcons({ root: this.elements.detectedFiles });
                 }
                 updateDropdowns() {
-                    const keys = this.store.getFilePaths().sort();
+                    // 内部処理用の仮想ファイルをプルダウンの選択肢から隠す
+                    const keys = this.store.getFilePaths().filter(k => !k.includes('_virtual_') && k !== '_direct_input.html').sort();
                     const htmlKeys = keys.filter(k => ['html', 'htm'].includes(k.split('.').pop().toLowerCase()));
                     const jsKeys = keys.filter(k => ['js', 'mjs', 'ts', 'jsx', 'tsx'].includes(k.split('.').pop().toLowerCase()));
                     this.elements.htmlEntrySelect.innerHTML = '';
@@ -4517,11 +4638,51 @@
                     this.elements.htmlOptions.classList.add('hidden');
                     this.elements.smartOptions.classList.add('hidden');
                     this.elements.directOptions.classList.add('hidden');
+
+                    const placeholders = {
+                        html: "// 【HTML単一化モード】\n// 左上のエリアにプロジェクトフォルダをドラッグ＆ドロップしてください。\n// 検出されたHTML、CSS、JS、画像が三位一体で極限まで1ファイルに凝縮されます。",
+                        smart: "// 【JSスマート結合モード】\n// 左上のエリアに複数のJavaScriptファイルをロードしてください。\n// 依存関係（モジュール）を解析し、最適な実行順序でコードゴルフ結合を行います。",
+                        direct: "// 【直接入力モード】\n// 最最適化（ASTコードゴルフ）を行いたいソースコードをここに直接ペーストしてください。\n// 対象言語（JS/HTML/CSS）を切り替えてコンパイルを実行できます。"
+                    };
+                    this.elements.inputCode.placeholder = placeholders[mode] || placeholders.direct;
+
+                    // ボタンテキストの動的変更
+                    const buttonBtn = document.getElementById('bundle-btn');
+                    if (buttonBtn) {
+                        const btnTexts = {
+                            html: '<i class="h-4 w-4 mr-1.5 inline" data-lucide="play"></i>SoC HTML単一化コンパイルを実行',
+                            smart: '<i class="h-4 w-4 mr-1.5 inline" data-lucide="play"></i>JSスマート結合コンパイルを実行',
+                            direct: '<i class="h-4 w-4 mr-1.5 inline" data-lucide="play"></i>直接入力コンパイルを実行'
+                        };
+                        buttonBtn.innerHTML = btnTexts[mode] || btnTexts.direct;
+                        lucide.createIcons({ root: buttonBtn });
+                    }
+
                     if (mode === 'html') this.elements.htmlOptions.classList.remove('hidden');
                     else if (mode === 'smart') this.elements.smartOptions.classList.remove('hidden');
                     else if (mode === 'direct') this.elements.directOptions.classList.remove('hidden');
+
+                    // オプションの活性・非活性状態を中央管理関数に委譲
+                    this.updateOptionsAvailability();
+
                     this.switchEditorTab(mode === 'direct' ? 'input' : 'output');
                     this.updatePreviewFilename();
+                }
+
+                // 選択モードと選択言語から、ゴルフオプションコンテナ全体の表示・非表示を制御する
+                updateOptionsAvailability() {
+                    const mode = this.store.currentMode;
+                    const lang = this.elements.directLangSelect.value;
+                    const golfOptContainer = this.elements.optGolf.closest('.flex-col'); // ゴルフセクションの親の区切り
+
+                    if (golfOptContainer) {
+                        // モードがdirectで、かつ言語がjs以外（cssやhtml）の場合はJavaScript専用オプションを非表示にする
+                        if (mode === 'direct' && lang !== 'js') {
+                            golfOptContainer.classList.add('hidden');
+                        } else {
+                            golfOptContainer.classList.remove('hidden');
+                        }
+                    }
                 }
                 switchEditorTab(tab) {
                     const tabIn = document.getElementById('tab-input');
@@ -4532,21 +4693,24 @@
                         this.elements.inputCode.classList.remove('hidden');
                         this.elements.outputCode.classList.add('hidden');
                         this.updateLineNumbers(this.elements.inputCode.value);
+                        // アクティブなテキストエリアのスクロール位置に行番号を強制同期
+                        this.elements.lineNumbers.scrollTop = this.elements.inputCode.scrollTop;
                     } else {
                         tabOut.classList.add('active');
                         tabIn.classList.remove('active');
                         this.elements.outputCode.classList.remove('hidden');
                         this.elements.inputCode.classList.add('hidden');
                         this.updateLineNumbers(this.elements.outputCode.value);
+                        // アクティブなテキストエリアのスクロール位置に行番号を強制同期
+                        this.elements.lineNumbers.scrollTop = this.elements.outputCode.scrollTop;
                     }
                 }
                 updateLineNumbers(code) {
                     const lines = code.split('\n').length;
-                    let numHtml = '';
-                    for (let i = 1; i <= Math.max(lines, 1); i++) {
-                        numHtml += i + "<br>";
-                    }
-                    this.elements.lineNumbers.innerHTML = numHtml;
+                    const maxLines = Math.max(lines, 1);
+                    // 配列結合を使用して文字列生成を高速化
+                    const numArr = Array.from({ length: maxLines }, (_, i) => i + 1);
+                    this.elements.lineNumbers.innerHTML = numArr.join("<br>");
                 }
                 resetAll() {
                     this.store.reset();
@@ -4625,14 +4789,22 @@
                     const text = document.getElementById('toast-text');
                     const icon = document.getElementById('toast-icon');
                     text.textContent = message;
-                    icon.innerHTML = '<i data-lucide="' + (type === 'success' ? 'check' : 'alert-circle') + '" class="w-4 h-4 text-emerald-400"></i>';
-                    toast.className = "fixed bottom-6 right-6 backdrop-blur-xl bg-slate-900/90 border border-slate-800/80 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50";
+
+                    const iconName = type === 'success' ? 'check' : (type === 'error' ? 'alert-triangle' : 'info');
+                    const iconColor = type === 'success' ? 'text-emerald-400' : (type === 'error' ? 'text-red-400' : 'text-sky-400');
+                    icon.innerHTML = `<i data-lucide="${iconName}" class="w-4 h-4 ${iconColor}"></i>`;
                     lucide.createIcons({ root: toast });
+
+                    // 表示用クラスの適用
+                    toast.classList.remove('opacity-0', 'translate-y-4', 'pointer-events-none');
+                    toast.classList.add('opacity-100', 'translate-y-0');
 
                     if (this.toastTimer) clearTimeout(this.toastTimer);
 
                     this.toastTimer = setTimeout(() => {
-                        toast.className = "fixed bottom-6 right-6 transform translate-y-10 opacity-0 bg-slate-900 border border-slate-800/80 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 pointer-events-none";
+                        // 非表示用クラスの適用
+                        toast.classList.remove('opacity-100', 'translate-y-0');
+                        toast.classList.add('opacity-0', 'translate-y-4', 'pointer-events-none');
                         this.toastTimer = null;
                     }, 3000);
                 }
@@ -4767,26 +4939,49 @@
                         } finally { this.showLoading(false); }
                     }, 100);
                 }
-                copyToClipboard() {
-                    const val = this.elements.outputCode.value; if (!val) return;
-                    const temp = document.createElement('textarea'); temp.value = val;
-                    document.body.appendChild(temp); temp.select();
+                async copyToClipboard() {
+                    const val = this.elements.outputCode.value;
+                    if (!val) return;
                     try {
-                        document.execCommand('copy');
+                        await navigator.clipboard.writeText(val);
                         this.showToast("成果物をクリップボードに格納", "success");
-                    } catch (e) { this.showToast("コピーエラー", "error"); }
-                    finally { document.body.removeChild(temp); }
+                    } catch (e) {
+                        this.showToast("コピーエラー", "error");
+                    }
                 }
                 downloadOutput() {
-                    const val = this.elements.outputCode.value; if (!val) return;
-                    const isHtml = this.store.currentMode === 'html';
-                    const filename = isHtml ? 'index.html' : 'bundle.js';
-                    const blob = new Blob([val], { type: isHtml ? 'text/html' : 'application/javascript' });
+                    const val = this.elements.outputCode.value;
+                    if (!val) return;
+
+                    const mode = this.store.currentMode;
+                    const lang = this.elements.directLangSelect.value;
+
+                    let ext = 'js';
+                    let mime = 'application/javascript';
+
+                    // モードと選択言語に応じて拡張子とMIMEタイプを動的解決
+                    if (mode === 'html' || (mode === 'direct' && lang === 'html')) {
+                        ext = 'html';
+                        mime = 'text/html';
+                    } else if (mode === 'direct' && lang === 'css') {
+                        ext = 'css';
+                        mime = 'text/css';
+                    }
+
+                    // ファイル名の決定
+                    const filename = mode === 'smart' ? 'bundle.js' : `optimized.${ext}`;
+
+                    const blob = new Blob([val], { type: mime });
                     const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a'); a.href = url; a.download = filename;
-                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
                     URL.revokeObjectURL(url);
-                    this.showToast("成果物をダウンロードしました", "success");
+
+                    this.showToast(`成果物 (${filename}) を保存しました`, "success");
                 }
                 isSupportedFile(filename) {
                     const ext = filename.split('.').pop().toLowerCase();
