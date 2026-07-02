@@ -1008,8 +1008,10 @@
                 description: '定数値の自動伝播 (Constant Propagation)',
                 unsafe: false,
                 tags: ['semantic', 'optimization'],
-                match(node, t, dfaQuery) {
-                    if (!dfaQuery) return false;
+                match(node, t, dfaQuery, path) {
+                    if (!dfaQuery || !path) return false;
+                    //  参照（Read）されているIdentifierのみ対象とし、定義（Write）は除外
+                    if (!path.isReferencedIdentifier()) return false;
                     return dfaQuery.isConstant(node.name) && dfaQuery.getConstantValue(node.name) !== null;
                 },
                 candidates(node, t, dfaQuery) {
@@ -1029,8 +1031,9 @@
                 description: '変数参照の直接コピー展開 (Copy Propagation)',
                 unsafe: false,
                 tags: ['semantic', 'copy'],
-                match(node, t, dfaQuery) {
-                    if (!dfaQuery) return false;
+                match(node, t, dfaQuery, path) {
+                    if (!dfaQuery || !path) return false;
+                    if (!path.isReferencedIdentifier()) return false;
                     const val = dfaQuery.getConstantValue(node.name);
                     return val && t.isIdentifier(val) && dfaQuery.isConstant(val.name);
                 },
@@ -1087,8 +1090,9 @@
                 description: '単一参照変数の自動インライン展開',
                 unsafe: false,
                 tags: ['semantic', 'inline'],
-                match(node, t, dfaQuery) {
-                    if (!dfaQuery) return false;
+                match(node, t, dfaQuery, path) {
+                    if (!dfaQuery || !path) return false;
+                    if (!path.isReferencedIdentifier()) return false;
                     return dfaQuery.canInline(node.name);
                 },
                 candidates(node, t, dfaQuery) {
@@ -1262,8 +1266,16 @@
                     if (node.id || node.generator || node.async) return false;
                     let hasThisOrArgs = false;
                     path.traverse({
-                        ThisExpression() { hasThisOrArgs = true; },
-                        Identifier(p) { if (p.node.name === 'arguments') hasThisOrArgs = true; }
+                        ThisExpression(p) {
+                            hasThisOrArgs = true;
+                            p.stop(); // 早期離脱でO(n^2)を防止
+                        },
+                        Identifier(p) {
+                            if (p.node.name === 'arguments') {
+                                hasThisOrArgs = true;
+                                p.stop();
+                            }
+                        }
                     });
                     return !hasThisOrArgs;
                 },
@@ -1811,7 +1823,11 @@
                     if (!targetKey) return [node];
 
                     const [objName, propName] = targetKey.split('.');
-                    const aliasId = path.scope.generateUidIdentifier("cse_" + objName + "_" + propName);
+
+                    // CQSを守るため generateUidIdentifier を使用せず、固定の擬似乱数名を使用。
+                    // 実際に名前が競合してもManglePassで安全な名前に圧縮されるため問題ない。
+                    const safeIdString = "__cse_" + objName + "_" + propName + "_" + Math.floor(Math.random() * 1000);
+                    const aliasId = t.identifier(safeIdString);
 
                     const newBody = [];
                     newBody.push(
@@ -2103,7 +2119,14 @@
                                         if (candidates.length === 0) {
                                             const beforeCost = ctx.costModel.estimateCost(path.node, parentPrec, path.scope);
                                             const snippet = safeSnippet(path.node, t);
-                                            path.remove();
+
+                                            // Declaratorの最後の1つなら親のDeclarationごと消す
+                                            if (path.isVariableDeclarator() && path.parentPath && path.parentPath.node.declarations.length === 1) {
+                                                path.parentPath.remove();
+                                            } else {
+                                                path.remove();
+                                            }
+
                                             ctx.markDirty();
                                             ctx.trace.record(rule.id, iteration, phase.id, snippet, beforeCost, 0, true, 'dead-store removal');
                                             break;
@@ -2236,9 +2259,10 @@
             const { EncodingSelector } = window.App.require('src/encoding/EncodingSelector.js');
 
             class CompilerFacade {
-                // 内部ヘルパー: 単一JSコードブロックの最適化パイプライン
-                static runJsOptimization(sourceCode, options, scheduler, finalConfig, context, logger) {
+                //context は処理ブロックごとに生成し、状態汚染を防ぐ
+                static runJsOptimization(sourceCode, options, scheduler, finalConfig, logger) {
                     try {
+                        const context = new CompilationContext(options);
                         const parsed = Babel.transform(sourceCode, {
                             ast: true, code: false,
                             parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript'] }
@@ -2255,46 +2279,52 @@
                         if (activePostLoops.some(p => p.transforms.includes('terser-mangle')) && options.enableMangle && options.golfEnabled) {
                             code = TerserBackend.mangle(code, logger);
                         }
-                        return code;
+                        return { code, trace: context.trace.getEntries() };
                     } catch (e) {
                         logger.error("JS最適化例外: " + e.message);
-                        return sourceCode;
+                        return { code: sourceCode, trace: [] };
                     }
                 }
 
-                static compile(options, store, logger) {
-                    const finalConfig = { ...PipelineConfig };
+                static compile(options, logger) {
+                    //PipelineConfig を安全にディープコピーして設定汚染を防止
+                    const finalConfig = JSON.parse(JSON.stringify(PipelineConfig));
                     finalConfig.fixpointLoop.maxIterations = options.searchDepth || 10;
                     const scheduler = new PassScheduler(registry, finalConfig);
                     const scanner = new ProjectScanner();
-                    const context = new CompilationContext(options);
                     logger.info("[SoC Architecture] コンパイラコア始動完了");
 
                     let outputCode = "";
+                    let combinedTrace = [];
+
+                    //Linker のための CSS 圧縮コールバックを注入（Linkerの依存を排除）
+                    options.minifyCss = (css) => CssCompressor.minify(css);
 
                     if (options.mode === 'direct') {
                         if (options.directLang === 'js') {
-                            outputCode = this.runJsOptimization(options.directSourceCode, options, scheduler, finalConfig, context, logger);
+                            const res = this.runJsOptimization(options.directSourceCode, options, scheduler, finalConfig, logger);
+                            outputCode = res.code;
+                            combinedTrace = res.trace;
                         } else if (options.directLang === 'css') {
                             outputCode = CssCompressor.minify(options.directSourceCode);
                         } else if (options.directLang === 'html') {
                             outputCode = HtmlCompressor.minify(options.directSourceCode, options, logger);
                         }
                     } else if (options.mode === 'smart') {
-                        // SoC: Linkerは結合するだけ。最適化はFacadeが担当する。
-                        const bundledSource = Linker.link(options.jsEntryPoint, store, scanner, options, logger);
-                        outputCode = this.runJsOptimization(bundledSource, options, scheduler, finalConfig, context, logger);
-
+                        //store 直渡しをやめ、options.fs を使用
+                        const bundledSource = Linker.link(options.jsEntryPoint, options.fs, scanner, options, logger);
+                        const res = this.runJsOptimization(bundledSource, options, scheduler, finalConfig, logger);
+                        outputCode = res.code;
+                        combinedTrace = res.trace;
                     } else if (options.mode === 'html') {
-                        // SoC: HTMLの結合とJSインライン化を行う
-                        const linkedHtml = Linker.linkSingleHTML(options.htmlEntryPath, store, scanner, options, logger);
+                        const linkedHtml = Linker.linkSingleHTML(options.htmlEntryPath, options.fs, scanner, options, logger);
 
-                        // HTMLパーサーの衝突(scriptタグの早期クローズ誤認)を防ぐため、
-                        // 正規表現リテラルを避け RegExp コンストラクタを使用し、戻り値の終了タグは "</" + "script>" のように分割結合。
+                        // HTMLパーサーの衝突を防ぐため、RegExp コンストラクタで終了タグの判定を行います
                         const scriptMatchRegex = new RegExp('<script([^>]*)>\\/\\* __BUNDLE_TARGET__ \\*\\/([\\s\\S]*?)<\\/script>', 'gi');
                         const optimizedHtml = linkedHtml.replace(scriptMatchRegex, (m, attrs, content) => {
-                            const optCode = this.runJsOptimization(content, options, scheduler, finalConfig, context, logger);
-                            return "<script" + attrs + ">" + optCode + "</" + "script>";
+                            const res = this.runJsOptimization(content, options, scheduler, finalConfig, logger);
+                            combinedTrace.push(...res.trace);
+                            return "<script" + attrs + ">" + res.code + "</" + "script>";
                         });
                         outputCode = HtmlCompressor.minify(optimizedHtml, options, logger);
                     }
@@ -2307,8 +2337,8 @@
 
                     return {
                         code: outputCode,
-                        trace: context.trace.getEntries(),
-                        iterations: context.trace.getEntries().length
+                        trace: combinedTrace,
+                        iterations: combinedTrace.length
                     };
                 }
             }
@@ -2599,22 +2629,21 @@
 
     <script id="src/bundler/Linker.js">
         window.App.define('src/bundler/Linker.js', () => {
-            const { CssCompressor } = window.App.require('src/compression/CssCompressor.js');
-            const { HtmlCompressor } = window.App.require('src/compression/HtmlCompressor.js');
+            // CssCompressor の直接 import を削除し SoC を遵守
             class Linker {
-                static link(entryPoint, store, scanner, options, logger) {
+                static link(entryPoint, fs, scanner, options, logger) {
                     const visited = new Set();
                     const orderedModules = [];
                     const collect = (curr) => {
                         if (visited.has(curr)) return;
                         visited.add(curr);
-                        store.addUsedFile(curr);
-                        const file = store.getFile(curr);
+                        fs.addUsedFile(curr);
+                        const file = fs.getFile(curr);
                         if (!file || file.isBinary) return;
-                        const deps = scanner.extractDependencies(file.content, curr, store);
+                        const deps = scanner.extractDependencies(file.content, curr, fs);
                         deps.forEach(d => {
-                            const resolved = scanner.resolveRelativePath(curr, d, store);
-                            if (store.hasFile(resolved)) {
+                            const resolved = scanner.resolveRelativePath(curr, d, fs);
+                            if (fs.hasFile(resolved)) {
                                 collect(resolved);
                             }
                         });
@@ -2626,30 +2655,37 @@
                     let bundledCode = `const __m = {};\nconst require = (id) => {\n  if(!__m[id].e) {\n    __m[id].e = {};\n    __m[id].f(require, __m[id].e, __m[id]);\n  }\n  return __m[id].e;\n};\n`;
 
                     orderedModules.forEach((path) => {
-                        const file = store.getFile(path);
+                        const file = fs.getFile(path);
                         let moduleCode = "";
                         try {
-                            moduleCode = Babel.transform(file.content, {
-                                plugins: [
-                                    function (babel) {
-                                        return {
-                                            visitor: {
-                                                ImportDeclaration(p) {
-                                                    const relPath = p.node.source.value;
-                                                    p.node.source.value = scanner.resolveRelativePath(path, relPath, store);
-                                                },
-                                                CallExpression(p) {
-                                                    if (p.node.callee.name === 'require' && p.node.arguments.length === 1 && babel.types.isStringLiteral(p.node.arguments[0])) {
-                                                        const relPath = p.node.arguments[0].value;
-                                                        p.node.arguments[0].value = scanner.resolveRelativePath(path, relPath, store);
-                                                    }
+                            // CJS変換プラグインがStandalone環境にない場合のフォールバック
+                            const plugins = [
+                                function (babel) {
+                                    return {
+                                        visitor: {
+                                            ImportDeclaration(p) {
+                                                const relPath = p.node.source.value;
+                                                p.node.source.value = scanner.resolveRelativePath(path, relPath, fs);
+                                            },
+                                            CallExpression(p) {
+                                                if (p.node.callee.name === 'require' && p.node.arguments.length === 1 && babel.types.isStringLiteral(p.node.arguments[0])) {
+                                                    const relPath = p.node.arguments[0].value;
+                                                    p.node.arguments[0].value = scanner.resolveRelativePath(path, relPath, fs);
                                                 }
                                             }
                                         }
-                                    },
-                                    ['transform-modules-commonjs', { loose: true }]
-                                ],
-                                parserOpts: { sourceType: 'module' }
+                                    }
+                                }
+                            ];
+                            if (Babel.availablePlugins && Babel.availablePlugins['transform-modules-commonjs']) {
+                                plugins.push(['transform-modules-commonjs', { loose: true }]);
+                            } else {
+                                plugins.push(['env', { modules: 'commonjs' }]);
+                            }
+
+                            moduleCode = Babel.transform(file.content, {
+                                plugins: plugins,
+                                parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript'] }
                             }).code;
                         } catch (e) {
                             logger.warn(`[${path}] モジュール変換に失敗: ${e.message}`);
@@ -2661,14 +2697,13 @@
                     bundledCode += `\nrequire(${JSON.stringify(entryPoint)});`;
                     if (options.addStrict) bundledCode = `"use strict";\n` + bundledCode;
 
-                    // SoC修正: ここで CompilerFacade を呼ばず、結合した文字列をそのまま返す
                     return bundledCode;
                 }
 
-                static linkSingleHTML(entryHtml, store, scanner, options, logger) {
-                    const file = store.getFile(entryHtml);
+                static linkSingleHTML(entryHtml, fs, scanner, options, logger) {
+                    const file = fs.getFile(entryHtml);
                     if (!file) throw new Error("HTMLの解決に失敗しました: " + entryHtml);
-                    store.addUsedFile(entryHtml);
+                    fs.addUsedFile(entryHtml);
                     const parser = new DOMParser();
                     const doc = parser.parseFromString(file.content, 'text/html');
 
@@ -2677,49 +2712,77 @@
                         links.forEach(link => {
                             const href = link.getAttribute('href');
                             if (!href || href.startsWith('http') || href.startsWith('//')) return;
-                            const resolved = scanner.resolveRelativePath(entryHtml, href, store);
-                            if (store.hasFile(resolved)) {
-                                store.addUsedFile(resolved);
+                            const resolved = scanner.resolveRelativePath(entryHtml, href, fs);
+                            if (fs.hasFile(resolved)) {
+                                fs.addUsedFile(resolved);
                                 const style = doc.createElement('style');
-                                style.textContent = CssCompressor.minify(store.getFile(resolved).content);
+                                // Facadeから注入された minifyCss を使用
+                                style.textContent = options.minifyCss ? options.minifyCss(fs.getFile(resolved).content) : fs.getFile(resolved).content;
                                 link.replaceWith(style);
                                 logger.success("[CSS統合] スタイルブロック化インライン置換: " + href);
                             }
                         });
                     }
+
                     if (options.htmlOptJs) {
-                        const scripts = doc.querySelectorAll('script[src]');
+                        const scripts = doc.querySelectorAll('script');
+                        let virtualCounter = 0;
                         scripts.forEach(script => {
                             const src = script.getAttribute('src');
-                            if (!src || src.startsWith('http') || src.startsWith('//')) return;
-                            const resolved = scanner.resolveRelativePath(entryHtml, src, store);
-                            if (store.hasFile(resolved)) {
-                                store.addUsedFile(resolved);
-                                const jsSource = store.getFile(resolved).content;
+                            const type = script.getAttribute('type');
 
-                                // SoC修正: HTMLインラインJSの最適化は CompilerFacade 側で行うため、ここではマーカー付きで生ソースを注入する
-                                const newScript = doc.createElement('script');
-                                newScript.textContent = `/* __BUNDLE_TARGET__ */\n${jsSource}`;
-                                script.replaceWith(newScript);
-                                logger.info("[JS統合] 最適化キューに追加: " + src);
+                            if (src) {
+                                if (src.startsWith('http') || src.startsWith('//')) return;
+                                const resolved = scanner.resolveRelativePath(entryHtml, src, fs);
+                                if (fs.hasFile(resolved)) {
+                                    fs.addUsedFile(resolved);
+                                    if (type === 'module') script.removeAttribute('type');
+
+                                    //this.link -> Linker.link に統一
+                                    const bundledCode = Linker.link(resolved, fs, scanner, options, logger);
+                                    const newScript = doc.createElement('script');
+                                    newScript.textContent = `/* __BUNDLE_TARGET__ */\n${bundledCode}`;
+                                    script.replaceWith(newScript);
+                                    logger.info("[JS統合] 外部スクリプトをバンドルしてインライン化: " + src);
+                                }
+                            } else {
+                                const content = script.textContent;
+                                if (!content || !content.trim()) return;
+
+                                const isModule = type === 'module';
+                                const hasImports = content.includes('import ') || content.includes('require(');
+                                script.removeAttribute('type');
+
+                                if (isModule || hasImports) {
+                                    const virtualPath = `${entryHtml.replace('.html', '')}_virtual_${virtualCounter++}.js`;
+                                    // 仮想ファイルのサイズとバイナリフラグを正しくセット
+                                    fs.addFile(virtualPath, content, content.length, false);
+
+                                    const bundledCode = Linker.link(virtualPath, fs, scanner, options, logger);
+                                    script.textContent = `/* __BUNDLE_TARGET__ */\n${bundledCode}`;
+                                    logger.info("[JS統合] インラインモジュールを仮想ファイルとしてバンドル化しました");
+                                } else {
+                                    script.textContent = `/* __BUNDLE_TARGET__ */\n${content}`;
+                                    logger.info("[JS統合] インラインスクリプトを最適化キューに追加");
+                                }
                             }
                         });
                     }
+
                     if (options.htmlOptImg) {
                         const imgs = doc.querySelectorAll('img[src]');
                         imgs.forEach(img => {
                             const src = img.getAttribute('src');
                             if (!src || src.startsWith('http') || src.startsWith('data:')) return;
-                            const resolved = scanner.resolveRelativePath(entryHtml, src, store);
-                            if (store.hasFile(resolved)) {
-                                store.addUsedFile(resolved);
-                                img.setAttribute('src', store.getFile(resolved).content);
+                            const resolved = scanner.resolveRelativePath(entryHtml, src, fs);
+                            if (fs.hasFile(resolved)) {
+                                fs.addUsedFile(resolved);
+                                img.setAttribute('src', fs.getFile(resolved).content);
                                 logger.success("[画像 DataURL 化] インライン展開に成功: " + src);
                             }
                         });
                     }
-                    let finalHtml = "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
-                    return finalHtml;
+                    return "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
                 }
             }
             return { Linker };
@@ -3178,10 +3241,19 @@
                                 htmlEntryPath: this.elements.htmlEntrySelect.value, htmlOptCss: this.elements.htmlOptCss.checked,
                                 htmlOptJs: this.elements.htmlOptJs.checked, htmlOptImg: this.elements.htmlOptImg.checked,
                                 jsEntryPoint: this.elements.entryPointSelect.value, directSourceCode: this.elements.inputCode.value,
-                                directLang: this.elements.directLangSelect.value
+                                directLang: this.elements.directLangSelect.value,
+                                //UI Store を隠蔽する仮想FSアダプタを注入
+                                fs: {
+                                    hasFile: (p) => this.store.hasFile(p),
+                                    getFile: (p) => this.store.getFile(p),
+                                    getFilePaths: () => this.store.getFilePaths(),
+                                    addUsedFile: (p) => this.store.addUsedFile(p),
+                                    addFile: (p, c, s, b) => this.store.addFile(p, c, s, b)
+                                }
                             };
                             const { CompilerFacade } = window.App.require('src/engine/CompilerFacade.js');
-                            const result = CompilerFacade.compile(options, this.store, logger);
+                            // store の直渡しを廃止
+                            const result = CompilerFacade.compile(options, logger);
                             if (result && result.code) {
                                 this.elements.outputCode.value = result.code;
                                 this.switchEditorTab('output');
