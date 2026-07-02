@@ -399,6 +399,25 @@
                             </div>
                             <input class="nop-slider" id="search-depth" type="range" max="50" min="1" value="10">
                         </div>
+                        <div class="flex flex-col gap-1 mt-1.5">
+                            <div class="flex items-center justify-between text-slate-300 text-xs">
+                                <span class="font-medium">タイムアウト制限 (秒) <span
+                                        class="font-mono text-[10px] opacity-50 ml-1">(timeoutLimit)</span></span>
+                                <span class="font-bold font-mono text-amber-400" id="timeout-limit-val">15</span>
+                            </div>
+                            <input class="nop-slider" id="timeout-limit" type="range" max="60" min="5" step="5"
+                                value="15">
+                        </div>
+                        <div class="flex items-center justify-between text-slate-300 text-xs mt-1.5">
+                            <span class="font-medium">非同期実行 (UIハング防止) <span
+                                    class="font-mono text-[10px] opacity-50 ml-1">(enableAsyncGolf)</span></span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="enable-async-golf" class="sr-only peer" checked>
+                                <div
+                                    class="w-7 h-4 bg-[#1e2125] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-500 shadow-inner">
+                                </div>
+                            </label>
+                        </div>
                         <div class="my-1 border-white/5 border-t"></div>
                         <div id="golf-options-container" class="flex flex-col gap-2.5"></div>
                         <div class="my-1 border-white/5 border-t"></div>
@@ -533,7 +552,13 @@
                             <div
                                 class="rounded-full animate-spin border-4 border-brand-500 border-t-transparent h-10 w-10">
                             </div>
-                            <p class="text-sm font-semibold text-slate-300">モジュールを解析中...
+                            <p class="text-sm font-semibold text-slate-300" id="loading-message">モジュールを解析中...</p>
+                            <p class="text-xs text-slate-400 font-mono hidden" id="loading-progress"></p>
+                            <button
+                                class="nop-btn text-xs px-3 py-1.5 bg-red-950/40 border border-red-500/20 text-red-400 hover:bg-red-900/40 hidden mt-2 shadow-md"
+                                id="abort-btn">
+                                <i class="h-3.5 w-3.5 mr-1.5 inline" data-lucide="x-circle"></i>最適化を中断
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1164,11 +1189,11 @@
 
                 isEventNode(path) {
                     return path.isIdentifier() ||
-                           path.isAssignmentExpression() ||
-                           path.isVariableDeclarator() ||
-                           path.isCallExpression() ||
-                           path.isNewExpression() ||
-                           path.isUpdateExpression();
+                        path.isAssignmentExpression() ||
+                        path.isVariableDeclarator() ||
+                        path.isCallExpression() ||
+                        path.isNewExpression() ||
+                        path.isUpdateExpression();
                 }
             }
 
@@ -1317,7 +1342,7 @@
                         Object.values(path.scope.bindings).forEach(binding => {
                             const declScope = binding.scope.getFunctionParent();
                             const allRefs = [...binding.referencePaths, ...binding.constantViolations];
-                            
+
                             const isEscaped = allRefs.some(ref => {
                                 const refFuncScope = ref.scope.getFunctionParent();
                                 return refFuncScope !== declScope;
@@ -1454,10 +1479,16 @@
 
     <script id="src/analysis/DFAQuery.js">
         window.App.define('src/analysis/DFAQuery.js', () => {
+            const { BrowserEnvironment, SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
+            const { BUILTIN_GLOBALS } = window.App.require('src/core/Globals.js');
+
             class DFAQuery {
                 constructor(reachingDefStates = new WeakMap(), liveVarStates = new WeakMap(), nodeMap = new WeakMap(), escapedVars = new Set()) {
-                    const { BrowserEnvironment } = window.App.require('src/core/KnowledgeBase.js');
+                    // DIとしてクラスプロパティに保持
                     this.env = BrowserEnvironment;
+                    this.signatures = SIGNATURES;
+                    this.builtinGlobals = BUILTIN_GLOBALS;
+
                     this.reachingDefStates = reachingDefStates;
                     this.liveVarStates = liveVarStates;
                     this.nodeMap = nodeMap;
@@ -1598,6 +1629,14 @@
                     return false;
                 }
 
+                // Transform層に知識ベースの詳細(require)を意識させないための窓口API
+                checkSignature(path, expectedSignatures) {
+                    const origin = this.resolveOrigin(path);
+                    if (!origin) return false;
+                    const expected = Array.isArray(expectedSignatures) ? expectedSignatures : [expectedSignatures];
+                    return expected.some(sigKey => origin === this.signatures[sigKey]);
+                }
+
                 isSafeGlobalAccess(name, atPath) {
                     if (!atPath || !atPath.scope) return false;
                     if (atPath.scope.hasBinding(name)) return false;
@@ -1607,8 +1646,7 @@
                         isUsedAsFreeGlobal = (typeof programScope.hasGlobal === 'function' && programScope.hasGlobal(name)) ||
                             (programScope.globals && (name in programScope.globals));
                     }
-                    const { BUILTIN_GLOBALS } = window.App.require('src/core/Globals.js');
-                    return isUsedAsFreeGlobal || BUILTIN_GLOBALS.has(name);
+                    return isUsedAsFreeGlobal || this.builtinGlobals.has(name);
                 }
 
                 resolveOrigin(path, visited = new Set()) {
@@ -1620,10 +1658,10 @@
                             const propertyPath = path.get('property');
                             if (!propertyPath.isStringLiteral()) return null;
                         }
-                        
+
                         const objOrigin = this.resolveOrigin(path.get('object'), visited);
                         if (!objOrigin) return null;
-                        
+
                         const propName = path.node.computed ? path.node.property.value : path.node.property.name;
                         return this._resolvePropertySignature(objOrigin, propName);
                     }
@@ -1631,10 +1669,10 @@
                     if (path.isIdentifier()) {
                         const name = path.node.name;
                         const binding = path.scope.getBinding(name);
-                        
+
                         if (binding) {
                             if (visited.has(binding.path)) return null;
-                            
+
                             if (binding.constant && binding.path.isVariableDeclarator()) {
                                 visited.add(binding.path);
                                 const initPath = binding.path.get('init');
@@ -1659,16 +1697,16 @@
                         const globalDef = this.env.globals[propName];
                         return globalDef ? (globalDef.signature || `global.${propName}`) : null;
                     }
-                    
+
                     const parts = objSignature.split('.');
                     if (parts[0] !== 'global') return null;
-                    
+
                     let current = this.env.globals[parts[1]];
                     for (let i = 2; i < parts.length; i++) {
                         if (!current || !current.properties) return null;
                         current = current.properties[parts[i]];
                     }
-                    
+
                     if (current && current.properties && current.properties[propName]) {
                         return current.properties[propName].signature;
                     }
@@ -2163,9 +2201,8 @@
                     if (!dfaQuery || !path) return false;
                     if (!t.isCallExpression(node) || node.arguments.length !== 1) return false;
 
-                    const origin = dfaQuery.resolveOrigin(path.get('callee'));
-                    const { SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
-                    return origin === SIGNATURES.MATH_FLOOR || origin === SIGNATURES.MATH_TRUNC;
+                    // 外部依存を排除し、DFAQuery に完全委譲
+                    return dfaQuery.checkSignature(path.get('callee'), ['MATH_FLOOR', 'MATH_TRUNC']);
                 },
                 candidates(node, t) {
                     const arg = node.arguments[0];
@@ -2191,9 +2228,8 @@
                     if (!dfaQuery || !path) return false;
                     if (!t.isCallExpression(node) || node.arguments.length !== 1) return false;
 
-                    const origin = dfaQuery.resolveOrigin(path.get('callee'));
-                    const { SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
-                    return origin === SIGNATURES.MATH_ROUND;
+                    // 外部依存を排除
+                    return dfaQuery.checkSignature(path.get('callee'), 'MATH_ROUND');
                 },
                 candidates(node, t) {
                     const arg = node.arguments[0];
@@ -2219,9 +2255,8 @@
                     if (!dfaQuery || !path) return false;
                     if (!t.isCallExpression(node) || node.arguments.length !== 1) return false;
 
-                    const origin = dfaQuery.resolveOrigin(path.get('callee'));
-                    const { SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
-                    return origin === SIGNATURES.PARSE_INT;
+                    // 外部依存を排除
+                    return dfaQuery.checkSignature(path.get('callee'), 'PARSE_INT');
                 },
                 candidates(node, t) {
                     return [
@@ -2338,9 +2373,8 @@
                         return false;
                     }
 
-                    const origin = dfaQuery.resolveOrigin(path.get('callee'));
-                    const { SIGNATURES } = window.App.require('src/core/KnowledgeBase.js');
-                    if (origin !== SIGNATURES.DOCUMENT_GET_ELEMENT_BY_ID) return false;
+                    // 外部依存を排除
+                    if (!dfaQuery.checkSignature(path.get('callee'), 'DOCUMENT_GET_ELEMENT_BY_ID')) return false;
 
                     const idName = node.arguments[0].value;
                     return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(idName) && !path.scope.hasBinding(idName);
@@ -2826,6 +2860,7 @@
             const { ReachingDefinitionsProblem, LiveVariablesProblem } = window.App.require('src/analysis/DataFlowProblems.js');
             const { DFAQuery } = window.App.require('src/analysis/DFAQuery.js');
             const { PREC } = window.App.require('src/core/ByteEstimator.js');
+            const { CompilationContext } = window.App.require('src/core/CompilationContext.js');
 
             function getParentPrecedence(path) {
                 const parent = path.parent;
@@ -3087,20 +3122,22 @@
     <script id="src/engine/FixpointLoop.js">
         window.App.define('src/engine/FixpointLoop.js', () => {
             class BeamSearchOrchestrator {
-                constructor(initialCtx, scheduler, beamWidth, maxIterations, logger) {
+                constructor(initialCtx, scheduler, beamWidth, maxIterations, logger, options) {
                     this.beam = [initialCtx];
                     this.scheduler = scheduler;
                     this.beamWidth = beamWidth;
                     this.maxIterations = maxIterations;
                     this.logger = logger;
+                    this.options = options || {};
                     this.nextBeam = [];
                 }
                 addNewWorlds(worlds) {
                     this.nextBeam.push(...worlds);
                 }
-                run() {
+                async run() {
                     let iteration = 1;
                     let reason = "上限到達";
+                    const startTime = performance.now();
 
                     while (iteration <= this.maxIterations && this.beam.length > 0) {
                         this.nextBeam = [];
@@ -3130,6 +3167,31 @@
                         this.beam = allWorlds;
 
                         const anyDirty = this.beam.some(ctx => ctx.isDirty());
+
+                        // 進捗コールバックの呼び出し
+                        const bestCost = this.beam[0] ? this.beam[0].currentCost : 0;
+                        if (this.options.onProgress) {
+                            this.options.onProgress({
+                                iteration,
+                                maxIterations: this.maxIterations,
+                                bestCost,
+                                worldsCount: this.beam.length
+                            });
+                        }
+
+                        // 非同期実行時の制御 (UIフリーズ防止、中断、タイムアウト)
+                        if (this.options.enableAsyncGolf) {
+                            await new Promise(resolve => setTimeout(resolve, 0));
+                            if (window.App.abortOptimization) {
+                                reason = "ユーザーによる中断";
+                                break;
+                            }
+                            if (this.options.timeoutLimit && (performance.now() - startTime > this.options.timeoutLimit * 1000)) {
+                                reason = "タイムアウト到達";
+                                break;
+                            }
+                        }
+
                         if (!anyDirty) {
                             reason = "全世界線が正常収束";
                             break;
@@ -3146,10 +3208,12 @@
             }
 
             class FixpointLoop {
-                static execute(ctx, scheduler, maxIterations) {
+                static async execute(ctx, scheduler, maxIterations, options) {
                     let iteration = 1;
                     let reason = "上限到達";
                     ctx.currentCost = ctx.costModel.measureExact(ctx.ast);
+                    const startTime = performance.now();
+                    const opts = options || {};
 
                     while (iteration <= maxIterations) {
                         ctx.resetDirty();
@@ -3168,12 +3232,34 @@
                                 }
                             }
                         }
+
+                        ctx.costModel.invalidateCache();
+                        const newCost = ctx.costModel.measureExact(ctx.ast);
+
+                        if (opts.onProgress) {
+                            opts.onProgress({
+                                iteration,
+                                maxIterations,
+                                bestCost: newCost
+                            });
+                        }
+
+                        if (opts.enableAsyncGolf) {
+                            await new Promise(resolve => setTimeout(resolve, 0));
+                            if (window.App.abortOptimization) {
+                                reason = "ユーザーによる中断";
+                                break;
+                            }
+                            if (opts.timeoutLimit && (performance.now() - startTime > opts.timeoutLimit * 1000)) {
+                                reason = "タイムアウト到達";
+                                break;
+                            }
+                        }
+
                         if (!ctx.isDirty()) {
                             reason = "正常収束 (これ以上の最適化なし)";
                             break;
                         }
-                        ctx.costModel.invalidateCache();
-                        const newCost = ctx.costModel.measureExact(ctx.ast);
                         if (newCost >= ctx.currentCost) {
                             reason = `振動/悪化検知 (cost: ${ctx.currentCost} ➔ ${newCost}) により安全に離脱`;
                             break;
@@ -3220,7 +3306,7 @@
                 }
 
                 // contextName 引数を追加し、エラー時にソースプレビューを出力
-                static runJsOptimization(sourceCode, options, scheduler, finalConfig, logger, contextName = "Unknown") {
+                static async runJsOptimization(sourceCode, options, scheduler, finalConfig, logger, contextName = "Unknown") {
                     try {
                         const trimmedSource = sourceCode.trim();
                         if (trimmedSource.startsWith('<') && (trimmedSource.toLowerCase().includes('<!doctype html') || trimmedSource.toLowerCase().startsWith('<html'))) {
@@ -3253,8 +3339,8 @@
                         }
 
                         const loopResult = options.enableBeamSearch
-                            ? new BeamSearchOrchestrator(context, scheduler, options.beamWidth, finalConfig.fixpointLoop.maxIterations, logger).run()
-                            : FixpointLoop.execute(context, scheduler, finalConfig.fixpointLoop.maxIterations);
+                            ? await new BeamSearchOrchestrator(context, scheduler, options.beamWidth, finalConfig.fixpointLoop.maxIterations, logger, options).run()
+                            : await FixpointLoop.execute(context, scheduler, finalConfig.fixpointLoop.maxIterations, options);
 
                         logger.success(`[最適化ループ (${contextName})] ` + loopResult.reason + " - 合計 " + loopResult.iterations + " 周回");
                         const finalCtx = loopResult.bestCtx || context;
@@ -3276,7 +3362,7 @@
                     }
                 }
 
-                static compile(options, logger) {
+                static async compile(options, logger) {
                     const finalConfig = JSON.parse(JSON.stringify(PipelineConfig));
                     finalConfig.fixpointLoop.maxIterations = options.searchDepth || 10;
 
@@ -3323,7 +3409,7 @@
                         }
 
                         if (actualLang === 'js') {
-                            const res = this.runJsOptimization(options.directSourceCode, options, scheduler, finalConfig, logger, "Direct JS");
+                            const res = await this.runJsOptimization(options.directSourceCode, options, scheduler, finalConfig, logger, "Direct JS");
                             outputCode = res.code;
                             combinedTrace = res.trace;
                         } else if (actualLang === 'css') {
@@ -3334,31 +3420,45 @@
                             options.fs.addFile(virtualEntry, options.directSourceCode, options.directSourceCode.length, false);
 
                             const linkedHtml = Linker.linkSingleHTML(virtualEntry, options.fs, scanner, options, logger);
-                            const scriptMatchRegex = new RegExp('<script([^>]*)>\\/\\* __BUNDLE_TARGET__ \\*\\/([\\s\\S]*?)<\\/script>', 'gi');
 
-                            const optimizedHtml = linkedHtml.replace(scriptMatchRegex, (m, attrs, content) => {
-                                const res = this.runJsOptimization(content, options, scheduler, finalConfig, logger, "Direct HTML Inline Script");
+                            // 非同期インラインスクリプト最適化
+                            let optimizedHtml = linkedHtml;
+                            const matches = [];
+                            const regex = new RegExp('<script([^>]*)>\\/\\* __BUNDLE_TARGET__ \\*\\/([\\s\\S]*?)<\\/script>', 'gi');
+                            let match;
+                            while ((match = regex.exec(linkedHtml)) !== null) {
+                                matches.push({ full: match[0], attrs: match[1], content: match[2] });
+                            }
+                            for (const m of matches) {
+                                const res = await this.runJsOptimization(m.content, options, scheduler, finalConfig, logger, "Direct HTML Inline Script");
                                 combinedTrace.push(...res.trace);
-                                return "<script" + attrs + ">" + res.code + "</" + "script>";
-                            });
+                                optimizedHtml = optimizedHtml.replace(m.full, "<script" + m.attrs + ">" + res.code + "</" + "script>");
+                            }
 
                             outputCode = HtmlCompressor.minify(optimizedHtml, options, logger);
                         }
                     } else if (options.mode === 'smart') {
                         const bundledSource = Linker.link(options.jsEntryPoint, options.fs, scanner, options, logger);
                         // コンテキスト名を渡す
-                        const res = this.runJsOptimization(bundledSource, options, scheduler, finalConfig, logger, "Smart Bundler");
+                        const res = await this.runJsOptimization(bundledSource, options, scheduler, finalConfig, logger, "Smart Bundler");
                         outputCode = res.code;
                         combinedTrace = res.trace;
                     } else if (options.mode === 'html') {
                         const linkedHtml = Linker.linkSingleHTML(options.htmlEntryPath, options.fs, scanner, options, logger);
-                        const scriptMatchRegex = new RegExp('<script([^>]*)>\\/\\* __BUNDLE_TARGET__ \\*\\/([\\s\\S]*?)<\\/script>', 'gi');
-                        const optimizedHtml = linkedHtml.replace(scriptMatchRegex, (m, attrs, content) => {
-                            // コンテキスト名を渡す
-                            const res = this.runJsOptimization(content, options, scheduler, finalConfig, logger, "HTML Inline Script");
+
+                        // 非同期インラインスクリプト最適化
+                        let optimizedHtml = linkedHtml;
+                        const matches = [];
+                        const regex = new RegExp('<script([^>]*)>\\/\\* __BUNDLE_TARGET__ \\*\\/([\\s\\S]*?)<\\/script>', 'gi');
+                        let match;
+                        while ((match = regex.exec(linkedHtml)) !== null) {
+                            matches.push({ full: match[0], attrs: match[1], content: match[2] });
+                        }
+                        for (const m of matches) {
+                            const res = await this.runJsOptimization(m.content, options, scheduler, finalConfig, logger, "HTML Inline Script");
                             combinedTrace.push(...res.trace);
-                            return "<script" + attrs + ">" + res.code + "</" + "script>";
-                        });
+                            optimizedHtml = optimizedHtml.replace(m.full, "<script" + m.attrs + ">" + res.code + "</" + "script>");
+                        }
                         outputCode = HtmlCompressor.minify(optimizedHtml, options, logger);
                     }
 
@@ -3384,7 +3484,7 @@
                 static mangle(code, logger) {
                     try {
                         const parsed = Babel.transform(code, { ast: true, code: false });
-                        const traverse = Babel.packages.traverse.default;
+                        const traverse = Babel.traverse;
                         const reserved = new Set(['do', 'if', 'in', 'for', 'let', 'new', 'try', 'var', 'case', 'else', 'with', 'class', 'const', 'super', 'catch', 'break', 'throw', 'while', 'yield', 'return', 'delete', 'switch', 'typeof', 'default', 'extends', 'finally', 'continue', 'debugger', 'function', 'arguments', 'null', 'true', 'false', 'NaN', 'undefined', 'window', 'document', 'Math', 'console', 'navigator', 'App']);
 
                         traverse(parsed.ast, {
@@ -4050,6 +4150,13 @@
                     this.elements.modeHtmlBtn = document.getElementById('mode-html-btn');
                     this.elements.modeSmartBtn = document.getElementById('mode-smart-btn');
                     this.elements.modeDirectBtn = document.getElementById('mode-direct-btn');
+
+                    this.elements.timeoutLimit = document.getElementById('timeout-limit');
+                    this.elements.timeoutLimitVal = document.getElementById('timeout-limit-val');
+                    this.elements.enableAsyncGolf = document.getElementById('enable-async-golf');
+                    this.elements.loadingMessage = document.getElementById('loading-message');
+                    this.elements.loadingProgress = document.getElementById('loading-progress');
+                    this.elements.abortBtn = document.getElementById('abort-btn');
                 }
                 renderDynamicSettings() {
                     const { PipelineConfig } = window.App.require('src/engine/PipelineConfig.js');
@@ -4237,6 +4344,14 @@
                     this.elements.beamWidth.addEventListener('input', (e) => {
                         this.elements.beamWidthVal.textContent = e.target.value;
                     });
+                    this.elements.timeoutLimit.addEventListener('input', (e) => {
+                        this.elements.timeoutLimitVal.textContent = e.target.value;
+                    });
+                    this.elements.abortBtn.addEventListener('click', () => {
+                        window.App.abortOptimization = true;
+                        this.elements.loadingMessage.textContent = "最適化を中断しています...";
+                        this.elements.abortBtn.disabled = true;
+                    });
                     this.elements.inputCode.addEventListener('input', () => {
                         this.updateLineNumbers(this.elements.inputCode.value);
                     });
@@ -4311,7 +4426,6 @@
                             this.elements.inputCode.value = file.content;
                             this.switchEditorTab('input');
 
-                            // 単一ファイルでもHTMLなら「HTMLモード(バンドル・最適化対応)」に自動切替
                             if (['html', 'htm'].includes(ext)) {
                                 this.switchMode('html');
                             } else if (['js', 'ts', 'jsx', 'tsx'].includes(ext)) {
@@ -4328,7 +4442,7 @@
                         const jsKeys = keys.filter(k => ['js', 'ts'].includes(k.split('.').pop().toLowerCase()));
                         if (jsKeys.length === keys.length) this.switchMode('smart');
                         else this.switchMode('html');
-                        this.switchEditorTab('input'); // 複数読み込み時は入力画面を維持
+                        this.switchEditorTab('input');
                     }
                     this.updatePreviewFilename();
                 }
@@ -4372,7 +4486,6 @@
                             opt.value = p; opt.textContent = p;
                             this.elements.htmlEntrySelect.appendChild(opt);
                         });
-                        // index.html があれば自動優先選択
                         const defaultHtml = htmlKeys.find(k => k.toLowerCase().endsWith('index.html')) || htmlKeys[0];
                         this.elements.htmlEntrySelect.value = defaultHtml;
                     }
@@ -4385,17 +4498,9 @@
                             opt.value = p; opt.textContent = p;
                             this.elements.entryPointSelect.appendChild(opt);
                         });
-                        // index.js / main.js / app.js / index.ts 等があれば自動優先選択
                         const priorityNames = ['index.js', 'main.js', 'app.js', 'index.ts', 'main.ts', 'app.ts'];
-                        let defaultJs = jsKeys[0];
-                        for (const name of priorityNames) {
-                            const found = jsKeys.find(k => k.toLowerCase().endsWith('/' + name) || k.toLowerCase() === name);
-                            if (found) {
-                                defaultJs = found;
-                                break;
-                            }
-                        }
-                        this.elements.entryPointSelect.value = defaultJs;
+                        const match = jsKeys.find(p => priorityNames.includes(p.split('/').pop()));
+                        if (match) this.elements.entryPointSelect.value = match;
                     }
                 }
                 updatePreviewFilename() {
@@ -4468,6 +4573,9 @@
                     this.elements.beamDetails.classList.add('opacity-25', 'pointer-events-none');
                     this.elements.searchDepth.value = 10;
                     this.elements.searchDepthVal.textContent = "10";
+                    this.elements.timeoutLimit.value = 15;
+                    this.elements.timeoutLimitVal.textContent = "15";
+                    this.elements.enableAsyncGolf.checked = true;
                     this.elements.optGolf.checked = true;
                     this.elements.golfDetails.classList.remove('opacity-25', 'pointer-events-none');
 
@@ -4480,12 +4588,23 @@
                     this.switchMode('direct');
                     this.showToast("完全リセット", "info");
                 }
-                showLoading(show, message = "処理中...") {
+                showLoading(show, message = "処理中...", isGolf = false) {
                     if (show) {
-                        this.elements.loadingOverlay.querySelector('p').textContent = message;
+                        this.elements.loadingMessage.textContent = message;
                         this.elements.loadingOverlay.classList.remove('hidden');
+                        if (isGolf && this.elements.enableAsyncGolf.checked) {
+                            this.elements.abortBtn.classList.remove('hidden');
+                            this.elements.abortBtn.disabled = false;
+                            this.elements.loadingProgress.classList.remove('hidden');
+                            this.elements.loadingProgress.textContent = "";
+                        } else {
+                            this.elements.abortBtn.classList.add('hidden');
+                            this.elements.loadingProgress.classList.add('hidden');
+                        }
                     } else {
                         this.elements.loadingOverlay.classList.add('hidden');
+                        this.elements.abortBtn.classList.add('hidden');
+                        this.elements.loadingProgress.classList.add('hidden');
                     }
                 }
                 addLog(message, type = 'info') {
@@ -4507,10 +4626,9 @@
                     const icon = document.getElementById('toast-icon');
                     text.textContent = message;
                     icon.innerHTML = '<i data-lucide="' + (type === 'success' ? 'check' : 'alert-circle') + '" class="w-4 h-4 text-emerald-400"></i>';
-                    toast.className = "fixed bottom-6 right-6 backdrop-blur-xl bg-slate-900/90...";
-                    lucide.createIcons({ root: toast }); // 対象をToast内部のみに限定
+                    toast.className = "fixed bottom-6 right-6 backdrop-blur-xl bg-slate-900/90 border border-slate-800/80 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50";
+                    lucide.createIcons({ root: toast });
 
-                    // 既存のタイマーがあればクリア
                     if (this.toastTimer) clearTimeout(this.toastTimer);
 
                     this.toastTimer = setTimeout(() => {
@@ -4548,19 +4666,23 @@
                     });
                 }
                 runBundle() {
-                    this.elements.logContent.innerHTML = ''; // ビルド開始時にログエリアをクリア
-                    this.showLoading(true, "SoC パイプライン最適化中...");
+                    this.elements.logContent.innerHTML = '';
+                    const isGolf = this.elements.optGolf.checked;
+                    this.showLoading(true, "SoC パイプライン最適化中...", isGolf);
                     this.elements.logSection.classList.remove('hidden');
                     const logger = {
                         info: (msg) => this.addLog(msg, 'info'), success: (msg) => this.addLog(msg, 'success'),
                         warn: (msg) => this.addLog(msg, 'warn'), error: (msg) => this.addLog(msg, 'error')
                     };
-                    setTimeout(() => {
+
+                    window.App.abortOptimization = false;
+
+                    setTimeout(async () => {
                         try {
                             const options = {
                                 mode: this.store.currentMode,
                                 addStrict: this.elements.optStrict.checked,
-                                golfEnabled: this.elements.optGolf.checked,
+                                golfEnabled: isGolf,
                                 searchDepth: parseInt(this.elements.searchDepth.value),
                                 enableBeamSearch: this.elements.golfBeamSearch.checked,
                                 beamWidth: parseInt(this.elements.beamWidth.value),
@@ -4571,6 +4693,15 @@
                                 jsEntryPoint: this.elements.entryPointSelect.value,
                                 directSourceCode: this.elements.inputCode.value,
                                 directLang: this.elements.directLangSelect.value,
+                                timeoutLimit: parseInt(this.elements.timeoutLimit.value),
+                                enableAsyncGolf: this.elements.enableAsyncGolf.checked,
+                                onProgress: (progress) => {
+                                    if (progress.worldsCount) {
+                                        this.elements.loadingProgress.textContent = `周回: ${progress.iteration}/${progress.maxIterations} (生存世界線: ${progress.worldsCount}, ベスト: ${progress.bestCost} Byte)`;
+                                    } else {
+                                        this.elements.loadingProgress.textContent = `周回: ${progress.iteration}/${progress.maxIterations} (ベスト: ${progress.bestCost} Byte)`;
+                                    }
+                                },
                                 //UI Store を隠蔽する仮想FSアダプタを注入
                                 fs: {
                                     hasFile: (p) => this.store.hasFile(p),
@@ -4604,7 +4735,11 @@
                             }
                             const { CompilerFacade } = window.App.require('src/engine/CompilerFacade.js');
                             // store の直渡しを廃止
-                            const result = CompilerFacade.compile(options, logger);
+                            const result = await CompilerFacade.compile(options, logger);
+
+                            if (window.App.abortOptimization) {
+                                this.addLog("最適化がユーザーによって中断されました。中断時点での最適コードを出力します。", "warn");
+                            }
                             if (result && result.code) {
                                 this.elements.outputCode.value = result.code;
                                 this.switchEditorTab('output');
@@ -4620,7 +4755,11 @@
                                 }
                                 const finalSize = new Blob([result.code]).size;
                                 this.updateGolfScoreboard(originalSize, finalSize);
-                                this.showToast("バンドル正常終了", "success");
+                                if (window.App.abortOptimization) {
+                                    this.showToast("中断してコードを出力しました", "warn");
+                                } else {
+                                    this.showToast("バンドル正常終了", "success");
+                                }
                             }
                         } catch (err) {
                             this.addLog("ビルド異常終了: " + err.message, "error");
