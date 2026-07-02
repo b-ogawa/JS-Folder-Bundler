@@ -12,27 +12,232 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
+        :root {
+            --bg-main: #2b2f35;
+            --text-main: #e0e6ed;
+            --text-muted: #8b9bb4;
+            --u-shadow-light: -5px -5px 12px rgba(255, 255, 255, 0.05);
+            --u-shadow-dark: 5px 5px 12px rgba(0, 0, 0, 0.35);
+            --u-inset-light: inset -4px -4px 8px rgba(255, 255, 255, 0.04);
+            --u-inset-dark: inset 4px 4px 8px rgba(0, 0, 0, 0.45);
+            --accent: #4da6ff;
+            --danger: #ff5c5c;
+            --success: #5cff85;
+            --r-md: 14px;
+            --r-sm: 8px;
+        }
+
         ::-webkit-scrollbar {
             width: 8px;
             height: 8px
         }
 
         ::-webkit-scrollbar-track {
-            background: #0f172a
+            background: rgba(0, 0, 0, 0.15);
         }
 
         ::-webkit-scrollbar-thumb {
-            background: #334155;
-            border-radius: 4px
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: #475569
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Neumorphic + Glassmorphic Panel */
+        .nop-panel {
+            background: rgba(43, 47, 53, 0.75);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: var(--r-md);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), var(--u-shadow-light), var(--u-shadow-dark);
+        }
+
+        .nop-panel-inset {
+            background: #1e2125;
+            border-radius: var(--r-sm);
+            box-shadow: var(--u-inset-light), var(--u-inset-dark);
+            border: 1px solid rgba(0, 0, 0, 0.15);
+        }
+
+        /* Neumorphic Buttons */
+        .nop-btn {
+            background: var(--bg-main);
+            border: none;
+            border-radius: var(--r-sm);
+            box-shadow: var(--u-shadow-light), var(--u-shadow-dark);
+            color: var(--text-muted);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        .nop-btn:hover:not(:disabled) {
+            color: var(--accent);
+            transform: translateY(-1px);
+        }
+
+        .nop-btn:active:not(:disabled),
+        .nop-btn.active:not(:disabled) {
+            box-shadow: var(--u-inset-light), var(--u-inset-dark);
+            color: var(--accent);
+            transform: translateY(1px);
+        }
+
+        .nop-btn:disabled {
+            opacity: 0.25;
+            cursor: not-allowed;
+            box-shadow: none;
+            border: 1px solid rgba(255, 255, 255, 0.02);
+        }
+
+        /* Inputs & Selects */
+        .nop-input,
+        .nop-select {
+            background: #1e2125;
+            border: none;
+            border-radius: var(--r-sm);
+            box-shadow: var(--u-inset-light), var(--u-inset-dark);
+            color: var(--accent);
+            outline: none;
+            transition: box-shadow 0.2s;
+        }
+
+        .nop-input:focus,
+        .nop-select:focus {
+            box-shadow: var(--u-inset-light), var(--u-inset-dark), 0 0 0 1px var(--accent);
+        }
+
+        /* Segmented Switch */
+        .segmented-switch {
+            display: flex;
+            background: #1e2125;
+            padding: 4px;
+            border-radius: var(--r-sm);
+            box-shadow: var(--u-inset-light), var(--u-inset-dark);
+            gap: 4px;
+        }
+
+        .segmented-switch button {
+            flex: 1;
+            border: none;
+            background: none;
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        .segmented-switch button.active {
+            background: var(--bg-main);
+            box-shadow: var(--u-shadow-light), var(--u-shadow-dark);
+            color: var(--accent);
+        }
+
+        /* Range Slider */
+        .nop-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            background: transparent;
+            margin: 8px 0;
+        }
+
+        .nop-slider::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 6px;
+            background: #1e2125;
+            border-radius: 10px;
+            box-shadow: var(--u-inset-light), var(--u-inset-dark);
+            cursor: pointer;
+        }
+
+        .nop-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            margin-top: -5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .nop-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+        }
+
+        /* Custom Checkbox */
+        .nop-checkbox-container {
+            display: flex;
+            align-items: center;
+            position: relative;
+            padding-left: 26px;
+            cursor: pointer;
+            font-size: 12px;
+            user-select: none;
+            margin-bottom: 2px;
+        }
+
+        .nop-checkbox-container input {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+            height: 0;
+            width: 0;
+        }
+
+        .checkmark {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            transform: translateY(-50%);
+            height: 16px;
+            width: 16px;
+            background-color: #1e2125;
+            border-radius: 4px;
+            box-shadow: var(--u-inset-light), var(--u-inset-dark);
+        }
+
+        .nop-checkbox-container input:checked~.checkmark {
+            background-color: var(--accent);
+            box-shadow: none;
+        }
+
+        .checkmark:after {
+            content: "";
+            position: absolute;
+            display: none;
+        }
+
+        .nop-checkbox-container input:checked~.checkmark:after {
+            display: block;
+        }
+
+        .nop-checkbox-container .checkmark:after {
+            left: 5px;
+            top: 2px;
+            width: 5px;
+            height: 9px;
+            border: solid #1e2125;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
         }
     </style>
 </head>
 
-<body class="flex flex-col antialiased bg-slate-950 font-sans min-h-screen text-slate-100">
+<body class="flex flex-col antialiased bg-[#2b2f35] font-sans min-h-screen text-[#e0e6ed]">
     <script>
         // 依存関係管理システム (App Sandbox Module Loader)
         window.App = {
@@ -46,17 +251,17 @@
         };
     </script>
 
-    <header class="border-slate-800 backdrop-blur-md bg-slate-900/50 border-b sticky top-0 z-50">
+    <header class="border-white/5 backdrop-blur-xl bg-[#2b2f35]/60 border-b sticky top-0 z-50 shadow-md">
         <div class="flex items-center justify-between flex-col gap-4 sm:flex-row max-w-7xl mx-auto px-4 py-4">
             <div class="flex items-center gap-3">
-                <div class="bg-brand-600/20 border border-brand-500/30 p-2 rounded-xl text-brand-500">
-                    <i class="h-8 w-8" data-lucide="cpu"></i>
+                <div class="nop-panel-inset p-2 text-[var(--accent)] flex items-center justify-center"
+                    style="border-radius: 12px;">
+                    <i class="h-7 w-7" data-lucide="cpu"></i>
                 </div>
                 <div>
-                    <h1
-                        class="flex items-center gap-2 font-bold bg-clip-text bg-gradient-to-r from-white text-transparent text-xl to-slate-400 tracking-tight">
+                    <h1 class="flex items-center gap-2 font-bold text-white text-xl tracking-tight">
                         JS Folder Bundler<span
-                            class="text-xs border rounded-full bg-amber-500/20 border-amber-500/30 font-mono font-normal px-2 py-0.5 text-amber-400">Strict
+                            class="text-xs px-2 py-0.5 rounded-full font-mono font-normal text-amber-400 nop-panel-inset">Strict
                             SoC Modular ⛳️</span>
                     </h1>
                     <p class="text-xs text-slate-400">Layer 1〜5の厳密な分離。データ駆動型の Match / Candidates プロトコルによるAST極限収束エンジン</p>
@@ -64,7 +269,7 @@
             </div>
             <div class="flex items-center gap-3">
                 <span
-                    class="flex items-center text-xs border bg-emerald-500/10 border-emerald-500/20 gap-1 px-2.5 py-1 rounded-full text-emerald-400">
+                    class="flex items-center text-xs gap-1.5 px-3 py-1.5 rounded-full text-emerald-400 nop-panel-inset">
                     <span class="rounded-full animate-pulse bg-emerald-400 h-2 w-2"></span>100% ローカルサンドボックス実行
                 </span>
             </div>
@@ -73,36 +278,30 @@
 
     <main class="gap-6 flex-1 grid grid-cols-1 lg:grid-cols-12 max-w-7xl mx-auto px-4 py-6 w-full">
         <div class="flex flex-col gap-6 lg:col-span-5">
-            <div class="flex items-center flex-col justify-center bg-slate-900/30 border-2 border-dashed border-slate-800 cursor-pointer group hover:bg-brand-500/5 hover:border-brand-500/50 overflow-hidden p-8 relative rounded-2xl text-center transition-all"
+            <div class="flex items-center flex-col justify-center border-2 border-dashed border-white/5 bg-slate-900/10 cursor-pointer group hover:bg-white/5 overflow-hidden p-8 relative rounded-2xl text-center transition-all shadow-xl shadow-black/10"
                 id="drop-zone">
                 <input class="hidden" id="folder-input" type="file" multiple directory webkitdirectory>
                 <input class="hidden" id="files-input" type="file" multiple>
-                <div
-                    class="group-hover:bg-brand-500/10 bg-slate-800/50 group-hover:scale-110 group-hover:text-brand-500 mb-4 p-4 rounded-2xl text-slate-400 transition-all">
+                <div class="nop-panel-inset mb-4 p-4 text-slate-400 group-hover:text-[var(--accent)] transition-all">
                     <i class="h-10 w-10" data-lucide="folder-up"></i>
                 </div>
-                <h3 class="font-bold text-sm">フォルダをドラッグ＆ドロップ</h3>
+                <h3 class="font-bold text-sm text-slate-200">フォルダをドラッグ＆ドロップ</h3>
                 <p class="text-xs text-slate-400 max-w-xs mb-4">HTML、CSS、JS、画像を含むプロジェクト構造をフラットにロード</p>
-                <div class="flex gap-2">
-                    <button
-                        class="flex items-center text-xs border bg-slate-800 border-slate-700 font-semibold gap-1.5 hover:bg-slate-700 rounded-lg transition-colors px-4 py-2"
-                        data-action="triggerFolderInput">
+                <div class="flex gap-3">
+                    <button class="nop-btn text-xs px-4 py-2 gap-1.5" data-action="triggerFolderInput">
                         <i class="h-3.5 w-3.5" data-lucide="folder"></i>フォルダを選択
                     </button>
-                    <button
-                        class="flex items-center text-xs border bg-slate-800 border-slate-700 font-semibold gap-1.5 hover:bg-slate-700 rounded-lg transition-colors px-4 py-2"
-                        data-action="triggerFilesInput">
+                    <button class="nop-btn text-xs px-4 py-2 gap-1.5" data-action="triggerFilesInput">
                         <i class="h-3.5 w-3.5" data-lucide="files"></i>複数ファイル
                     </button>
                 </div>
             </div>
 
-            <div id="settings-card"
-                class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 flex flex-col gap-5">
-                <div class="flex items-center justify-between border-b border-slate-800/60 pb-3">
+            <div id="settings-card" class="nop-panel p-5 flex flex-col gap-5">
+                <div class="flex items-center justify-between border-b border-white/5 pb-3">
                     <div class="flex items-center gap-2">
-                        <i class="h-5 text-brand-500 w-5" data-lucide="sliders"></i>
-                        <h2 class="font-bold text-sm">ビルド・ゴルフ設定</h2>
+                        <i class="h-5 text-[var(--accent)] w-5" data-lucide="sliders"></i>
+                        <h2 class="font-bold text-sm text-slate-200">ビルド・ゴルフ設定</h2>
                     </div>
                     <button class="flex items-center text-xs transition-colors gap-1 hover:text-red-300 text-red-400"
                         data-action="resetAll" id="clear-btn">
@@ -110,62 +309,46 @@
                     </button>
                 </div>
 
-                <div class="flex border-slate-800/80 border rounded-xl bg-slate-950 flex-wrap gap-1 p-1">
-                    <button
-                        class="text-xs border rounded-lg py-2 border-slate-800 bg-slate-900 flex-1 font-semibold shadow-sm text-brand-400 transition-all"
-                        data-action="switchMode" id="mode-html-btn" data-value="html">🌐 HTML単一化</button>
-                    <button
-                        class="text-xs text-slate-400 flex-1 font-semibold hover:text-slate-200 py-2 rounded-lg transition-all"
-                        data-action="switchMode" id="mode-smart-btn" data-value="smart">📦 JSスマート結合</button>
-                    <button
-                        class="text-xs text-slate-400 flex-1 font-semibold hover:text-slate-200 py-2 rounded-lg transition-all"
-                        data-action="switchMode" id="mode-direct-btn" data-value="direct">直接入力</button>
+                <div class="segmented-switch">
+                    <button class="active" data-action="switchMode" id="mode-html-btn" data-value="html">🌐
+                        HTML単一化</button>
+                    <button data-action="switchMode" id="mode-smart-btn" data-value="smart">📦 JSスマート結合</button>
+                    <button data-action="switchMode" id="mode-direct-btn" data-value="direct">直接入力</button>
                 </div>
 
                 <div class="flex flex-col gap-4" id="html-options">
                     <div>
                         <label class="text-xs text-slate-400 font-medium block mb-1.5">エントリーHTML</label>
-                        <select
-                            class="text-xs border rounded-lg py-2 border-slate-800 bg-slate-950 focus:border-brand-500 focus:outline-none font-mono px-3 text-slate-200 w-full"
-                            id="html-entry-select"></select>
+                        <select class="nop-select text-xs py-2 px-3 w-full font-mono" id="html-entry-select"></select>
                     </div>
-                    <div class="flex flex-col border border-slate-800/80 bg-slate-950 rounded-xl gap-2.5 p-3">
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-brand-500"
-                                id="html-opt-css" type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer"
-                                for="html-opt-css">CSSファイルをスタイルに変換</label>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-brand-500" id="html-opt-js"
-                                type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer"
-                                for="html-opt-js">JSを統合してインライン展開</label>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-brand-500"
-                                id="html-opt-img" type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer"
-                                for="html-opt-img">ローカル画像をDataURLに変換</label>
-                        </div>
+                    <div
+                        class="flex flex-col border border-white/5 bg-slate-950/20 rounded-xl gap-2.5 p-3 shadow-inner">
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="html-opt-css" type="checkbox" checked>
+                            <span class="checkmark"></span>CSSファイルをスタイルに変換
+                        </label>
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="html-opt-js" type="checkbox" checked>
+                            <span class="checkmark"></span>JSを統合してインライン展開
+                        </label>
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="html-opt-img" type="checkbox" checked>
+                            <span class="checkmark"></span>ローカル画像をDataURLに変換
+                        </label>
                     </div>
                 </div>
 
                 <div class="flex flex-col hidden gap-4" id="smart-options">
                     <div>
                         <label class="text-xs text-slate-400 font-medium block mb-1.5">JSエントリーポイント</label>
-                        <select
-                            class="text-xs border rounded-lg py-2 border-slate-800 bg-slate-950 focus:border-brand-500 focus:outline-none font-mono px-3 text-slate-200 w-full"
-                            id="entry-point-select"></select>
+                        <select class="nop-select text-xs py-2 px-3 w-full font-mono" id="entry-point-select"></select>
                     </div>
                 </div>
 
                 <div class="flex flex-col hidden gap-4" id="direct-options">
                     <div class="flex items-center gap-2">
                         <label class="text-xs text-slate-400 font-medium">対象言語:</label>
-                        <select
-                            class="text-xs border rounded-lg border-slate-800 bg-slate-950 font-mono px-3 text-slate-200 py-1"
-                            id="direct-lang-select">
+                        <select class="nop-select text-xs px-3 py-1" id="direct-lang-select">
                             <option value="js">JavaScript (ASTゴルフ)</option>
                             <option value="html">HTML (極限圧縮)</option>
                             <option value="css">CSS (構造圧縮)</option>
@@ -173,88 +356,71 @@
                     </div>
                 </div>
 
-                <div class="flex flex-col border-slate-800/80 border-t gap-3 pt-4">
+                <div class="flex flex-col border-t border-white/5 gap-3 pt-4">
                     <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2 font-bold text-amber-500 text-xs tracking-wider uppercase">
+                        <div class="flex items-center gap-2 font-bold text-amber-400 text-xs tracking-wider uppercase">
                             <i class="h-4 w-4" data-lucide="award"></i>ASTコードゴルフオプション
                         </div>
                         <label class="items-center cursor-pointer relative inline-flex">
                             <input class="sr-only peer" id="opt-golf" type="checkbox" checked>
                             <div
-                                class="rounded-full after:absolute after:bg-slate-400 after:border after:border-slate-300 after:content-[''] after:h-4 after:left-[2px] after:rounded-full after:top-[2px] after:transition-all after:w-4 bg-slate-800 h-5 peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600 peer-checked:after:bg-white">
+                                class="rounded-full border border-white/5 after:absolute after:bg-slate-400 after:border after:border-slate-300 after:content-[''] after:h-4 after:left-[2px] after:rounded-full after:top-[2px] after:transition-all after:w-4 bg-[#1e2125] h-5 w-9 peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:bg-amber-600 shadow-inner">
                             </div>
                         </label>
                     </div>
-                    <div class="flex flex-col border rounded-xl gap-2.5 bg-amber-500/5 border-amber-500/20 p-3.5 transition-all"
+                    <div class="flex flex-col border border-white/5 rounded-xl gap-2.5 bg-amber-500/5 p-3.5 transition-all shadow-inner"
                         id="golf-details">
                         <div class="flex flex-col gap-1">
                             <div class="flex items-center justify-between text-slate-300 text-xs">
                                 <span class="font-medium">最大探索深度 (収束ループ上限数)</span>
                                 <span class="font-bold font-mono text-amber-400" id="search-depth-val">10</span>
                             </div>
-                            <input
-                                class="accent-amber-500 appearance-none bg-slate-950 cursor-pointer h-1.5 rounded-lg w-full"
-                                id="search-depth" type="range" max="50" min="1" value="10">
+                            <input class="nop-slider" id="search-depth" type="range" max="50" min="1" value="10">
                         </div>
-                        <div class="my-1 border-slate-800/60 border-t"></div>
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-amber-600" id="golf-mangle"
-                                type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer" for="golf-mangle">変数の短縮一文字化
-                                (Mangler)</label>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-amber-600"
-                                id="golf-console" type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer" for="golf-console">console.log
-                                出力の安全除去</label>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-amber-600"
-                                id="golf-extreme" type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer" for="golf-extreme">極限構文短縮 (Boolean /
-                                If-else ➔ 単一式)</label>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-amber-600"
-                                id="golf-global-alias" type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer" for="golf-global-alias">APIグローバルエイリアス
-                                (Math, document等の短縮)</label>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-amber-600"
-                                id="golf-cross-asset" type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer" for="golf-cross-asset">三位一体クロスアセット同期圧縮
-                                (id/class最適化)</label>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-amber-600" id="golf-packer"
-                                type="checkbox" checked>
-                            <label class="text-xs text-slate-300 cursor-pointer" for="golf-packer">LZ77自己解凍パッカー
-                                (RegPack/Crush評価)</label>
-                        </div>
+                        <div class="my-1 border-white/5 border-t"></div>
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="golf-mangle" type="checkbox" checked>
+                            <span class="checkmark"></span>変数の短縮一文字化 (Mangler)
+                        </label>
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="golf-console" type="checkbox" checked>
+                            <span class="checkmark"></span>console.log 出力の安全除去
+                        </label>
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="golf-extreme" type="checkbox" checked>
+                            <span class="checkmark"></span>極限構文短縮 (Boolean / If-else ➔ 単一式)
+                        </label>
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="golf-global-alias" type="checkbox" checked>
+                            <span class="checkmark"></span>APIグローバルエイリアス (Math, document等の短縮)
+                        </label>
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="golf-cross-asset" type="checkbox" checked>
+                            <span class="checkmark"></span>三位一体クロスアセット同期圧縮 (id/class最適化)
+                        </label>
+                        <label class="nop-checkbox-container text-slate-300">
+                            <input id="golf-packer" type="checkbox" checked>
+                            <span class="checkmark"></span>LZ77自己解凍パッカー (RegPack/Crush評価)
+                        </label>
                     </div>
                 </div>
-                <div class="flex flex-col gap-3 border-t pt-4 border-slate-800/60">
-                    <div class="flex items-center gap-2">
-                        <input class="border-slate-800 bg-slate-900 h-4 rounded w-4 text-brand-500" id="opt-strict"
-                            type="checkbox" checked>
-                        <label class="text-xs text-slate-300 cursor-pointer" for="opt-strict">先頭に "use strict";
-                            を宣言する</label>
-                    </div>
+                <div class="flex flex-col gap-3 border-t border-white/5 pt-4">
+                    <label class="nop-checkbox-container text-slate-300">
+                        <input id="opt-strict" type="checkbox" checked>
+                        <span class="checkmark"></span>先頭に "use strict"; を宣言する
+                    </label>
                 </div>
                 <button
-                    class="flex items-center gap-2 font-bold bg-brand-600 hover:bg-brand-500 justify-center py-3 rounded-xl shadow-brand-600/15 shadow-lg text-white transition-all w-full"
+                    class="nop-btn w-full py-3 text-white bg-gradient-to-r from-brand-600 to-brand-500 font-bold tracking-wider rounded-xl shadow-lg shadow-black/20"
                     data-action="runBundle" id="bundle-btn">
-                    <i class="h-4 w-4" data-lucide="play"></i>SoCゴルフコンパイルを実行
+                    <i class="h-4 w-4 mr-1.5 inline" data-lucide="play"></i>SoCゴルフコンパイルを実行
                 </button>
             </div>
-            <div class="flex flex-col border border-slate-800/80 bg-slate-900/40 p-5 rounded-2xl hidden min-h-[250px]"
-                id="file-list-card">
-                <div class="flex items-center justify-between border-b border-slate-800/60 pb-3 mb-3">
-                    <div class="flex items-center gap-2"><i class="h-5 text-brand-500 w-5"
+            <div class="nop-panel p-5 hidden min-h-[250px]" id="file-list-card">
+                <div class="flex items-center justify-between border-b border-white/5 pb-3 mb-3">
+                    <div class="flex items-center gap-2"><i class="h-5 text-[var(--accent)] w-5"
                             data-lucide="folder-tree"></i>
-                        <h2 class="font-bold text-sm">検出されたアセット一覧 (<span id="file-count">0</span>)</h2>
+                        <h2 class="font-bold text-sm text-slate-200">検出されたアセット一覧 (<span id="file-count">0</span>)</h2>
                     </div>
                 </div>
                 <div class="flex flex-col gap-1 flex-1 font-mono max-h-[300px] overflow-y-auto pr-1 text-xs"
@@ -263,58 +429,60 @@
         </div>
 
         <div class="flex flex-col gap-6 h-[calc(100vh-120px)] lg:col-span-7 min-h-[500px]">
-            <div class="flex items-center justify-between flex-col gap-4 sm:flex-row bg-gradient-to-r border border-amber-500/20 from-amber-600/10 hidden p-4 rounded-2xl to-brand-600/10"
-                id="golf-scoreboard">
+            <div class="nop-panel flex items-center justify-between flex-col gap-4 sm:flex-row hidden p-4"
+                id="golf-scoreboard"
+                style="background: rgba(245, 158, 11, 0.03); border-color: rgba(245, 158, 11, 0.15);">
                 <div class="flex items-center gap-3">
-                    <div class="p-3 border rounded-xl bg-amber-500/10 border-amber-500/20 text-amber-500">
+                    <div class="p-3 border rounded-xl bg-amber-500/10 border-amber-500/20 text-amber-400 shadow-inner">
                         <i class="animate-bounce h-6 w-6" data-lucide="award"></i>
                     </div>
                     <div>
                         <div class="text-xs text-slate-400 font-bold">⛳️ GOLF SCOREBOARD</div>
                         <div class="flex items-center gap-2 font-extrabold text-amber-400 text-lg">極限の削減に成功！<span
-                                class="text-xs font-mono px-2 py-0.5 bg-red-500 font-bold rounded text-white"
+                                class="text-xs font-mono px-2 py-0.5 bg-red-600/80 border border-white/5 font-bold rounded text-white"
                                 id="golf-rank-badge">RANK SSS</span></div>
                     </div>
                 </div>
-                <div class="flex font-mono gap-4 sm:gap-6">
+                <div
+                    class="flex font-mono gap-4 sm:gap-6 bg-slate-950/40 border border-white/5 p-2 rounded-xl shadow-inner">
                     <div class="text-center">
                         <div class="text-slate-500 text-[10px]">元容量</div>
                         <div class="font-bold text-sm text-slate-400" id="golf-orig-size">0 KB</div>
                     </div>
-                    <div class="flex items-center text-slate-700">➔</div>
+                    <div class="flex items-center text-slate-600">➔</div>
                     <div class="text-center">
                         <div class="text-slate-500 text-[10px]">最適化後</div>
                         <div class="font-bold text-sm text-emerald-400" id="golf-final-size">0 KB</div>
                     </div>
-                    <div class="border-slate-800 text-center border-l pl-4 sm:pl-6">
+                    <div class="border-white/10 text-center border-l pl-4 sm:pl-6">
                         <div class="text-slate-500 text-[10px]">極限削減率</div>
                         <div class="text-base font-extrabold text-amber-500" id="golf-reduction">-0.0%</div>
                     </div>
                 </div>
             </div>
 
-            <div
-                class="flex flex-col border border-slate-800/80 bg-slate-900/40 p-5 rounded-2xl flex-1 overflow-hidden relative">
-                <div class="flex items-center justify-between border-b border-slate-800/60 pb-3 mb-4">
+            <div class="nop-panel p-5 flex flex-col flex-1 overflow-hidden relative">
+                <div class="flex items-center justify-between border-b border-white/5 pb-3 mb-4">
                     <div class="flex items-center gap-2">
-                        <div class="rounded-full bg-slate-700 h-3 w-3"></div>
+                        <div class="rounded-full bg-slate-600 h-3 w-3 shadow-inner"></div>
                         <span class="text-xs font-mono ml-2 text-slate-400" id="preview-filename">index.html</span>
                     </div>
                     <div class="flex gap-2">
+                        <button class="nop-btn text-xs font-semibold gap-1.5 px-3 py-1.5" data-action="copyToClipboard"
+                            id="copy-btn" disabled>
+                            <i class="h-3.5 w-3.5" data-lucide="copy"></i>コピー
+                        </button>
                         <button
-                            class="flex items-center text-xs border bg-slate-800 border-slate-700 font-semibold gap-1.5 hover:bg-slate-700 rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-50 px-3 py-1.5 text-slate-300"
-                            data-action="copyToClipboard" id="copy-btn" disabled><i class="h-3.5 w-3.5"
-                                data-lucide="copy"></i>コピー</button>
-                        <button
-                            class="text-xs font-semibold rounded-lg transition-all bg-brand-600 disabled:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-brand-500 px-3 py-1.5 text-white"
-                            data-action="downloadOutput" id="download-btn" disabled><i class="h-3.5 w-3.5"
-                                data-lucide="download"></i>保存</button>
+                            class="nop-btn text-xs font-semibold rounded-lg bg-brand-600 text-white border border-white/10 px-3 py-1.5 shadow-md hover:bg-brand-500 disabled:opacity-30"
+                            data-action="downloadOutput" id="download-btn" disabled>
+                            <i class="h-3.5 w-3.5 mr-1 inline" data-lucide="download"></i>保存
+                        </button>
                     </div>
                 </div>
 
-                <div class="flex flex-col border rounded-xl bg-slate-950 overflow-hidden border-slate-800 font-mono hidden max-h-[180px] mb-4 p-4 text-xs"
+                <div class="flex flex-col border border-white/5 rounded-xl bg-slate-950/50 backdrop-blur-md overflow-hidden font-mono hidden max-h-[180px] mb-4 p-4 text-xs shadow-inner"
                     id="process-log">
-                    <div class="flex items-center justify-between border-b border-slate-900 mb-2 pb-2 text-slate-400">
+                    <div class="flex items-center justify-between border-b border-white/5 mb-2 pb-2 text-slate-400">
                         <span class="flex items-center gap-1.5 font-bold text-amber-400"><i class="h-3.5 w-3.5"
                                 data-lucide="history"></i>Fixpoint Loop Trace (最適化収束追跡ログ)</span><span
                             class="text-slate-500 text-[10px]" id="trace-stats">0 走査</span>
@@ -322,27 +490,22 @@
                     <div class="space-y-1 flex-1 overflow-y-auto" id="log-content"></div>
                 </div>
 
-                <div
-                    class="flex flex-col border border-slate-800/80 bg-slate-950 rounded-xl flex-1 overflow-hidden relative">
-                    <div class="flex border-slate-800/80 bg-slate-900 text-xs border-b font-semibold select-none">
-                        <button
-                            class="flex items-center gap-2 border-b-2 px-5 py-2.5 bg-slate-800/50 border-brand-500 text-brand-400"
-                            data-action="switchEditorTab" id="tab-input" data-tab="input"><i class="h-4 w-4"
-                                data-lucide="pencil"></i>入力 (Input)</button>
-                        <button
-                            class="flex items-center gap-2 border-b-2 px-5 py-2.5 border-transparent hover:text-slate-300 text-slate-500"
-                            data-action="switchEditorTab" id="tab-output" data-tab="output"><i class="h-4 w-4"
-                                data-lucide="terminal"></i>出力 (Output)</button>
+                <div class="flex flex-col flex-1 overflow-hidden relative">
+                    <div class="segmented-switch mb-3">
+                        <button class="active" data-action="switchEditorTab" id="tab-input" data-tab="input"><i
+                                class="h-3.5 w-3.5 inline mr-1" data-lucide="pencil"></i>入力 (Input)</button>
+                        <button data-action="switchEditorTab" id="tab-output" data-tab="output"><i
+                                class="h-3.5 w-3.5 inline mr-1" data-lucide="terminal"></i>出力 (Output)</button>
                     </div>
-                    <div class="flex flex-1 relative">
-                        <div class="text-xs font-mono bg-slate-950 border-r border-slate-800/80 pr-3 py-4 select-none text-right text-slate-600 w-12"
+                    <div class="nop-panel-inset flex flex-1 relative overflow-hidden">
+                        <div class="text-xs font-mono bg-transparent border-r border-white/5 pr-3 py-4 select-none text-right text-slate-600 w-12 h-full overflow-hidden leading-relaxed"
                             id="line-numbers">1</div><textarea
-                            class="text-xs font-mono bg-slate-950 focus:outline-none text-slate-200 animate-none flex-1 leading-relaxed overflow-auto p-4 resize-none whitespace-pre"
+                            class="text-xs font-mono bg-transparent focus:outline-none text-slate-200 animate-none flex-1 leading-relaxed overflow-auto p-4 resize-none whitespace-pre relative z-10"
                             id="input-code"
-                            placeholder="// 最適化したいソースコードをペースト、または左エリアへプロジェクトフォルダをロードしてください。"></textarea><textarea
-                            class="text-xs font-mono bg-slate-950 focus:outline-none flex-1 leading-relaxed overflow-auto p-4 resize-none whitespace-pre hidden text-emerald-400"
+                            placeholder="// 最最適化したいソースコードをペースト、または左エリアへプロジェクトフォルダをロードしてください。"></textarea><textarea
+                            class="text-xs font-mono bg-transparent focus:outline-none flex-1 leading-relaxed overflow-auto p-4 resize-none whitespace-pre hidden text-emerald-400 relative z-10"
                             id="output-code" placeholder="// 極限ゴルフ圧縮後のコードがここに出力されます。" readonly></textarea>
-                        <div class="flex items-center flex-col hidden absolute backdrop-blur-sm bg-slate-950/80 gap-3 inset-0 justify-center z-10"
+                        <div class="flex items-center flex-col hidden absolute backdrop-blur-sm bg-slate-950/80 gap-3 inset-0 justify-center z-20"
                             id="loading-overlay">
                             <div
                                 class="rounded-full animate-spin border-4 border-brand-500 border-t-transparent h-10 w-10">
@@ -354,10 +517,10 @@
             </div>
         </div>
     </main>
-    <footer class="text-xs py-4 bg-slate-950 border-slate-900 border-t text-center text-slate-500">
+    <footer class="text-xs py-4 bg-transparent border-t border-white/5 text-center text-slate-600">
         <p>JS Folder Bundler SoC Edition </p>
     </footer>
-    <div class="flex items-center gap-2 py-3 rounded-xl transition-all bg-slate-900 border border-slate-800/80 bottom-6 duration-300 fixed opacity-0 px-4 right-6 shadow-2xl text-xs transform translate-y-10 z-50"
+    <div class="flex items-center gap-2 py-3 rounded-xl transition-all bg-slate-900 border border-white/10 bottom-6 duration-300 fixed opacity-0 px-4 right-6 shadow-2xl text-xs transform translate-y-10 z-50"
         id="toast"><span id="toast-icon"></span><span class="font-medium" id="toast-text">メッセージ</span></div>
 
     <!-- ==========================================================================
@@ -2577,19 +2740,13 @@
                     this.usedFiles.clear();
                 }
                 addFile(path, content, size, isBinary) {
-                    this.files[path] = {
-                        content,
-                        size,
-                        isBinary
-                    };
+                    this.files[path] = { content, size, isBinary };
                 }
                 deleteFile(path) {
                     delete this.files[path];
                 }
                 getFile(path) {
-                    return this.files[path] ? {
-                        ...this.files[path]
-                    } : null;
+                    return this.files[path] ? { ...this.files[path] } : null;
                 }
                 hasFile(path) {
                     return !!this.files[path];
@@ -2604,28 +2761,23 @@
                     this.usedFiles.clear();
                 }
                 get filesStore() {
-                    return {
-                        ...this.files
-                    };
+                    return { ...this.files };
                 }
                 get usedFilesSet() {
                     return new Set(this.usedFiles);
                 }
             }
-            return {
-                Store: new UIStore()
-            };
+            return { Store: new UIStore() };
         });
     </script>
 
     <script id="src/ui/UIManager.js">
         window.App.define('src/ui/UIManager.js', () => {
-            const { Store } = window.App.require('src/ui/Store.js');
-            const { CompilerFacade } = window.App.require('src/engine/CompilerFacade.js');
             class UIManager {
                 constructor(store) {
                     this.store = store;
                     this.elements = {};
+                    this.toastTimer = null; // タイマー競合バグを防止
                 }
                 init() {
                     this.cacheElements();
@@ -2702,16 +2854,17 @@
                     ['dragenter', 'dragover'].forEach(name => {
                         this.elements.dropZone.addEventListener(name, (e) => {
                             e.preventDefault();
-                            this.elements.dropZone.classList.add('border-brand-500', 'bg-brand-500/5');
+                            this.elements.dropZone.classList.add('bg-white/5', 'border-brand-500/50');
                         }, false);
                     });
                     ['dragleave', 'drop'].forEach(name => {
                         this.elements.dropZone.addEventListener(name, (e) => {
                             e.preventDefault();
-                            this.elements.dropZone.classList.remove('border-brand-500', 'bg-brand-500/5');
+                            this.elements.dropZone.classList.remove('bg-white/5', 'border-brand-500/50');
                         }, false);
                     });
                     this.elements.dropZone.addEventListener('drop', async (e) => {
+                        e.preventDefault();
                         const items = e.dataTransfer.items;
                         if (!items) return;
                         this.showLoading(true, "アップロード構造を走査中...");
@@ -2732,9 +2885,9 @@
                     this.elements.filesInput.addEventListener('change', async (e) => this.handleFileSelection(e.target.files));
                     this.elements.optGolf.addEventListener('change', () => {
                         if (this.elements.optGolf.checked) {
-                            this.elements.golfDetails.classList.remove('opacity-40', 'pointer-events-none');
+                            this.elements.golfDetails.classList.remove('opacity-25', 'pointer-events-none');
                         } else {
-                            this.elements.golfDetails.classList.add('opacity-40', 'pointer-events-none');
+                            this.elements.golfDetails.classList.add('opacity-25', 'pointer-events-none');
                         }
                     });
                     this.elements.searchDepth.addEventListener('input', (e) => {
@@ -2804,7 +2957,6 @@
                         return;
                     }
                     this.elements.fileListCard.classList.remove('hidden');
-                    this.elements.dropZone.classList.add('py-4');
                     this.elements.fileCount.textContent = keys.length;
                     this.updateDetectedFilesList();
                     this.updateDropdowns();
@@ -2818,12 +2970,12 @@
                             this.elements.inputCode.value = file.content;
                             this.switchEditorTab('input');
                             this.switchMode('direct');
-                            this.addLog("Direct Mode 自動同期展開");
                         }
                     } else {
                         const jsKeys = keys.filter(k => ['js', 'ts'].includes(k.split('.').pop().toLowerCase()));
                         if (jsKeys.length === keys.length) this.switchMode('smart');
                         else this.switchMode('html');
+                        this.switchEditorTab('input'); // 複数読み込み時は入力画面を維持
                     }
                     this.updatePreviewFilename();
                 }
@@ -2838,7 +2990,7 @@
                         else if (ext === 'css') icon = "palette";
                         else if (file.isBinary) icon = "image";
                         const div = document.createElement('div');
-                        div.className = "flex items-center justify-between p-2 hover:bg-slate-800/40 rounded-lg group border border-transparent hover:border-slate-800 transition-all";
+                        div.className = "flex items-center justify-between p-2 hover:bg-white/5 rounded-lg group border border-transparent hover:border-white/5 transition-all";
                         div.innerHTML =
                             '<div class="flex items-center gap-2 truncate">' +
                             '<i data-lucide="' + icon + '" class="w-3.5 h-3.5 shrink-0 text-slate-400"></i>' +
@@ -2852,9 +3004,7 @@
                             '</div>';
                         this.elements.detectedFiles.appendChild(div);
                     });
-                    lucide.createIcons({
-                        root: this.elements.detectedFiles
-                    });
+                    lucide.createIcons({ root: this.elements.detectedFiles });
                 }
                 updateDropdowns() {
                     const keys = this.store.getFilePaths().sort();
@@ -2866,8 +3016,7 @@
                     } else {
                         htmlKeys.forEach(p => {
                             const opt = document.createElement('option');
-                            opt.value = p;
-                            opt.textContent = p;
+                            opt.value = p; opt.textContent = p;
                             this.elements.htmlEntrySelect.appendChild(opt);
                         });
                     }
@@ -2877,8 +3026,7 @@
                     } else {
                         jsKeys.forEach(p => {
                             const opt = document.createElement('option');
-                            opt.value = p;
-                            opt.textContent = p;
+                            opt.value = p; opt.textContent = p;
                             this.elements.entryPointSelect.appendChild(opt);
                         });
                     }
@@ -2890,9 +3038,10 @@
                 switchMode(mode) {
                     this.store.currentMode = mode;
                     const tabs = [this.elements.modeHtmlBtn, this.elements.modeSmartBtn, this.elements.modeDirectBtn];
-                    tabs.forEach(t => t.className = "flex-1 py-2 text-xs font-semibold rounded-lg transition-all text-slate-400 hover:text-slate-200");
+                    tabs.forEach(t => t.classList.remove('active'));
                     const activeBtn = mode === 'html' ? tabs[0] : (mode === 'smart' ? tabs[1] : tabs[2]);
-                    activeBtn.className = "flex-1 py-2 text-xs font-semibold rounded-lg transition-all text-brand-400 bg-slate-900 shadow-sm border border-slate-800";
+                    activeBtn.classList.add('active');
+
                     this.elements.htmlOptions.classList.add('hidden');
                     this.elements.smartOptions.classList.add('hidden');
                     this.elements.directOptions.classList.add('hidden');
@@ -2906,14 +3055,14 @@
                     const tabIn = document.getElementById('tab-input');
                     const tabOut = document.getElementById('tab-output');
                     if (tab === 'input') {
-                        tabIn.className = "px-5 py-2.5 text-brand-400 border-b-2 border-brand-500 bg-slate-800/50 flex items-center gap-2";
-                        tabOut.className = "px-5 py-2.5 text-slate-500 hover:text-slate-300 border-b-2 border-transparent flex items-center gap-2";
+                        tabIn.classList.add('active');
+                        tabOut.classList.remove('active');
                         this.elements.inputCode.classList.remove('hidden');
                         this.elements.outputCode.classList.add('hidden');
                         this.updateLineNumbers(this.elements.inputCode.value);
                     } else {
-                        tabOut.className = "px-5 py-2.5 text-brand-400 border-b-2 border-brand-500 bg-slate-800/50 flex items-center gap-2";
-                        tabIn.className = "px-5 py-2.5 text-slate-500 hover:text-slate-300 border-b-2 border-transparent flex items-center gap-2";
+                        tabOut.classList.add('active');
+                        tabIn.classList.remove('active');
                         this.elements.outputCode.classList.remove('hidden');
                         this.elements.inputCode.classList.add('hidden');
                         this.updateLineNumbers(this.elements.outputCode.value);
@@ -2930,7 +3079,6 @@
                 resetAll() {
                     this.store.reset();
                     this.elements.fileListCard.classList.add('hidden');
-                    this.elements.dropZone.classList.remove('py-4');
                     this.elements.folderInput.value = '';
                     this.elements.filesInput.value = '';
                     this.elements.inputCode.value = '';
@@ -2954,8 +3102,8 @@
                 }
                 addLog(message, type = 'info') {
                     const colors = {
-                        info: 'text-slate-300 border-l border-slate-700 pl-2',
-                        success: 'text-emerald-400 font-semibold border-l-2 border-emerald-500 pl-2',
+                        info: 'text-slate-400 border-l border-slate-600 pl-2',
+                        success: 'text-[var(--accent)] font-semibold border-l-2 border-blue-500 pl-2',
                         warn: 'text-amber-400 border-l border-amber-500 pl-2',
                         error: 'text-red-400 font-bold border-l-2 border-red-500 pl-2'
                     };
@@ -2971,10 +3119,15 @@
                     const icon = document.getElementById('toast-icon');
                     text.textContent = message;
                     icon.innerHTML = '<i data-lucide="' + (type === 'success' ? 'check' : 'alert-circle') + '" class="w-4 h-4 text-emerald-400"></i>';
-                    toast.className = "fixed bottom-6 right-6 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 translate-y-0 opacity-100";
-                    lucide.createIcons();
-                    setTimeout(() => {
+                    toast.className = "fixed bottom-6 right-6 backdrop-blur-xl bg-slate-900/90...";
+                    lucide.createIcons({ root: toast }); // 対象をToast内部のみに限定
+
+                    // 既存のタイマーがあればクリア
+                    if (this.toastTimer) clearTimeout(this.toastTimer);
+
+                    this.toastTimer = setTimeout(() => {
                         toast.className = "fixed bottom-6 right-6 transform translate-y-10 opacity-0 bg-slate-900 border border-slate-800/80 text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 transition-all duration-300 z-50 pointer-events-none";
+                        this.toastTimer = null;
                     }, 3000);
                 }
                 updateGolfScoreboard(originalBytes, finalBytes) {
@@ -2983,31 +3136,20 @@
                     this.elements.golfOrigSize.textContent = (originalBytes / 1024).toFixed(2) + " KB";
                     this.elements.golfFinalSize.textContent = (finalBytes / 1024).toFixed(2) + " KB";
                     this.elements.golfReduction.textContent = "-" + reduction + "%";
-                    let rank = "⛳️ C";
-                    let rankColor = "bg-slate-500";
-                    if (reduction >= 85) {
-                        rank = "🏆 SSS";
-                        rankColor = "bg-red-600";
-                    } else if (reduction >= 70) {
-                        rank = "💎 SS";
-                        rankColor = "bg-orange-500";
-                    } else if (reduction >= 50) {
-                        rank = "🔥 S";
-                        rankColor = "bg-amber-500";
-                    } else if (reduction >= 30) {
-                        rank = "⭐ A";
-                        rankColor = "bg-emerald-500";
-                    }
+                    let rank = "⛳️ C"; let rankColor = "bg-slate-600/80";
+                    if (reduction >= 85) { rank = "🏆 SSS"; rankColor = "bg-red-600/80"; }
+                    else if (reduction >= 70) { rank = "💎 SS"; rankColor = "bg-orange-500/80"; }
+                    else if (reduction >= 50) { rank = "🔥 S"; rankColor = "bg-amber-500/80"; }
+                    else if (reduction >= 30) { rank = "⭐ A"; rankColor = "bg-emerald-500/80"; }
                     this.elements.golfRankBadge.textContent = rank;
-                    this.elements.golfRankBadge.className = "px-2 py-0.5 text-xs text-white rounded font-mono font-bold animate-pulse " + rankColor;
+                    this.elements.golfRankBadge.className = "px-2 py-0.5 text-xs text-white rounded font-mono font-bold border border-white/10 shadow-sm animate-pulse " + rankColor;
                     this.elements.golfScoreboard.classList.remove('hidden');
                 }
                 renderTraceExplorer(trace) {
                     this.elements.logContent.innerHTML = '';
                     if (!trace || trace.length === 0) {
                         this.addLog("[Explorer] 最適化探索空間に適用可能なルール候補は検出されませんでした。");
-                        this.elements.traceStats.textContent = "0 適用";
-                        return;
+                        this.elements.traceStats.textContent = "0 適用"; return;
                     }
                     this.elements.traceStats.textContent = trace.filter(t => t.applied).length + " 適用 / " + trace.length + " 走査";
                     trace.forEach((item) => {
@@ -3022,32 +3164,23 @@
                     this.showLoading(true, "SoC パイプライン最適化中...");
                     this.elements.logSection.classList.remove('hidden');
                     const logger = {
-                        info: (msg) => this.addLog(msg, 'info'),
-                        success: (msg) => this.addLog(msg, 'success'),
-                        warn: (msg) => this.addLog(msg, 'warn'),
-                        error: (msg) => this.addLog(msg, 'error')
+                        info: (msg) => this.addLog(msg, 'info'), success: (msg) => this.addLog(msg, 'success'),
+                        warn: (msg) => this.addLog(msg, 'warn'), error: (msg) => this.addLog(msg, 'error')
                     };
                     setTimeout(() => {
                         try {
                             const options = {
-                                mode: this.store.currentMode,
-                                addStrict: this.elements.optStrict.checked,
-                                golfEnabled: this.elements.optGolf.checked,
-                                enableMangle: this.elements.golfMangle.checked,
-                                enableConsoleStrip: this.elements.golfConsole.checked,
-                                enableExtreme: this.elements.golfExtreme.checked,
-                                globalAliasingEnabled: this.elements.golfGlobalAlias.checked,
-                                crossAssetEnabled: this.elements.golfCrossAsset.checked,
-                                packerEnabled: this.elements.golfPacker.checked,
-                                searchDepth: parseInt(this.elements.searchDepth.value),
-                                htmlEntryPath: this.elements.htmlEntrySelect.value,
-                                htmlOptCss: this.elements.htmlOptCss.checked,
-                                htmlOptJs: this.elements.htmlOptJs.checked,
-                                htmlOptImg: this.elements.htmlOptImg.checked,
-                                jsEntryPoint: this.elements.entryPointSelect.value,
-                                directSourceCode: this.elements.inputCode.value,
+                                mode: this.store.currentMode, addStrict: this.elements.optStrict.checked,
+                                golfEnabled: this.elements.optGolf.checked, enableMangle: this.elements.golfMangle.checked,
+                                enableConsoleStrip: this.elements.golfConsole.checked, enableExtreme: this.elements.golfExtreme.checked,
+                                globalAliasingEnabled: this.elements.golfGlobalAlias.checked, crossAssetEnabled: this.elements.golfCrossAsset.checked,
+                                packerEnabled: this.elements.golfPacker.checked, searchDepth: parseInt(this.elements.searchDepth.value),
+                                htmlEntryPath: this.elements.htmlEntrySelect.value, htmlOptCss: this.elements.htmlOptCss.checked,
+                                htmlOptJs: this.elements.htmlOptJs.checked, htmlOptImg: this.elements.htmlOptImg.checked,
+                                jsEntryPoint: this.elements.entryPointSelect.value, directSourceCode: this.elements.inputCode.value,
                                 directLang: this.elements.directLangSelect.value
                             };
+                            const { CompilerFacade } = window.App.require('src/engine/CompilerFacade.js');
                             const result = CompilerFacade.compile(options, this.store, logger);
                             if (result && result.code) {
                                 this.elements.outputCode.value = result.code;
@@ -3056,12 +3189,10 @@
                                 this.elements.downloadBtn.disabled = false;
                                 this.renderTraceExplorer(result.trace);
                                 let originalSize = 1;
-                                if (options.mode === 'direct') {
-                                    originalSize = new Blob([options.directSourceCode]).size;
-                                } else {
+                                if (options.mode === 'direct') { originalSize = new Blob([options.directSourceCode]).size; }
+                                else {
                                     originalSize = Array.from(this.store.usedFilesSet).reduce((sum, p) => {
-                                        const f = this.store.getFile(p);
-                                        return sum + (f ? f.size : 0);
+                                        const f = this.store.getFile(p); return sum + (f ? f.size : 0);
                                     }, 0) || 1;
                                 }
                                 const finalSize = new Blob([result.code]).size;
@@ -3071,42 +3202,27 @@
                         } catch (err) {
                             this.addLog("ビルド異常終了: " + err.message, "error");
                             this.showToast("プロセス失敗", "error");
-                        } finally {
-                            this.showLoading(false);
-                        }
+                        } finally { this.showLoading(false); }
                     }, 100);
                 }
                 copyToClipboard() {
-                    const val = this.elements.outputCode.value;
-                    if (!val) return;
-                    const temp = document.createElement('textarea');
-                    temp.value = val;
-                    document.body.appendChild(temp);
-                    temp.select();
+                    const val = this.elements.outputCode.value; if (!val) return;
+                    const temp = document.createElement('textarea'); temp.value = val;
+                    document.body.appendChild(temp); temp.select();
                     try {
                         document.execCommand('copy');
                         this.showToast("成果物をクリップボードに格納", "success");
-                    } catch (e) {
-                        this.showToast("コピーエラー", "error");
-                    } finally {
-                        document.body.removeChild(temp);
-                    }
+                    } catch (e) { this.showToast("コピーエラー", "error"); }
+                    finally { document.body.removeChild(temp); }
                 }
                 downloadOutput() {
-                    const val = this.elements.outputCode.value;
-                    if (!val) return;
+                    const val = this.elements.outputCode.value; if (!val) return;
                     const isHtml = this.store.currentMode === 'html';
                     const filename = isHtml ? 'index.html' : 'bundle.js';
-                    const blob = new Blob([val], {
-                        type: isHtml ? 'text/html' : 'application/javascript'
-                    });
+                    const blob = new Blob([val], { type: isHtml ? 'text/html' : 'application/javascript' });
                     const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
+                    const a = document.createElement('a'); a.href = url; a.download = filename;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                     this.showToast("成果物をダウンロードしました", "success");
                 }
@@ -3121,19 +3237,13 @@
                 readFileAsDataURL(file) {
                     return new Promise((resolve, reject) => {
                         const reader = new FileReader();
-                        reader.onload = () => resolve(reader.result);
-                        reader.onerror = reject;
+                        reader.onload = () => resolve(reader.result); reader.onerror = reject;
                         reader.readAsDataURL(file);
                     });
                 }
-                updateView() {
-                    this.updatePreviewFilename();
-                }
+                updateView() { this.updatePreviewFilename(); }
             }
-            return {
-                UIManager,
-                Store
-            };
+            return { UIManager, Store: window.App.require('src/ui/Store.js').Store };
         });
     </script>
     <script id="src/ui/Store.boot.js">
