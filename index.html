@@ -430,6 +430,43 @@
                             <span class="checkmark"></span>LZ77自己解凍パッカー (RegPack/Crush評価) <span
                                 class="font-mono text-[10px] opacity-50 ml-1.5">(packerEnabled)</span>
                         </label>
+                        <div class="my-1 border-white/5 border-t"></div>
+                        <div class="flex items-center justify-between text-slate-300 text-xs mt-1">
+                            <span class="font-medium text-brand-300"><i class="h-3 w-3 inline mr-1"
+                                    data-lucide="split"></i>投機的探索 (Beam Search) <span
+                                    class="font-mono text-[10px] opacity-50 ml-1">(enableBeamSearch)</span></span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="golf-beam-search" class="sr-only peer">
+                                <div
+                                    class="w-7 h-4 bg-[#1e2125] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-500 shadow-inner">
+                                </div>
+                            </label>
+                        </div>
+                        <div class="flex flex-col gap-1 mt-1 pl-4 border-l-2 border-brand-500/20 opacity-25 pointer-events-none transition-all"
+                            id="beam-details">
+                            <div class="flex items-center justify-between text-slate-300 text-xs">
+                                <span class="font-medium text-[10px]">ビーム幅 (同時探索数) <span
+                                        class="font-mono text-[8px] opacity-50 ml-1">(beamWidth)</span></span>
+                                <span class="font-bold font-mono text-brand-400 text-[10px]"
+                                    id="beam-width-val">3</span>
+                            </div>
+                            <input class="nop-slider" id="beam-width" type="range" max="10" min="1" value="3">
+                            <label class="nop-checkbox-container text-slate-300 mt-1">
+                                <input id="beam-inline-single" type="checkbox" checked>
+                                <span class="checkmark" style="width:12px;height:12px;top:2px;"></span><span
+                                    class="text-[10px] leading-[14px] inline-block mt-0.5">インライン化で分岐</span>
+                            </label>
+                            <label class="nop-checkbox-container text-slate-300">
+                                <input id="beam-if-to-ternary" type="checkbox" checked>
+                                <span class="checkmark" style="width:12px;height:12px;top:2px;"></span><span
+                                    class="text-[10px] leading-[14px] inline-block mt-0.5">If三項演算子化で分岐</span>
+                            </label>
+                            <label class="nop-checkbox-container text-slate-300">
+                                <input id="beam-block-to-comma" type="checkbox" checked>
+                                <span class="checkmark" style="width:12px;height:12px;top:2px;"></span><span
+                                    class="text-[10px] leading-[14px] inline-block mt-0.5">ブロック展開で分岐</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="flex flex-col gap-3 border-t border-white/5 pt-4">
@@ -555,6 +592,16 @@
     <!-- ==========================================================================
      src/core/ - Layer 1: Infrastructure
      ========================================================================== -->
+    <script id="src/core/Globals.js">
+        window.App.define('src/core/Globals.js', () => {
+            const BUILTIN_GLOBALS = new Set([
+                'window', 'document', 'Math', 'console', 'navigator', 'location', 'setTimeout', 'setInterval',
+                'Object', 'Array', 'String', 'Number', 'Boolean', 'RegExp', 'Function', 'Promise', 'Map', 'Set'
+            ]);
+            return { BUILTIN_GLOBALS };
+        });
+    </script>
+
     <script id="src/core/ByteEstimator.js">
         window.App.define('src/core/ByteEstimator.js', () => {
             const PREC = {
@@ -564,10 +611,7 @@
                 Unary: 14, Postfix: 15, Member: 17, Primary: 18
             };
 
-            const BUILTIN_GLOBALS = new Set([
-                'window', 'document', 'Math', 'console', 'navigator', 'location', 'setTimeout', 'setInterval',
-                'Object', 'Array', 'String', 'Number', 'Boolean', 'RegExp', 'Function', 'Promise', 'Map', 'Set'
-            ]);
+            const { BUILTIN_GLOBALS } = window.App.require('src/core/Globals.js');
 
             const unknownNodes = new Set(); // 警告の重複防止用
 
@@ -813,8 +857,9 @@
             const { CostModel } = window.App.require('src/core/CostModel.js');
             const { CompilationTrace } = window.App.require('src/core/CompilationTrace.js');
             class CompilationContext {
-                constructor(options) {
+                constructor(options, orchestrator = null) {
                     this.options = options;
+                    this.orchestrator = orchestrator;
                     this.ast = null;
                     this.dfa = null;
                     this.dfaQuery = null;
@@ -822,6 +867,7 @@
                     this.trace = new CompilationTrace();
                     this.dirty = false;
                     this.currentCost = Infinity;
+                    this.branchedNodes = new Set();
                 }
                 markDirty() {
                     this.dirty = true;
@@ -831,6 +877,15 @@
                 }
                 isDirty() {
                     return this.dirty;
+                }
+                fork() {
+                    const clonedAst = Babel.cloneDeep(this.ast);
+                    const newCtx = new CompilationContext(this.options, this.orchestrator);
+                    newCtx.ast = clonedAst;
+                    newCtx.currentCost = this.currentCost;
+                    newCtx.trace = this.trace.clone();
+                    newCtx.branchedNodes = new Set(this.branchedNodes);
+                    return newCtx;
                 }
             }
             return {
@@ -844,6 +899,11 @@
             class CompilationTrace {
                 constructor() {
                     this.records = [];
+                }
+                clone() {
+                    const newTrace = new CompilationTrace();
+                    newTrace.records = [...this.records];
+                    return newTrace;
                 }
                 record(ruleId, iteration, phaseId, nodeCode, beforeSize, afterSize, applied, reason = '') {
                     this.records.push({
@@ -1019,6 +1079,18 @@
                     }
                     return { type: 'top' };
                 }
+                isSafeGlobalAccess(name, atPath) {
+                    if (!atPath || !atPath.scope) return false;
+                    if (atPath.scope.hasBinding(name)) return false;
+                    const programScope = atPath.scope.getProgramParent();
+                    let isUsedAsFreeGlobal = false;
+                    if (programScope) {
+                        isUsedAsFreeGlobal = (typeof programScope.hasGlobal === 'function' && programScope.hasGlobal(name)) ||
+                            (programScope.globals && (name in programScope.globals));
+                    }
+                    const { BUILTIN_GLOBALS } = window.App.require('src/core/Globals.js');
+                    return isUsedAsFreeGlobal || BUILTIN_GLOBALS.has(name);
+                }
             }
             return {
                 DFAQuery
@@ -1123,9 +1195,7 @@
                 match(node, t, dfaQuery, path) {
                     if (!dfaQuery || !path) return false;
                     if (!path.isReferencedIdentifier()) return false;
-                    
                     const val = dfaQuery.getConstantValue(node.name);
-                    // 値が null/undefined のFalsyノードによるAST破壊を防ぐ
                     return val !== null && val !== undefined && dfaQuery.canInline(node.name);
                 },
                 candidates(node, t, dfaQuery) {
@@ -1346,7 +1416,6 @@
                         const curr = node.body[i];
                         if (t.isVariableDeclaration(curr)) {
                             if (newBody.length > 0 && t.isVariableDeclaration(newBody[newBody.length - 1]) && newBody[newBody.length - 1].kind === curr.kind) {
-                                // Babel.cloneDeep に配列を直接渡さず、要素ごとに確実にクローンする
                                 newBody[newBody.length - 1].declarations.push(...curr.declarations.map(d => Babel.cloneDeep(d)));
                             } else {
                                 newBody.push(Babel.cloneDeep(curr));
@@ -1692,8 +1761,12 @@
                 description: 'window.x ➔ x グローバル変数ダイレクト短縮',
                 unsafe: false,
                 tags: ['equivalence', 'member'],
-                match(node, t, dfaQuery) {
-                    return !node.computed && t.isIdentifier(node.object, { name: 'window' }) && t.isIdentifier(node.property);
+                match(node, t, dfaQuery, path) {
+                    if (!dfaQuery) return false;
+                    if (node.computed || !t.isIdentifier(node.object, { name: 'window' }) || !t.isIdentifier(node.property)) {
+                        return false;
+                    }
+                    return dfaQuery.isSafeGlobalAccess(node.property.name, path);
                 },
                 candidates(node, t) {
                     return [
@@ -2074,6 +2147,12 @@
                         'dom-id-hack'
                     ]
                 },
+                // 投機的探索（ビームサーチ）の対象となる変換ルールのUIマッピング
+                speculativeMappings: {
+                    beamInlineSingle: ['inline-single-ref'],
+                    beamIfToTernary: ['if-to-ternary'],
+                    beamBlockToComma: ['block-to-comma']
+                },
                 postLoop: [{
                     id: 'mangle-pass',
                     transforms: ['terser-mangle']
@@ -2186,6 +2265,36 @@
 
                                         if (candidates.length <= 1) continue;
 
+                                        // 投機的探索 (Beam Search) の分岐ロジック
+                                        const specTriggers = ctx.options.overrides?.speculativeTriggers || [];
+                                        const isSpeculative = ctx.options.enableBeamSearch && specTriggers.includes(rule.id);
+
+                                        if (isSpeculative && path.node._uid && !ctx.branchedNodes.has(path.node._uid)) {
+                                            ctx.branchedNodes.add(path.node._uid);
+                                            const beforeCost = ctx.costModel.estimateCost(path.node, parentPrec, path.scope);
+                                            const costs = candidates.map(cand => ctx.costModel.estimateCost(cand, parentPrec, path.scope));
+
+                                            const newWorlds = [];
+                                            for (let i = 0; i < candidates.length - 1; i++) {
+                                                path.replaceWith(candidates[i]);
+                                                const forkedCtx = ctx.fork();
+                                                const snippet = safeSnippet(candidates[i], t);
+                                                forkedCtx.trace.record(rule.id, iteration, phase.id, snippet, beforeCost, costs[i], i > 0, `Beam Branch ${i}`);
+                                                newWorlds.push(forkedCtx);
+                                            }
+
+                                            const lastIdx = candidates.length - 1;
+                                            path.replaceWith(candidates[lastIdx]);
+                                            ctx.markDirty();
+                                            ctx.trace.record(rule.id, iteration, phase.id, safeSnippet(candidates[lastIdx], t), beforeCost, costs[lastIdx], lastIdx > 0, `Beam Branch ${lastIdx}`);
+
+                                            if (ctx.orchestrator) {
+                                                ctx.orchestrator.addNewWorlds(newWorlds);
+                                            }
+                                            path.skip();
+                                            break;
+                                        }
+
                                         const costs = candidates.map(cand => ctx.costModel.estimateCost(cand, parentPrec, path.scope));
                                         const bestIdx = costs.indexOf(Math.min(...costs));
 
@@ -2226,8 +2335,35 @@
                                             const candidates = rule.candidates(path.node, t, ctx.dfaQuery, path);
                                             if (candidates.length <= 1) continue;
 
+                                            const specTriggers = ctx.options.overrides?.speculativeTriggers || [];
+                                            const isSpeculative = ctx.options.enableBeamSearch && specTriggers.includes(rule.id);
+
                                             const beforeCost = ctx.costModel.estimateCost(path.node, PREC.Sequence, path.scope);
                                             const costs = candidates.map(cand => ctx.costModel.estimateCost(cand, PREC.Sequence, path.scope));
+
+                                            if (isSpeculative && path.node._uid && !ctx.branchedNodes.has(path.node._uid)) {
+                                                ctx.branchedNodes.add(path.node._uid);
+                                                const newWorlds = [];
+                                                for (let i = 0; i < candidates.length - 1; i++) {
+                                                    path.replaceWith(candidates[i]);
+                                                    const forkedCtx = ctx.fork();
+                                                    const snippet = safeSnippet(candidates[i], t);
+                                                    forkedCtx.trace.record(rule.id, iteration, phase.id, snippet, beforeCost, costs[i], i > 0, `Beam Branch ${i}`);
+                                                    newWorlds.push(forkedCtx);
+                                                }
+
+                                                const lastIdx = candidates.length - 1;
+                                                path.replaceWith(candidates[lastIdx]);
+                                                ctx.markDirty();
+                                                ctx.trace.record(rule.id, iteration, phase.id, safeSnippet(candidates[lastIdx], t), beforeCost, costs[lastIdx], lastIdx > 0, `Beam Branch ${lastIdx}`);
+
+                                                if (ctx.orchestrator) {
+                                                    ctx.orchestrator.addNewWorlds(newWorlds);
+                                                }
+                                                path.skip();
+                                                break;
+                                            }
+
                                             const bestIdx = costs.indexOf(Math.min(...costs));
 
                                             if (bestIdx > 0) {
@@ -2262,6 +2398,65 @@
 
     <script id="src/engine/FixpointLoop.js">
         window.App.define('src/engine/FixpointLoop.js', () => {
+            class BeamSearchOrchestrator {
+                constructor(initialCtx, scheduler, beamWidth, maxIterations, logger) {
+                    this.beam = [initialCtx];
+                    this.scheduler = scheduler;
+                    this.beamWidth = beamWidth;
+                    this.maxIterations = maxIterations;
+                    this.logger = logger;
+                    this.nextBeam = [];
+                }
+                addNewWorlds(worlds) {
+                    this.nextBeam.push(...worlds);
+                }
+                run() {
+                    let iteration = 1;
+                    let reason = "上限到達";
+
+                    while (iteration <= this.maxIterations && this.beam.length > 0) {
+                        this.nextBeam = [];
+
+                        // 全世界線を1フェーズ（1周）実行
+                        for (let i = 0; i < this.beam.length; i++) {
+                            const ctx = this.beam[i];
+                            ctx.orchestrator = this;
+                            ctx.resetDirty();
+
+                            for (const phase of this.scheduler.config.phases) {
+                                this.scheduler.runPhase(phase, ctx, iteration);
+                            }
+                            ctx.costModel.invalidateCache();
+                            ctx.currentCost = ctx.costModel.measureExact(ctx.ast);
+                        }
+
+                        let allWorlds = [...this.beam, ...this.nextBeam];
+
+                        // 枝刈り (Pruning)
+                        allWorlds.sort((a, b) => a.currentCost - b.currentCost);
+                        if (allWorlds.length > this.beamWidth) {
+                            if (this.logger) this.logger.info(`[Beam Search] 分岐した ${allWorlds.length} の世界線から、上位 ${this.beamWidth} つを残して枝刈りしました。`);
+                            allWorlds = allWorlds.slice(0, this.beamWidth);
+                        }
+
+                        this.beam = allWorlds;
+
+                        const anyDirty = this.beam.some(ctx => ctx.isDirty());
+                        if (!anyDirty) {
+                            reason = "全世界線が正常収束";
+                            break;
+                        }
+                        iteration++;
+                    }
+
+                    return {
+                        bestCtx: this.beam[0],
+                        iterations: Math.min(iteration, this.maxIterations),
+                        reason: reason
+                    };
+                }
+            }
+
             class FixpointLoop {
                 static execute(ctx, scheduler, maxIterations) {
                     let iteration = 1;
@@ -2325,6 +2520,17 @@
 
 
             class CompilerFacade {
+                static assignUIDs(ast) {
+                    let uidCounter = 1;
+                    Babel.traverse(ast, {
+                        enter(path) {
+                            if (!path.node._uid) {
+                                path.node._uid = uidCounter++;
+                            }
+                        }
+                    });
+                }
+
                 // contextName 引数を追加し、エラー時にソースプレビューを出力
                 static runJsOptimization(sourceCode, options, scheduler, finalConfig, logger, contextName = "Unknown") {
                     try {
@@ -2339,6 +2545,7 @@
                             parserOpts: { sourceType: 'module', plugins: ['jsx', 'typescript'] }
                         });
                         context.ast = parsed.ast;
+                        this.assignUIDs(context.ast);
 
                         if (options.enableConsoleStrip && options.golfEnabled) {
                             const traverse = Babel.traverse;
@@ -2357,10 +2564,14 @@
                             });
                         }
 
-                        const loopResult = FixpointLoop.execute(context, scheduler, finalConfig.fixpointLoop.maxIterations);
-                        logger.success(`[最適化ループ (${contextName})] ` + loopResult.reason + " - 合計 " + loopResult.iterations + " 周回");
+                        const loopResult = options.enableBeamSearch
+                            ? new BeamSearchOrchestrator(context, scheduler, options.beamWidth, finalConfig.fixpointLoop.maxIterations, logger).run()
+                            : FixpointLoop.execute(context, scheduler, finalConfig.fixpointLoop.maxIterations);
 
-                        let { code } = Babel.transformFromAst(context.ast, null, {
+                        logger.success(`[最適化ループ (${contextName})] ` + loopResult.reason + " - 合計 " + loopResult.iterations + " 周回");
+                        const finalCtx = loopResult.bestCtx || context;
+
+                        let { code } = Babel.transformFromAst(finalCtx.ast, null, {
                             minified: options.golfEnabled, comments: !options.golfEnabled, compact: options.golfEnabled
                         });
 
@@ -2368,7 +2579,7 @@
                         if (activePostLoops.some(p => p.transforms.includes('terser-mangle')) && options.enableMangle && options.golfEnabled) {
                             code = TerserBackend.mangle(code, logger);
                         }
-                        return { code, trace: context.trace.getEntries() };
+                        return { code, trace: finalCtx.trace.getEntries() };
                     } catch (e) {
                         // 構文エラー時に、Babelがパースしようとした実際のテキスト先頭を可視化
                         const preview = (sourceCode || "").substring(0, 100).replace(/\n/g, ' ↵ ');
@@ -2382,6 +2593,7 @@
                     finalConfig.fixpointLoop.maxIterations = options.searchDepth || 10;
 
                     const disabledTransforms = [];
+                    const speculativeTriggers = [];
                     if (!options.golfEnabled) {
                         disabledTransforms.push(...Array.from(registry.keys()));
                     } else {
@@ -2391,8 +2603,17 @@
                                 disabledTransforms.push(...targetRules);
                             }
                         }
+
+                        if (options.enableBeamSearch) {
+                            const specMappings = finalConfig.speculativeMappings || {};
+                            for (const [optionKey, targetRules] of Object.entries(specMappings)) {
+                                if (options[optionKey] === true) {
+                                    speculativeTriggers.push(...targetRules);
+                                }
+                            }
+                        }
                     }
-                    options.overrides = { disabledTransforms };
+                    options.overrides = { disabledTransforms, speculativeTriggers };
 
                     const scheduler = new PassScheduler(registry, finalConfig);
                     const scanner = new ProjectScanner();
@@ -2476,11 +2697,8 @@
                     try {
                         const parsed = Babel.transform(code, { ast: true, code: false });
                         const traverse = Babel.packages.traverse.default;
-                        
-                        // 標準的な予約語
                         const reserved = new Set(['do', 'if', 'in', 'for', 'let', 'new', 'try', 'var', 'case', 'else', 'with', 'class', 'const', 'super', 'catch', 'break', 'throw', 'while', 'yield', 'return', 'delete', 'switch', 'typeof', 'default', 'extends', 'finally', 'continue', 'debugger', 'function', 'arguments', 'null', 'true', 'false', 'NaN', 'undefined', 'window', 'document', 'Math', 'console', 'navigator', 'App']);
 
-                        // AST内にすでに存在する識別子を全て予約語としてロックする
                         traverse(parsed.ast, {
                             Identifier(path) {
                                 if (!path.scope.hasBinding(path.node.name, true)) {
@@ -2491,8 +2709,8 @@
 
                         let counter = 0;
                         const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$';
-                        
-                        // 対象スコープのBindingも確認し、絶対に衝突しない名前を払い出す
+
+                        // 対象スコープを引数に取り、衝突しない安全な名前を生成する
                         const getNextName = (scope) => {
                             let name;
                             do {
@@ -2502,9 +2720,10 @@
                                     name = chars[num % chars.length] + name;
                                     num = Math.floor(num / chars.length) - 1;
                                 } while (num >= 0);
+                                // 予約語リストに含まれるか、対象スコープに既に存在する場合は再抽選
                             } while (reserved.has(name) || (scope && scope.hasBinding(name)));
-                            
-                            // 一度払い出した名前は即座に予約語に入れて二重発番を防ぐ
+
+                            // 他のスコープでBabelのトラッキングがズレた際にも衝突しないよう、一度使った名前はグローバル予約語に沈める
                             reserved.add(name);
                             return name;
                         };
@@ -2513,7 +2732,8 @@
                             Scope(path) {
                                 for (const [name, binding] of Object.entries(path.scope.bindings)) {
                                     if (name.length > 1 && !reserved.has(name)) {
-                                        path.scope.rename(name, getNextName(path.scope));
+                                        const safeName = getNextName(path.scope);
+                                        path.scope.rename(name, safeName);
                                     }
                                 }
                             }
@@ -3107,6 +3327,13 @@
                     this.elements.golfGlobalAlias = document.getElementById('golf-global-alias');
                     this.elements.golfCrossAsset = document.getElementById('golf-cross-asset');
                     this.elements.golfPacker = document.getElementById('golf-packer');
+                    this.elements.golfBeamSearch = document.getElementById('golf-beam-search');
+                    this.elements.beamDetails = document.getElementById('beam-details');
+                    this.elements.beamWidth = document.getElementById('beam-width');
+                    this.elements.beamWidthVal = document.getElementById('beam-width-val');
+                    this.elements.beamInlineSingle = document.getElementById('beam-inline-single');
+                    this.elements.beamIfToTernary = document.getElementById('beam-if-to-ternary');
+                    this.elements.beamBlockToComma = document.getElementById('beam-block-to-comma');
                     this.elements.searchDepth = document.getElementById('search-depth');
                     this.elements.searchDepthVal = document.getElementById('search-depth-val');
                     this.elements.modeHtmlBtn = document.getElementById('mode-html-btn');
@@ -3172,8 +3399,18 @@
                             this.elements.golfDetails.classList.add('opacity-25', 'pointer-events-none');
                         }
                     });
+                    this.elements.golfBeamSearch.addEventListener('change', () => {
+                        if (this.elements.golfBeamSearch.checked) {
+                            this.elements.beamDetails.classList.remove('opacity-25', 'pointer-events-none');
+                        } else {
+                            this.elements.beamDetails.classList.add('opacity-25', 'pointer-events-none');
+                        }
+                    });
                     this.elements.searchDepth.addEventListener('input', (e) => {
                         this.elements.searchDepthVal.textContent = e.target.value;
+                    });
+                    this.elements.beamWidth.addEventListener('input', (e) => {
+                        this.elements.beamWidthVal.textContent = e.target.value;
                     });
                     this.elements.inputCode.addEventListener('input', () => {
                         this.updateLineNumbers(this.elements.inputCode.value);
@@ -3406,6 +3643,13 @@
                     this.elements.golfGlobalAlias.checked = true;
                     this.elements.golfCrossAsset.checked = true;
                     this.elements.golfPacker.checked = true;
+                    this.elements.golfBeamSearch.checked = false;
+                    this.elements.beamWidth.value = 3;
+                    this.elements.beamWidthVal.textContent = "3";
+                    this.elements.beamInlineSingle.checked = true;
+                    this.elements.beamIfToTernary.checked = true;
+                    this.elements.beamBlockToComma.checked = true;
+                    this.elements.beamDetails.classList.add('opacity-25', 'pointer-events-none');
                     this.elements.searchDepth.value = 10;
                     this.elements.searchDepthVal.textContent = "10";
                     this.elements.optGolf.checked = true;
@@ -3497,6 +3741,11 @@
                                 enableConsoleStrip: this.elements.golfConsole.checked, enableExtreme: this.elements.golfExtreme.checked,
                                 globalAliasingEnabled: this.elements.golfGlobalAlias.checked, crossAssetEnabled: this.elements.golfCrossAsset.checked,
                                 packerEnabled: this.elements.golfPacker.checked, searchDepth: parseInt(this.elements.searchDepth.value),
+                                enableBeamSearch: this.elements.golfBeamSearch.checked,
+                                beamWidth: parseInt(this.elements.beamWidth.value),
+                                beamInlineSingle: this.elements.beamInlineSingle.checked,
+                                beamIfToTernary: this.elements.beamIfToTernary.checked,
+                                beamBlockToComma: this.elements.beamBlockToComma.checked,
                                 htmlEntryPath: this.elements.htmlEntrySelect.value, htmlOptCss: this.elements.htmlOptCss.checked,
                                 htmlOptJs: this.elements.htmlOptJs.checked, htmlOptImg: this.elements.htmlOptImg.checked,
                                 jsEntryPoint: this.elements.entryPointSelect.value, directSourceCode: this.elements.inputCode.value,
