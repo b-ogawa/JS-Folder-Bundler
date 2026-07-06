@@ -2418,6 +2418,7 @@
                 return null;
             }
         }
+        // core/iroptimizer/1_domain/rules/micro/ConstantFoldingRule.ts
         function generateIrId_1() {
             return `ir_generated_cf_${Math.random().toString(36).substring(2, 9)}`;
         }
@@ -2425,7 +2426,8 @@
             id: 'micro:constant-folding',
             type: 'micro',
             match: (node, state) => {
-                if (node.type !== 'BinaryExpression') return false;
+                // ここで型ガード。以降 node は確実に BinaryExpressionIR として推論される
+                if (node.type !== 'BinaryExpression') return false; // TSが node.props.left が存在することを保証してくれる
                 const leftRef = node.props.left;
                 const rightRef = node.props.right;
                 if (!leftRef || !rightRef) return false;
@@ -2436,9 +2438,11 @@
                 return isLiteral(left) && isLiteral(right);
             },
             candidates: (node, state) => {
-                const left = node.children.find(c => c.irNodeId === node.props.left?.irNodeId);
-                const right = node.children.find(c => c.irNodeId === node.props.right?.irNodeId);
-                const op = node.props.operator;
+                // matchで保証されているため、ここでは安全に BinaryExpressionIR としてキャストして扱える
+                const binNode = node;
+                const left = binNode.children.find(c => c.irNodeId === binNode.props.left.irNodeId);
+                const right = binNode.children.find(c => c.irNodeId === binNode.props.right.irNodeId);
+                const op = binNode.props.operator;
                 const lVal = left.props.value;
                 const rVal = right.props.value;
                 let result;
@@ -2502,35 +2506,47 @@
                             result = lVal >>> rVal;
                             break;
                         default:
-                            // Unsupported operator
                             return [];
                     }
                 } catch (e) {
                     return [];
                 }
-                let newType = 'StringLiteral';
                 if (typeof result === 'number') {
-                    if (isNaN(result) || !isFinite(result)) return []; // fallback
-                    newType = 'NumericLiteral';
+                    if (isNaN(result) || !isFinite(result)) return [];
+                    const newNode = {
+                        type: 'NumericLiteral',
+                        irNodeId: generateIrId_1(),
+                        props: {
+                            value: result
+                        },
+                        children: []
+                    };
+                    return [newNode];
                 } else if (typeof result === 'boolean') {
-                    newType = 'BooleanLiteral';
+                    const newNode = {
+                        type: 'BooleanLiteral',
+                        irNodeId: generateIrId_1(),
+                        props: {
+                            value: result
+                        },
+                        children: []
+                    };
+                    return [newNode];
                 } else if (typeof result === 'string') {
-                    newType = 'StringLiteral';
-                } else {
-                    return [];
+                    const newNode = {
+                        type: 'StringLiteral',
+                        irNodeId: generateIrId_1(),
+                        props: {
+                            value: result
+                        },
+                        children: []
+                    };
+                    return [newNode];
                 }
-                const newNode = {
-                    type: newType,
-                    irNodeId: generateIrId_1(),
-                    props: {
-                        value: result
-                    },
-                    children: []
-                };
-                console.debug(`[TransformRule] ${ConstantFoldingRule.id} matched on BinaryExpression. Generated 1 candidate.`);
-                return [newNode];
+                return [];
             }
         };
+        // core/iroptimizer/1_domain/rules/micro/IfToTernaryRule.ts
         function generateIrId_2() {
             return `ir_generated_it_${Math.random().toString(36).substring(2, 9)}`;
         }
@@ -2558,13 +2574,14 @@
             id: 'micro:if-to-ternary',
             type: 'micro',
             match: (node, state) => {
-                if (node.type !== 'IfStatement') return false;
+                // ここで型ガード
+                if (node.type !== 'IfStatement') return false; // props に as キャストや ['consequent'] と書く必要がなくなる
                 const consequentRef = node.props.consequent;
                 if (!consequentRef) return false;
                 const consequentNode = node.children.find(c => c.irNodeId === consequentRef.irNodeId);
                 if (!consequentNode) return false;
                 const expr = extractSingleExpression(consequentNode);
-                if (!expr) return false; // Either has no alternate, or alternate is also a single expression
+                if (!expr) return false;
                 const alternateRef = node.props.alternate;
                 if (alternateRef) {
                     const alternateNode = node.children.find(c => c.irNodeId === alternateRef.irNodeId);
@@ -2575,12 +2592,13 @@
                 return true;
             },
             candidates: (node, state) => {
-                const testRef = node.props.test;
-                const consequentRef = node.props.consequent;
-                const alternateRef = node.props.alternate;
-                const testNode = node.children.find(c => c.irNodeId === testRef?.irNodeId);
-                const consequentNode = node.children.find(c => c.irNodeId === consequentRef?.irNodeId);
-                const alternateNode = alternateRef ? node.children.find(c => c.irNodeId === alternateRef.irNodeId) : null;
+                const ifNode = node;
+                const testRef = ifNode.props.test;
+                const consequentRef = ifNode.props.consequent;
+                const alternateRef = ifNode.props.alternate;
+                const testNode = ifNode.children.find(c => c.irNodeId === testRef?.irNodeId);
+                const consequentNode = ifNode.children.find(c => c.irNodeId === consequentRef?.irNodeId);
+                const alternateNode = alternateRef ? ifNode.children.find(c => c.irNodeId === alternateRef.irNodeId) : null;
                 if (!testNode || !consequentNode) return [];
                 const consequentExpr = extractSingleExpression(consequentNode);
                 if (!consequentExpr) return [];
@@ -2588,7 +2606,7 @@
                 if (alternateNode) {
                     const alternateExpr = extractSingleExpression(alternateNode);
                     if (alternateExpr) {
-                        // Candidate 1: ConditionalExpression (Ternary)
+                        // 三項演算子への変換
                         const conditionalExpr = {
                             type: 'ConditionalExpression',
                             irNodeId: generateIrId_2(),
@@ -2619,7 +2637,7 @@
                             },
                             children: [conditionalExpr]
                         };
-                        candidates.push(exprStmt1); // Candidate 2: LogicalExpression (test && consequent || alternate)
+                        candidates.push(exprStmt1); // 論理積・論理和への変換 (test && consequent || alternate)
                         const logicalAndExpr = {
                             type: 'LogicalExpression',
                             irNodeId: generateIrId_2(),
@@ -2666,7 +2684,7 @@
                         candidates.push(exprStmt2);
                     }
                 } else {
-                    // Candidate 1: LogicalExpression (test && consequent)
+                    // elseがない場合は AND (&&) への変換
                     const logicalExpr = {
                         type: 'LogicalExpression',
                         irNodeId: generateIrId_2(),
@@ -2694,7 +2712,7 @@
                         },
                         children: [logicalExpr]
                     };
-                    candidates.push(exprStmt1); // Candidate 2: ConditionalExpression (test ? consequent : undefined)
+                    candidates.push(exprStmt1); // test ? consequent : undefined
                     const undefinedIdentifier = {
                         type: 'Identifier',
                         irNodeId: generateIrId_2(),
@@ -2739,47 +2757,53 @@
                 return candidates;
             }
         };
+        function generateIrId_3() {
+            return `ir_generated_ds_${Math.random().toString(36).substring(2, 9)}`;
+        }
         const DeadStoreEliminationRule = {
             id: 'micro:dead-store-elimination',
             type: 'micro',
             match: (node, state) => {
                 if (!state.analysisSnapshot) return false;
                 if (node.type === 'AssignmentExpression') {
-                    const leftRef = node.props.left;
-                    if (!leftRef || leftRef.type !== 'ref') return false;
-                    const leftNode = node.children.find(c => c.irNodeId === leftRef.irNodeId);
+                    const assignNode = node;
+                    const leftRef = assignNode.props.left;
+                    if (!leftRef) return false;
+                    const leftNode = assignNode.children.find(c => c.irNodeId === leftRef.irNodeId);
                     if (!leftNode || leftNode.type !== 'Identifier') return false;
                     const declId = state.analysisSnapshot.refToDeclMap.get(leftNode.irNodeId);
                     if (!declId) return false;
-                    const isLive = state.analysisSnapshot.isVariableLiveAfter(declId, node.irNodeId);
+                    const isLive = state.analysisSnapshot.isVariableLiveAfter(declId, assignNode.irNodeId);
                     return !isLive;
                 } else if (node.type === 'VariableDeclarator') {
-                    const idRef = node.props.id;
-                    if (!idRef || idRef.type !== 'ref') return false;
-                    const idNode = node.children.find(c => c.irNodeId === idRef.irNodeId);
-                    if (!idNode || idNode.type !== 'Identifier') return false; // If it doesn't have an init, it's already just a declaration
-                    if (!node.props.init) return false;
-                    const declId = idNode.irNodeId; // For VariableDeclarator, the id is the declId
-                    const isLive = state.analysisSnapshot.isVariableLiveAfter(declId, node.irNodeId); // If the variable is NOT live after the declaration, it means the initial value is NEVER read
+                    const declNode = node;
+                    const idRef = declNode.props.id;
+                    if (!idRef) return false;
+                    const idNode = declNode.children.find(c => c.irNodeId === idRef.irNodeId);
+                    if (!idNode || idNode.type !== 'Identifier') return false;
+                    if (!declNode.props.init) return false;
+                    const declId = idNode.irNodeId;
+                    const isLive = state.analysisSnapshot.isVariableLiveAfter(declId, declNode.irNodeId);
                     return !isLive;
                 }
                 return false;
             },
             candidates: (node, state) => {
                 if (node.type === 'AssignmentExpression') {
-                    const rightRef = node.props.right;
-                    if (!rightRef || rightRef.type !== 'ref') return [];
-                    const rightNode = node.children.find(c => c.irNodeId === rightRef.irNodeId);
+                    const assignNode = node;
+                    const rightRef = assignNode.props.right;
+                    if (!rightRef) return [];
+                    const rightNode = assignNode.children.find(c => c.irNodeId === rightRef.irNodeId);
                     if (!rightNode) return [];
                     console.debug(`[TransformRule] ${DeadStoreEliminationRule.id} matched on AssignmentExpression. Generated 1 candidate (replace with RHS).`);
                     return [rightNode];
                 } else if (node.type === 'VariableDeclarator') {
-                    // Remove the init property
+                    const declNode = node;
                     const newNode = {
-                        ...node,
-                        irNodeId: `ir_generated_ds_${Math.random().toString(36).substring(2, 9)}`,
+                        ...declNode,
+                        irNodeId: generateIrId_3(),
                         props: {
-                            ...node.props,
+                            ...declNode.props,
                             init: null
                         }
                     };
@@ -2789,7 +2813,7 @@
                 return [];
             }
         };
-        function generateIrId_3() {
+        function generateIrId_4() {
             return `ir_generated_cp_${Math.random().toString(36).substring(2, 9)}`;
         }
         const CopyPropagationRule = {
@@ -2798,41 +2822,44 @@
             match: (node, state) => {
                 if (node.type !== 'Identifier') return false;
                 if (!state.analysisSnapshot) return false;
-                const snapshot = state.analysisSnapshot; // 1. Check if it's an LVal (we don't propagate into LVal)
-                const parentId = snapshot.parentMap.get(node.irNodeId);
+                const identNode = node;
+                const snapshot = state.analysisSnapshot;
+                const parentId = snapshot.parentMap.get(identNode.irNodeId);
                 if (!parentId) return false;
                 const parent = snapshot.nodeMap.get(parentId);
                 if (!parent) return false;
-                if (parent.type === 'VariableDeclarator' && parent.props.id?.irNodeId === node.irNodeId) return false;
-                if (parent.type === 'AssignmentExpression' && parent.props.left?.irNodeId === node.irNodeId) return false;
-                if (parent.type === 'UpdateExpression' && parent.props.argument?.irNodeId === node.irNodeId) return false;
-                if (parent.type === 'MemberExpression' && parent.props.property?.irNodeId === node.irNodeId && !parent.props.computed) return false;
-                const a_decl = snapshot.refToDeclMap.get(node.irNodeId);
-                if (!a_decl) return false; // Global or unresolved
-                if (snapshot.escapedVars.has(a_decl)) return false; // Escaped variables are unsafe
-                const a_defs = snapshot.getReachingDefinitions(node.irNodeId, a_decl);
+                if (parent.type === 'VariableDeclarator' && parent.props.id?.irNodeId === identNode.irNodeId) return false;
+                if (parent.type === 'AssignmentExpression' && parent.props.left?.irNodeId === identNode.irNodeId) return false;
+                if (parent.type === 'UpdateExpression' && parent.props.argument?.irNodeId === identNode.irNodeId) return false;
+                if (parent.type === 'MemberExpression' && parent.props.property?.irNodeId === identNode.irNodeId && !parent.props.computed) return false;
+                const a_decl = snapshot.refToDeclMap.get(identNode.irNodeId);
+                if (!a_decl) return false;
+                if (snapshot.escapedVars.has(a_decl)) return false;
+                const a_defs = snapshot.getReachingDefinitions(identNode.irNodeId, a_decl);
                 if (a_defs.size !== 1) return false;
                 const defId = Array.from(a_defs)[0];
                 const defNode = snapshot.nodeMap.get(defId);
                 if (!defNode) return false;
                 let sourceNode = null;
                 if (defNode.type === 'VariableDeclarator') {
-                    const initRef = defNode.props.init;
-                    if (initRef && initRef.type === 'ref') {
-                        sourceNode = defNode.children.find(c => c.irNodeId === initRef.irNodeId) || null;
+                    const dNode = defNode;
+                    const initRef = dNode.props.init;
+                    if (initRef) {
+                        sourceNode = dNode.children.find(c => c.irNodeId === initRef.irNodeId) || null;
                     }
                 } else if (defNode.type === 'AssignmentExpression') {
-                    const rightRef = defNode.props.right;
-                    if (rightRef && rightRef.type === 'ref') {
-                        sourceNode = defNode.children.find(c => c.irNodeId === rightRef.irNodeId) || null;
+                    const aNode = defNode;
+                    const rightRef = aNode.props.right;
+                    if (rightRef) {
+                        sourceNode = aNode.children.find(c => c.irNodeId === rightRef.irNodeId) || null;
                     }
                 }
                 if (!sourceNode || sourceNode.type !== 'Identifier') return false;
                 const b_decl = snapshot.refToDeclMap.get(sourceNode.irNodeId);
                 if (!b_decl) return false;
-                if (snapshot.escapedVars.has(b_decl)) return false; // Unsafe to copy
+                if (snapshot.escapedVars.has(b_decl)) return false;
                 const r_D = snapshot.getReachingDefinitions(defId, b_decl);
-                const r_U = snapshot.getReachingDefinitions(node.irNodeId, b_decl);
+                const r_U = snapshot.getReachingDefinitions(identNode.irNodeId, b_decl);
                 if (r_D.size !== r_U.size) return false;
                 for (const item of r_D) {
                     if (!r_U.has(item)) return false;
@@ -2841,27 +2868,28 @@
             },
             candidates: (node, state) => {
                 const snapshot = state.analysisSnapshot;
-                const a_decl = snapshot.refToDeclMap.get(node.irNodeId);
-                const a_defs = snapshot.getReachingDefinitions(node.irNodeId, a_decl);
+                const identNode = node;
+                const a_decl = snapshot.refToDeclMap.get(identNode.irNodeId);
+                const a_defs = snapshot.getReachingDefinitions(identNode.irNodeId, a_decl);
                 const defId = Array.from(a_defs)[0];
                 const defNode = snapshot.nodeMap.get(defId);
                 let sourceNode = null;
                 if (defNode.type === 'VariableDeclarator') {
-                    sourceNode = defNode.children.find(c => c.irNodeId === defNode.props.init.irNodeId);
+                    sourceNode = defNode.children.find(c => c.irNodeId === defNode.props.init?.irNodeId);
                 } else {
-                    sourceNode = defNode.children.find(c => c.irNodeId === defNode.props.right.irNodeId);
+                    sourceNode = defNode.children.find(c => c.irNodeId === defNode.props.right?.irNodeId);
                 }
                 const b_decl = snapshot.refToDeclMap.get(sourceNode.irNodeId);
                 const newNode = {
                     type: 'Identifier',
-                    irNodeId: generateIrId_3(),
+                    irNodeId: generateIrId_4(),
                     props: {
                         name: sourceNode.props.name,
                         _declId: b_decl
                     },
                     children: []
                 };
-                console.debug(`[TransformRule] ${CopyPropagationRule.id} matched on Identifier. Propagating ${sourceNode.props.name} into ${node.props.name}.`);
+                console.debug(`[TransformRule] ${CopyPropagationRule.id} matched on Identifier. Propagating ${sourceNode.props.name} into ${identNode.props.name}.`);
                 return [newNode];
             }
         };
@@ -2870,36 +2898,39 @@
             type: 'macro',
             match: (node, state) => {
                 if (node.type !== 'VariableDeclaration') return false;
-                const declarations = node.props.declarations;
+                const varNode = node;
+                const declarations = varNode.props.declarations;
                 if (!Array.isArray(declarations) || declarations.length === 0) return false;
                 if (!state.analysisSnapshot) return false;
                 let allUnused = true;
                 for (const declRef of declarations) {
-                    const decl = node.children.find(c => c.irNodeId === declRef.irNodeId);
+                    const decl = varNode.children.find(c => c.irNodeId === declRef.irNodeId);
                     if (!decl || decl.type !== 'VariableDeclarator') {
                         allUnused = false;
                         break;
                     }
-                    const idRef = decl.props.id;
+                    const declNode = decl;
+                    const idRef = declNode.props.id;
                     if (!idRef) {
                         allUnused = false;
                         break;
                     }
-                    const idNode = decl.children.find(c => c.irNodeId === idRef.irNodeId);
+                    const idNode = declNode.children.find(c => c.irNodeId === idRef.irNodeId);
                     if (!idNode || idNode.type !== 'Identifier') {
                         allUnused = false;
                         break;
                     }
-                    const varName = idNode.props['name'];
+                    const identNode = idNode;
+                    const varName = identNode.props.name;
                     if (!varName) {
                         allUnused = false;
                         break;
-                    } // O(1) Check! Is the variable referenced ANYWHERE else?
-                    if ((state.analysisSnapshot.referenceCounts.get(idNode.irNodeId) || 0) > 0) {
+                    }
+                    if ((state.analysisSnapshot.referenceCounts.get(identNode.irNodeId) || 0) > 0) {
                         allUnused = false;
                         break;
-                    } // Is the variable an escaped variable (global, closure capture, export)?
-                    if (state.analysisSnapshot.escapedVars.has(idNode.irNodeId)) {
+                    }
+                    if (state.analysisSnapshot.escapedVars.has(identNode.irNodeId)) {
                         allUnused = false;
                         break;
                     }
