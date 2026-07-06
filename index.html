@@ -15,6 +15,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Web Asset &amp; JS Bundler</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
+    <script src="https://unpkg.com/terser/dist/bundle.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root {
@@ -258,7 +259,7 @@
     <script type="module">
         "use strict";
         import React, { useRef, useState, StrictMode } from 'react';
-        import { Cpu, FolderUp, Folder, Files, Sliders, RotateCcw, Award, Split, Play, FolderTree, Copy, Download, History, Pencil, Terminal, XCircle } from 'lucide-react';
+        import { Cpu, FolderUp, Folder, Files, Sliders, RotateCcw, Award, Split, Play, FolderTree, Repeat, Layers, Copy, Download, History, Pencil, Terminal, XCircle } from 'lucide-react';
         import { motion, AnimatePresence } from 'motion/react';
         import { createRoot } from 'react-dom/client';
         class VirtualFileSystem {
@@ -987,7 +988,7 @@
             }
         }
         class VariableMangler {
-            static async mangle(code) {
+            static async mangle(code, enableCompress = false) {
                 try {
                     const Terser = window.Terser;
                     if (!Terser) {
@@ -998,7 +999,7 @@
                     const result = await Terser.minify(code, {
                         toplevel: true,
                         mangle: true,
-                        compress: false // We only care about mangling here, IROptimizer handles compression
+                        compress: enableCompress // Dynamic compression toggled via argument
                     });
                     return result.code || code;
                 } catch (error) {
@@ -1076,6 +1077,10 @@
         }];
         class AssetMultiplexer {
             static generateImportUrl(modulePath, vfs, cdnTemplate) {
+                // http:// または https:// で始まる絶対URLの場合は、CDNテンプレートの適用を行わずにそのまま返す
+                if (/^(https?:)?\/\//i.test(modulePath)) {
+                    return modulePath;
+                }
                 let packageJson = null;
                 try {
                     const pjContent = vfs.read('package.json');
@@ -1309,8 +1314,8 @@
         }
         class PhysicalCompressor {
             static async compressAndMultiplex(jsCode, vfs, config) {
-                if (config.golfEnabled) {
-                    jsCode = await VariableMangler.mangle(jsCode);
+                if (config.golfEnabled && config.enableMangle) {
+                    jsCode = await VariableMangler.mangle(jsCode, !!config.terserCompress);
                 } // 空文字の場合は strict の付与を完全に諦めて空文字のまま返す
                 const cleanCode = jsCode.trim();
                 if (cleanCode === '') {
@@ -1414,8 +1419,16 @@
                     // 絶対パス（ドキュメントルートからの指定）
                     resolvedBase = relativePath.replace(/^\/+/, ''); // 先頭の / を削除
                 } else if (!relativePath.startsWith('.')) {
-                    // node_modules等の外部パッケージ
-                    return relativePath;
+                    // プレフィックスなし相対パスと外部モジュールの判定
+                    const baseDir = basePath.substring(0, basePath.lastIndexOf('/')) || '';
+                    const testPath = baseDir ? `${baseDir}/${relativePath}` : relativePath; // VFS（existingFiles）に照らし合わせて、ローカルに実在する（または末尾が一致する）ファイルであれば
+                    // 外部パッケージではなく、ローカルファイルパスとして解決する
+                    const isLocalFile = existingFiles && existingFiles.some(f => f === testPath || f.endsWith('/' + relativePath) || f === relativePath);
+                    if (!isLocalFile) {
+                        // ローカルに存在しない場合のみ、純粋な外部パッケージ（node_modules等）とみなす
+                        return relativePath;
+                    }
+                    resolvedBase = testPath;
                 } else {
                     // 通常の相対パス（./ や ../）
                     const baseDir = basePath.substring(0, basePath.lastIndexOf('/')) || '';
@@ -1623,7 +1636,7 @@
             }
         };
         class IRLinker {
-            static link(irTrees, vfs, entryPath) {
+            static link(irTrees, vfs, entryPaths) {
                 const getBase = p => p.replace(/\.(js|ts|jsx|tsx)$/, '');
                 const adjList = new Map();
                 const existingFiles = irTrees.map(t => t.filePath);
@@ -1649,9 +1662,10 @@
                     visited.add(base);
                     const tree = irTrees.find(t => getBase(t.filePath) === base);
                     if (tree) sortedTrees.push(tree);
-                };
-                if (entryPath) {
-                    visit(entryPath);
+                }; // 複数エントリーの依存巡回に対応
+                if (entryPaths) {
+                    const paths = Array.isArray(entryPaths) ? entryPaths : [entryPaths];
+                    for (const p of paths) visit(p);
                 } else {
                     for (const tree of irTrees) visit(tree.filePath);
                 }
@@ -2335,9 +2349,19 @@
             static scanMicro(node, state, rules, actions) {
                 if (!node) return;
                 for (const rule of rules) {
-                    if (rule.match(node, state)) {
-                        const candidates = rule.candidates(node, state);
-                        this.recordActions(node.irNodeId, rule.id, candidates, actions);
+                    try {
+                        if (rule.match(node, state)) {
+                            const candidates = rule.candidates(node, state); // 整合性検証: matchが適合したにもかかわらず候補配列が生成されない例外を検出
+                            if (!candidates) {
+                                console.error(`[ActionScanner] CRITICAL: Rule '${rule.id}' returned null/undefined candidates!`);
+                            }
+                            this.recordActions(node.irNodeId, rule.id, candidates || [], actions);
+                        }
+                    } catch (e) {
+                        // 例外発生時における解析処理の即時中断（Fail-Fast）およびコンテキスト情報の出力
+                        console.error(`[ActionScanner] CRASH in Rule '${rule.id}' (Micro) on Node '${node.type}' (${node.irNodeId})`);
+                        console.error(`[ActionScanner] Node Props:`, node.props);
+                        throw e; // 呼び出し元への例外の伝播
                     }
                 }
                 if (node.children && Array.isArray(node.children)) {
@@ -2352,9 +2376,15 @@
                 // 大域的な条件（参照カウント0など）に合致するものを直接狙い撃つ
                 for (const node of snapshot.nodeMap.values()) {
                     for (const rule of rules) {
-                        if (rule.match(node, state)) {
-                            const candidates = rule.candidates(node, state);
-                            this.recordActions(node.irNodeId, rule.id, candidates, actions);
+                        try {
+                            if (rule.match(node, state)) {
+                                const candidates = rule.candidates(node, state);
+                                this.recordActions(node.irNodeId, rule.id, candidates || [], actions);
+                            }
+                        } catch (e) {
+                            // グローバル最適化処理における例外の即時伝播
+                            console.error(`[ActionScanner] CRASH in Rule '${rule.id}' (Macro) on Node '${node.type}' (${node.irNodeId})`);
+                            throw e;
                         }
                     }
                 }
@@ -2610,7 +2640,8 @@
                             return calcChild(n.props['object'], nodeMap, calc) + 1 + calcChild(n.props['property'], nodeMap, calc);
                         // 1 for dot
                         default:
-                            // 定義されていないノードの大まかなフォールバック
+                            // 未定義のノードタイプが検出された場合は警告を出力し、フォールバック値を使用する
+                            console.warn(`[CostEstimator] Unknown node type encountered: '${n.type}' (NodeID: ${n.irNodeId}). Using fallback estimation.`); // 未定義ノードに対するフォールバック計算
                             return n.children.reduce((acc, c) => acc + calc(c) + 1, 0) + 2;
                     }
                 };
@@ -2822,7 +2853,10 @@
                 }];
                 const walk = (node, parentId = null) => {
                     if (!node) return;
-                    if (parentId) parentMap.set(node.irNodeId, parentId);
+                    if (parentId) parentMap.set(node.irNodeId, parentId); // 未サポートの制御フロー構文に対する整合性検証
+                    if (['SwitchStatement', 'ForInStatement', 'ForOfStatement', 'DoWhileStatement'].includes(node.type)) {
+                        console.warn(`[CFGBuilder] Unsupported control flow node encountered: '${node.type}'. The CFG will be inaccurate, which may compromise optimization safety.`);
+                    }
                     const rule = CFG_BRANCH_RULES[node.type];
                     if (!currentBlock) {
                         currentBlock = createBlock();
@@ -3324,6 +3358,9 @@
         const ConstantFoldingRule = {
             id: 'micro:constant-folding',
             type: 'micro',
+            name: '定数畳み込み (Constant Folding)',
+            description: '静的に確定する計算（例: 1 + 2）を事前に行い、リテラル（3）に置換します。',
+            defaultEnabled: true,
             match: (node, state) => {
                 // ここで型ガード。以降 node は確実に BinaryExpressionIR として推論される
                 if (node.type !== 'BinaryExpression') return false; // TSが node.props.left が存在することを保証してくれる
@@ -3408,6 +3445,8 @@
                             return [];
                     }
                 } catch (e) {
+                    // 定数式の評価中に例外が発生した場合は警告を出力し、適用対象外とする
+                    console.warn(`[ConstantFoldingRule] Failed to evaluate constant expression (Op: ${op}, L: ${lVal}, R: ${rVal}):`, e.message);
                     return [];
                 }
                 if (typeof result === 'number') {
@@ -3471,6 +3510,9 @@
         const IfToTernaryRule = {
             id: 'micro:if-to-ternary',
             type: 'micro',
+            name: 'If文の三項演算子化 (If to Ternary)',
+            description: 'シンプルなif/else代入やif/else式を、より短い三項演算子に変換します。',
+            defaultEnabled: true,
             match: (node, state) => {
                 // ここで型ガード
                 if (node.type !== 'IfStatement') return false; // props に as キャストや ['consequent'] と書く必要がなくなる
@@ -3661,6 +3703,9 @@
         const DeadStoreEliminationRule = {
             id: 'micro:dead-store-elimination',
             type: 'micro',
+            name: '不要代入の削除 (Dead Store Elimination)',
+            description: '再代入などで上書きされて一度も読み取られない無駄な代入や初期化コードを削除します。',
+            defaultEnabled: true,
             match: (node, state) => {
                 if (!state.analysisSnapshot) return false;
                 if (node.type === 'AssignmentExpression') {
@@ -3717,6 +3762,9 @@
         const CopyPropagationRule = {
             id: 'micro:copy-propagation',
             type: 'micro',
+            name: 'コピー伝播 (Copy Propagation)',
+            description: '変数から変数への単純コピー（例: a = b）がある場合、直接元の変数に書き換えます。',
+            defaultEnabled: true,
             match: (node, state) => {
                 if (node.type !== 'Identifier') return false;
                 if (!state.analysisSnapshot) return false;
@@ -3797,6 +3845,9 @@
         const ConstantPropagationRule = {
             id: 'micro:constant-propagation',
             type: 'micro',
+            name: '定数伝播 (Constant Propagation)',
+            description: '不変な定数の参照を、直接そのリテラル値に書き換えて展開します。',
+            defaultEnabled: true,
             match: (node, state) => {
                 if (node.type !== 'Identifier') return false;
                 if (!state.analysisSnapshot) return false;
@@ -3866,6 +3917,9 @@
         const UnreachableCodeEliminationRule = {
             id: 'micro:unreachable-code-elimination',
             type: 'micro',
+            name: '到達不能コード削除 (Unreachable Code Elimination)',
+            description: 'if (true) や if (false) の分岐を静的に判定し、通らない方のコードブロックを除去します。',
+            defaultEnabled: true,
             match: (node, state) => {
                 if (node.type !== 'IfStatement' && node.type !== 'ConditionalExpression') return false;
                 const ifNode = node;
@@ -4016,6 +4070,9 @@
         const FunctionInliningRule = {
             id: 'micro:function-inlining',
             type: 'micro',
+            name: '関数インライン化 (Function Inlining)',
+            description: '呼び出し頻度が高く、かつ小さい関数をインライン展開して呼び出しのオーバーヘッドを削減します。',
+            defaultEnabled: true,
             match: (node, state) => {
                 if (node.type !== 'CallExpression') return false;
                 const callNode = node;
@@ -4113,6 +4170,9 @@
         const DeadCodeEliminationRule = {
             id: 'macro:dead-code-elimination',
             type: 'macro',
+            name: 'デッドコード削除 (DCE)',
+            description: 'どこからも参照されていない、あるいは実行されることのない不要な変数や関数宣言を削除します。',
+            defaultEnabled: true,
             match: (node, state) => {
                 if (node.type !== 'VariableDeclaration') return false;
                 const varNode = node;
@@ -4186,19 +4246,25 @@
                * ここでの責務は、ビームサーチの「探索の深さ」と「幅（メモリ使用量）」の
                * ペース配分（スケジューリング）を Orchestrator に提案すること。
                */
-            static getSchedules(baseBeamWidth) {
-                const allRules = TransformRegistry.getAllRules(); // 登録されている全最適化ルールを取得
+            static getSchedules(baseBeamWidth, config, enabledRuleIds) {
+                // UIの設定に基づいて、有効なルールだけをフィルタリングする (データ駆動)
+                const allRules = TransformRegistry.getAllRules().filter(rule => {
+                    if (!enabledRuleIds) return rule.defaultEnabled;
+                    return enabledRuleIds[rule.id] ?? rule.defaultEnabled;
+                });
+                const stage1Depth = config?.stage1Depth !== undefined ? config.stage1Depth : 3;
+                const stage2Depth = config?.stage2Depth !== undefined ? config.stage2Depth : 10;
                 return [{
                     id: 'STAGE_1_BROAD_SEARCH',
                     rules: allRules,
-                    maxDepth: 3,
-                    // 浅く
+                    maxDepth: stage1Depth,
+                    // ユーザー指定の広域探索深度
                     beamWidth: baseBeamWidth * 2 // 広く（多様な状態候補を保持）
                 }, {
                     id: 'STAGE_2_DEEP_GOLFING',
                     rules: allRules,
-                    maxDepth: 15,
-                    // 深度を深く設定
+                    maxDepth: stage2Depth,
+                    // ユーザー指定の詳細探索深度
                     beamWidth: baseBeamWidth // ビーム幅を絞り込んで最適化を収束させる
                 }];
             }
@@ -4206,33 +4272,44 @@
         class IROptimizer {
             static optimize(initialRoot, config) {
                 const baseBeamWidth = config.enableBeamSearch ? config.beamWidth || 3 : 1;
-                let currentStates = [new CompilationState(initialRoot)];
-                let bestOverallState = currentStates[0];
-                let bestOverallCost = DecisionEngine.getInitialCost(bestOverallState); // PhaseScheduler から「探索リソースの配分計画」を受け取る
-                const schedules = PhaseScheduler.getSchedules(baseBeamWidth);
-                for (const schedule of schedules) {
-                    console.debug(`[IROptimizer] Entering ${schedule.id} (Depth: ${schedule.maxDepth}, Beam: ${schedule.beamWidth})`);
-                    for (let depth = 0; depth < schedule.maxDepth; depth++) {
-                        let allNextStates = [];
-                        for (const state of currentStates) {
-                            const snapshot = NativeFlowAnalyzer.analyze(state.irRoot);
-                            const analyzedState = state.withAnalysis(snapshot); // ミクロ・マクロの全ルールを一括スキャン
-                            const actions = ActionScanner.scan(analyzedState, schedule.rules);
-                            const expandedStates = StateExpander.expand(analyzedState, actions);
-                            allNextStates.push(...expandedStates);
+                const maxIterations = config.maxIterations !== undefined ? config.maxIterations : 5;
+                let currentRoot = initialRoot;
+                let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot));
+                for (let iter = 0; iter < maxIterations; iter++) {
+                    console.debug(`[IROptimizer] Iteration ${iter + 1}/${maxIterations} starting with Cost: ${lastBestCost}`);
+                    let currentStates = [new CompilationState(currentRoot)];
+                    let bestOverallState = currentStates[0];
+                    let bestOverallCost = lastBestCost; // PhaseScheduler から「探索リソースの配分計画」を受け取る
+                    const schedules = PhaseScheduler.getSchedules(baseBeamWidth, config, config.enabledRuleIds);
+                    for (const schedule of schedules) {
+                        console.debug(`[IROptimizer] Entering ${schedule.id} (Depth: ${schedule.maxDepth}, Beam: ${schedule.beamWidth})`);
+                        for (let depth = 0; depth < schedule.maxDepth; depth++) {
+                            let allNextStates = [];
+                            for (const state of currentStates) {
+                                const snapshot = NativeFlowAnalyzer.analyze(state.irRoot);
+                                const analyzedState = state.withAnalysis(snapshot); // ミクロ・マクロの全ルールを一括スキャン
+                                const actions = ActionScanner.scan(analyzedState, schedule.rules);
+                                const expandedStates = StateExpander.expand(analyzedState, actions);
+                                allNextStates.push(...expandedStates);
+                            }
+                            if (allNextStates.length === 0) break; // DecisionEngineによる状態の評価と枝刈り
+                            currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth);
+                            const currentBestCost = DecisionEngine.getInitialCost(currentStates[0]); // 最小コストを更新した場合は状態を保存する
+                            if (currentBestCost < bestOverallCost) {
+                                bestOverallState = currentStates[0];
+                                bestOverallCost = currentBestCost;
+                            } // コストが悪化した場合でも探索を中断せず、最大深度(maxDepth)まで探索を継続する
+                            console.debug(`[IROptimizer] Depth ${depth + 1}/${schedule.maxDepth} | Current Best Cost: ${currentBestCost} | Overall Best: ${bestOverallCost}`);
                         }
-                        if (allNextStates.length === 0) break; // DecisionEngineによる状態の評価と枝刈り
-                        // 適用順序の異なる各遷移先を均等に評価
-                        currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth);
-                        const currentBestCost = DecisionEngine.getInitialCost(currentStates[0]); // 最小コストを更新した場合は状態を保存する
-                        if (currentBestCost < bestOverallCost) {
-                            bestOverallState = currentStates[0];
-                            bestOverallCost = currentBestCost;
-                        } // コストが悪化した場合でも探索を中断せず、最大深度(maxDepth)まで探索を継続する
-                        console.debug(`[IROptimizer] Depth ${depth + 1}/${schedule.maxDepth} | Current Best Cost: ${currentBestCost} | Overall Best: ${bestOverallCost}`);
+                    } // 以前のイテレーションと比較してコストが改善しなかった場合は早期に終了する
+                    if (bestOverallCost >= lastBestCost) {
+                        console.debug(`[IROptimizer] Optimization converged or no cost reduction at iteration ${iter + 1}`);
+                        break;
                     }
+                    currentRoot = bestOverallState.irRoot;
+                    lastBestCost = bestOverallCost;
                 }
-                return bestOverallState.irRoot;
+                return currentRoot;
             }
         }
         class WorkerDetector {
@@ -4422,38 +4499,42 @@
                     };
                 });
             }
-            async compile(entryPath) {
-                if (this.compiledWorlds.has(entryPath)) {
-                    return this.compiledWorlds.get(entryPath);
+            async compile(entryPaths) {
+                const cacheKey = Array.isArray(entryPaths) ? entryPaths.join(',') : entryPaths;
+                if (this.compiledWorlds.has(cacheKey)) {
+                    return this.compiledWorlds.get(cacheKey);
                 }
                 this.logger({
                     type: 'info',
-                    msg: `Compiling world entry: ${entryPath}...`
+                    msg: `Compiling world entry: ${cacheKey}...`
                 }); // 1. AST解析（未実行の場合のみ処理する）
                 if (!this.parsedIRCache) {
                     this.parsedIRCache = SourceAnalyzerFacade.analyzeAll(this.vfs, this.filterOptions);
                 } // キャッシュからディープクローンしたツリーを使用する
                 const irTrees = this.cloneIRTrees(this.parsedIRCache);
                 const existingFiles = irTrees.map(t => t.filePath);
-                const entryTree = irTrees.find(t => t.filePath === entryPath);
-                if (!entryTree) {
-                    throw new Error(`Entry file ${entryPath} was not found in the parsed AST roots.`);
+                const paths = Array.isArray(entryPaths) ? entryPaths : [entryPaths];
+                for (const p of paths) {
+                    const entryTree = irTrees.find(t => t.filePath === p);
+                    if (!entryTree) {
+                        throw new Error(`Entry file ${p} was not found in the parsed AST roots.`);
+                    }
                 } // 2. Link standard ES modules
                 this.logger({
                     type: 'info',
-                    msg: `Linking standard dependencies for entry: ${entryPath}`
+                    msg: `Linking standard dependencies for entry: ${cacheKey}`
                 });
-                const linkedIR = IRLinker.link(irTrees, this.vfs, entryPath); // 3. Detect workers
+                const linkedIR = IRLinker.link(irTrees, this.vfs, entryPaths); // 3. Detect workers
                 this.logger({
                     type: 'info',
-                    msg: `Detecting and isolating multi-threaded dependencies in ${entryPath}`
+                    msg: `Detecting and isolating multi-threaded dependencies in ${cacheKey}`
                 });
                 const workerReplacements = WorkerDetector.detectAndReplace(linkedIR, existingFiles); // 4. Optimize IR (AST Golf)
                 let optimizedIR = linkedIR;
                 if (this.config.golfEnabled) {
                     this.logger({
                         type: 'info',
-                        msg: `Optimizing AST (Golf) for ${entryPath}`
+                        msg: `Optimizing AST (Golf) for ${cacheKey}`
                     });
                     optimizedIR = IROptimizer.optimize(linkedIR, this.config);
                 }
@@ -4468,7 +4549,7 @@
                     const wrappedWorker = `URL.createObjectURL(new Blob([${JSON.stringify(compiledWorkerCode)}], {type: "application/javascript"}))`;
                     jsCode = jsCode.split(replacement.placeholder).join(wrappedWorker);
                 }
-                this.compiledWorlds.set(entryPath, jsCode);
+                this.compiledWorlds.set(cacheKey, jsCode);
                 return jsCode;
             }
             extractExternalImports(node) {
@@ -4554,31 +4635,31 @@
                             if (htmlContent) {
                                 originalSize += new Blob([htmlContent]).size;
                             }
-                        } // 3. メインエントリの特定
-                        let mainEntryPath = '';
+                        } // 3. メインエントリの特定 (複数エントリー対応)
+                        let mainEntryPaths = [];
                         if (actualMode === 'html') {
                             const extractedJsStr = vfs.read('_meta_extracted_js.json');
                             if (extractedJsStr) {
                                 try {
                                     const entries = JSON.parse(extractedJsStr);
-                                    if (entries.length > 0) {
-                                        // PathResolverを使って、フォルダ名のズレを自動吸収して実在のパスを取得する
-                                        const allFiles = Array.from(vfs.getAll().keys());
-                                        const htmlBase = actualHtmlEntry || 'index.html';
-                                        mainEntryPath = PathResolver.resolve(htmlBase, entries[0], allFiles);
+                                    const allFiles = Array.from(vfs.getAll().keys());
+                                    const htmlBase = actualHtmlEntry || 'index.html';
+                                    for (const entry of entries) {
+                                        const resolved = PathResolver.resolve(htmlBase, entry, allFiles);
+                                        if (resolved) mainEntryPaths.push(resolved);
                                     }
                                 } catch (err) { }
                             }
-                            if (!mainEntryPath) {
+                            if (mainEntryPaths.length === 0) {
                                 const allFiles = Array.from(vfs.getAll().keys()).filter(f => !f.startsWith('_inline_script_') && !f.startsWith('_meta_'));
                                 const likelyEntry = allFiles.find(f => f.endsWith('main.tsx') || f.endsWith('index.tsx') || f.endsWith('main.ts') || f.endsWith('index.ts'));
-                                if (likelyEntry) mainEntryPath = likelyEntry; else {
+                                if (likelyEntry) mainEntryPaths.push(likelyEntry); else {
                                     const firstJs = allFiles.find(f => f.endsWith('.tsx') || f.endsWith('.ts') || f.endsWith('.jsx') || f.endsWith('.js'));
-                                    if (firstJs) mainEntryPath = firstJs;
+                                    if (firstJs) mainEntryPaths.push(firstJs);
                                 }
                             }
                         } else {
-                            mainEntryPath = 'input.js';
+                            mainEntryPaths.push('input.js');
                         } // 4. WorldCompilerによる再帰的ビルド
                         const worldCompiler = new WorldCompiler(vfs, state.config, filterOptions, logger); // HTML内のインラインスクリプトを個別に限界圧縮（In-place Multi-Chunk Optimization）
                         logger({
@@ -4591,8 +4672,8 @@
                             for (const item of inlineList) {
                                 try {
                                     let optCode = await worldCompiler.compile(item.path); // インラインスクリプトもTerserによる変数難読化（Mangle）の対象とする
-                                    if (state.config.golfEnabled) {
-                                        optCode = await VariableMangler.mangle(optCode);
+                                    if (state.config.golfEnabled && state.config.enableMangle) {
+                                        optCode = await VariableMangler.mangle(optCode, state.config.terserCompress);
                                     } // シングルクォートや空白違いの strict も安全に除去する
                                     const cleanCode = optCode.replace(/^["']use strict["'];?\s*/i, '');
                                     vfs.write(item.path, cleanCode);
@@ -4605,12 +4686,12 @@
                             }
                         } // 4-2. 外部メインエントリのコンパイル (存在する場合のみ)
                         let jsCodeStr = '';
-                        if (mainEntryPath) {
+                        if (mainEntryPaths.length > 0) {
                             logger({
                                 type: 'info',
-                                msg: `Compiling main entry: ${mainEntryPath}...`
-                            });
-                            jsCodeStr = await worldCompiler.compile(mainEntryPath);
+                                msg: `Compiling main entries: ${mainEntryPaths.join(', ')}...`
+                            }); // 複数エントリーの一括結合およびコンパイル処理
+                            jsCodeStr = await worldCompiler.compile(mainEntryPaths);
                         }
                         const externalImportsSet = worldCompiler.getExternalImports(); // 5. 圧縮と再結合 (Compress & Multiplex)
                         logger({
@@ -4619,6 +4700,8 @@
                         });
                         const compressorConfig = {
                             golfEnabled: state.config.golfEnabled,
+                            enableMangle: state.config.enableMangle,
+                            terserCompress: state.config.terserCompress,
                             addStrict: state.config.addStrict,
                             mode: actualMode,
                             // 推論されたモードを渡す
@@ -4763,7 +4846,6 @@
                 onChange: e => onLoadFiles(e.target.files)
             }))));
         }
-        // 1. データ駆動用スキーマの定義 (責務分離)
         const HTML_OPTIONS = [{
             key: 'htmlOptCss',
             label: 'CSSファイルをスタイルに変換'
@@ -4774,39 +4856,40 @@
             key: 'htmlOptImg',
             label: '画像をBase64でインライン化'
         }];
-        const GOLF_OPTIONS = [{
-            key: 'searchDepth',
-            label: '最大探索深度',
-            type: 'range',
-            min: 1,
-            max: 50
-        }, {
-            key: 'maxIterations',
-            label: '最大イテレーション回数',
-            type: 'range',
-            min: 1,
-            max: 50
-        }, {
-            key: 'enableBeamSearch',
-            label: '投機的探索 (Beam Search)',
-            type: 'checkbox',
-            icon: React.createElement(Split, {
-                className: "h-3 w-3 inline mr-1"
-            })
-        }, {
-            key: 'beamWidth',
-            label: 'ビーム幅',
-            type: 'range',
-            min: 1,
-            max: 10,
-            dependsOn: 'enableBeamSearch'
-        }];
         function ConfigPanel({
             state,
             dispatch,
             onCompile,
             isLoading
         }) {
+            // スライダーUIをレンダリングするヘルパー関数
+            const renderSlider = (key, label, desc, min, max, colorClass) => {
+                const val = state.config[key];
+                return React.createElement("div", {
+                    className: "flex flex-col gap-1.5"
+                }, React.createElement("div", {
+                    className: "flex items-center justify-between text-slate-300 text-xs font-medium"
+                }, React.createElement("div", {
+                    className: "flex flex-col"
+                }, React.createElement("span", null, label, " ", React.createElement("span", {
+                    className: "font-mono text-[10px] opacity-50 ml-0.5"
+                }, "(", key, ")")), React.createElement("span", {
+                    className: "text-[9px] text-slate-500 font-normal"
+                }, desc)), React.createElement("span", {
+                    className: `font-bold font-mono ${colorClass} bg-black/20 px-1.5 py-0.5 rounded shadow-inner`
+                }, val)), React.createElement("input", {
+                    className: "nop-slider",
+                    type: "range",
+                    min: min,
+                    max: max,
+                    value: val,
+                    onChange: e => dispatch({
+                        type: 'SET_CONFIG',
+                        key,
+                        value: parseInt(e.target.value)
+                    })
+                }));
+            };
             return React.createElement(React.Fragment, null, React.createElement(motion.div, {
                 initial: {
                     opacity: 0,
@@ -4919,65 +5002,160 @@
             }), React.createElement("div", {
                 className: "rounded-full border border-white/5 after:absolute after:bg-slate-400 after:border after:border-slate-300 after:content-[''] after:h-4 after:left-[2px] after:rounded-full after:top-[2px] after:transition-all after:w-4 bg-[#1e2125] h-5 w-9 peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:bg-amber-600 shadow-inner"
             }))), state.config.golfEnabled && React.createElement("div", {
-                className: "flex flex-col border border-white/5 rounded-xl gap-3 bg-amber-500/5 p-3.5 shadow-inner transition-all"
-            }, GOLF_OPTIONS.map(opt => {
-                // 依存関係がある場合、依存先のキーがON（true）でなければ表示しない
-                if (opt.dependsOn && !state.config[opt.dependsOn]) {
-                    return null;
-                } // 依存関係のある子コンポーネントに少し左マージン（インデント）を与える
-                const indentClass = opt.dependsOn ? "pl-4 border-l-2 border-[#0ea5e9]/30 ml-2 mt-1 gap-2 flex flex-col" : "flex flex-col";
-                if (opt.type === 'range') {
-                    const currentValue = state.config[opt.key];
-                    const isBeamWidth = opt.key === 'beamWidth';
-                    const badgeColorClass = isBeamWidth ? "text-[#0ea5e9]" : "text-amber-400";
-                    return React.createElement("div", {
-                        key: opt.key,
-                        className: indentClass
-                    }, React.createElement("div", {
-                        className: "flex items-center justify-between text-slate-300 text-xs font-medium"
-                    }, React.createElement("span", null, opt.label, " ", React.createElement("span", {
-                        className: "font-mono text-[10px] opacity-50"
-                    }, "(", opt.key, ")")), React.createElement("span", {
-                        className: `font-bold font-mono ${badgeColorClass}`
-                    }, currentValue)), React.createElement("input", {
-                        className: "nop-slider",
-                        type: "range",
-                        max: opt.max || 50,
-                        min: opt.min || 1,
-                        value: currentValue,
-                        onChange: e => dispatch({
+                className: "flex flex-col gap-4 mt-1 transition-all"
+            }, React.createElement("div", {
+                className: "flex flex-col border border-amber-500/20 rounded-xl bg-amber-500/5 p-3.5 shadow-inner"
+            }, React.createElement("div", {
+                className: "flex items-center gap-1.5 text-[10px] font-bold text-amber-500/90 mb-3 uppercase tracking-wider border-b border-amber-500/10 pb-1.5"
+            }, React.createElement(Award, {
+                className: "w-3.5 h-3.5"
+            }), "1. \u8AD6\u7406\u69CB\u9020\u5727\u7E2E (AST\u30B3\u30FC\u30C9\u30B4\u30EB\u30D5)"), React.createElement("div", {
+                className: "flex flex-col gap-1.5 mb-4 mt-1"
+            }, React.createElement("div", {
+                className: "flex items-center gap-1.5 text-[10px] font-bold text-amber-500/80 uppercase tracking-wider"
+            }, React.createElement(Repeat, {
+                className: "w-3 h-3"
+            }), "\u5168\u4F53\u53CD\u5FA9\u5236\u5FA1 (Orchestrator)"), React.createElement("div", {
+                className: "mt-1"
+            }, renderSlider('maxIterations', '最大イテレーション', '限界に達するまで全体を回す最大周回数', 1, 20, 'text-amber-400'))), React.createElement("div", {
+                className: "flex flex-col border border-emerald-500/20 rounded-lg bg-emerald-500/5 p-3 shadow-inner ml-2 mb-4"
+            }, React.createElement("div", {
+                className: "flex items-center gap-1.5 text-[10px] font-bold text-emerald-500/90 mb-3 uppercase tracking-wider"
+            }, React.createElement(Layers, {
+                className: "w-3.5 h-3.5"
+            }), "\u5404\u5468\u56DE\u306E\u30D5\u30A7\u30FC\u30BA\u9032\u884C (Phase Scheduler)"), React.createElement("div", {
+                className: "flex flex-col gap-3"
+            }, renderSlider('stage1Depth', 'STAGE 1: 粗削り', '広域探索の深さ (Depth)', 1, 15, 'text-emerald-400'), renderSlider('stage2Depth', 'STAGE 2: 極限圧縮', '詳細探索の深さ (Depth)', 1, 50, 'text-emerald-400')), React.createElement("div", {
+                className: "flex flex-col border border-sky-500/20 rounded-lg bg-sky-500/5 p-3 mt-4 shadow-inner ml-2"
+            }, React.createElement("div", {
+                className: "flex items-center gap-1.5 text-[10px] font-bold text-sky-400/90 mb-3 uppercase tracking-wider"
+            }, React.createElement(Cpu, {
+                className: "w-3.5 h-3.5"
+            }), "\u63A2\u7D22\u30A2\u30EB\u30B4\u30EA\u30BA\u30E0 (Search Engine)"), React.createElement("div", {
+                className: "flex flex-col gap-3"
+            }, React.createElement("div", {
+                className: "flex items-center justify-between text-slate-300 text-xs"
+            }, React.createElement("div", {
+                className: "flex flex-col"
+            }, React.createElement("span", {
+                className: "font-medium text-sky-300"
+            }, React.createElement(Split, {
+                className: "h-3 w-3 inline mr-1"
+            }), "\u6295\u6A5F\u7684\u4E26\u884C\u63A2\u7D22 ", React.createElement("span", {
+                className: "font-mono text-[10px] opacity-50 ml-0.5"
+            }, "(enableBeamSearch)")), React.createElement("span", {
+                className: "text-[9px] text-slate-500 ml-4 font-normal"
+            }, "\u8907\u6570\u306E\u4E16\u754C\u7DDA\u3092\u5C55\u958B\u3057\u3066\u6700\u9069\u89E3\u3092\u63A2\u3059")), React.createElement("label", {
+                className: "relative inline-flex items-center cursor-pointer"
+            }, React.createElement("input", {
+                type: "checkbox",
+                className: "sr-only peer",
+                checked: state.config.enableBeamSearch,
+                onChange: e => dispatch({
+                    type: 'SET_CONFIG',
+                    key: 'enableBeamSearch',
+                    value: e.target.checked
+                })
+            }), React.createElement("div", {
+                className: "w-7 h-4 bg-[#1e2125] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-sky-500 shadow-inner border border-white/5"
+            }))), state.config.enableBeamSearch && React.createElement("div", {
+                className: "mt-1 pl-2 border-l-2 border-sky-500/30"
+            }, renderSlider('beamWidth', '基本ビーム幅', '同時に保持する並行世界の最大数', 1, 10, 'text-sky-400')))), React.createElement("div", {
+                className: "flex flex-col border border-purple-500/20 rounded-lg bg-purple-500/5 p-3 shadow-inner ml-2 mt-4 mb-1"
+            }, React.createElement("div", {
+                className: "flex items-center gap-1.5 text-[10px] font-bold text-purple-400/90 mb-3 uppercase tracking-wider border-b border-purple-500/10 pb-1.5"
+            }, React.createElement(Layers, {
+                className: "w-3.5 h-3.5"
+            }), "\u6700\u9069\u5316\u30EB\u30FC\u30EB\u306E\u500B\u5225\u5236\u5FA1 (Auto Discovered)"), React.createElement("div", {
+                className: "flex flex-col gap-3"
+            }, TransformRegistry.getAllRules().map(rule => {
+                const isEnabled = state.config.enabledRuleIds[rule.id] ?? rule.defaultEnabled;
+                return React.createElement("div", {
+                    key: rule.id,
+                    className: "flex items-center justify-between text-slate-300 text-xs"
+                }, React.createElement("div", {
+                    className: "flex flex-col max-w-[80%]"
+                }, React.createElement("span", {
+                    className: "font-medium text-purple-300"
+                }, rule.name, React.createElement("span", {
+                    className: "font-mono text-[9px] opacity-50 ml-1.5 px-1 py-0.5 rounded bg-black/30"
+                }, rule.type)), React.createElement("span", {
+                    className: "text-[9px] text-slate-500 font-normal leading-tight mt-0.5"
+                }, rule.description)), React.createElement("label", {
+                    className: "relative inline-flex items-center cursor-pointer shrink-0"
+                }, React.createElement("input", {
+                    type: "checkbox",
+                    className: "sr-only peer",
+                    checked: isEnabled,
+                    onChange: e => {
+                        const newRules = {
+                            ...state.config.enabledRuleIds,
+                            [rule.id]: e.target.checked
+                        };
+                        dispatch({
                             type: 'SET_CONFIG',
-                            key: opt.key,
-                            value: parseInt(e.target.value)
-                        })
-                    }));
-                }
-                if (opt.type === 'checkbox') {
-                    const isChecked = state.config[opt.key];
-                    return React.createElement("div", {
-                        key: opt.key,
-                        className: "flex items-center justify-between text-slate-300 text-xs pt-1"
-                    }, React.createElement("div", null, React.createElement("span", {
-                        className: "font-medium text-brand-300"
-                    }, opt.icon, opt.label, " ", React.createElement("span", {
-                        className: "font-mono text-[10px] opacity-50 ml-1.5"
-                    }, "(", opt.key, ")"))), React.createElement("label", {
-                        className: "relative inline-flex items-center cursor-pointer"
-                    }, React.createElement("input", {
-                        type: "checkbox",
-                        className: "sr-only peer",
-                        checked: isChecked,
-                        onChange: e => dispatch({
-                            type: 'SET_CONFIG',
-                            key: opt.key,
-                            value: e.target.checked
-                        })
-                    }), React.createElement("div", {
-                        className: "w-7 h-4 bg-[#1e2125] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#0ea5e9] shadow-inner"
-                    })));
-                }
-                return null;
+                            key: 'enabledRuleIds',
+                            value: newRules
+                        });
+                    }
+                }), React.createElement("div", {
+                    className: "w-7 h-4 bg-[#1e2125] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-500 shadow-inner border border-white/5"
+                })));
+            }))))), React.createElement("div", {
+                className: "flex flex-col border border-indigo-500/20 rounded-xl bg-indigo-500/5 p-3.5 shadow-inner"
+            }, React.createElement("div", {
+                className: "flex items-center gap-1.5 text-[10px] font-bold text-indigo-400/90 mb-3 uppercase tracking-wider border-b border-indigo-500/10 pb-1.5"
+            }, React.createElement(Sliders, {
+                className: "w-3.5 h-3.5"
+            }), "2. \u7269\u7406\u8868\u9762\u5727\u7E2E (Physical Compressor)"), React.createElement("div", {
+                className: "flex flex-col gap-3 mt-1"
+            }, React.createElement("div", {
+                className: "flex items-center justify-between text-slate-300 text-xs"
+            }, React.createElement("div", {
+                className: "flex flex-col"
+            }, React.createElement("span", {
+                className: "font-medium text-indigo-300"
+            }, "\u5909\u6570\u540D\u306E\u4E00\u6587\u5B57\u5316 (Terser) ", React.createElement("span", {
+                className: "font-mono text-[10px] opacity-50 ml-0.5"
+            }, "(enableMangle)")), React.createElement("span", {
+                className: "text-[9px] text-slate-500 font-normal"
+            }, "Terser\u306B\u3088\u308B\u5909\u6570\u540D\u30FB\u95A2\u6570\u540D\u306E\u4E00\u6587\u5B57\u5316(toplevel: true)\u3092\u5B9F\u884C\u3059\u308B")), React.createElement("label", {
+                className: "relative inline-flex items-center cursor-pointer"
+            }, React.createElement("input", {
+                type: "checkbox",
+                className: "sr-only peer",
+                checked: state.config.enableMangle,
+                onChange: e => dispatch({
+                    type: 'SET_CONFIG',
+                    key: 'enableMangle',
+                    value: e.target.checked
+                })
+            }), React.createElement("div", {
+                className: "w-7 h-4 bg-[#1e2125] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-500 shadow-inner border border-white/5"
             }))), React.createElement("div", {
+                className: "flex items-center justify-between text-slate-300 text-xs border-t border-indigo-500/10 pt-2 mt-1"
+            }, React.createElement("div", {
+                className: "flex flex-col"
+            }, React.createElement("span", {
+                className: "font-medium text-indigo-300"
+            }, "Terser\u306B\u3088\u308B\u6975\u9650\u69CB\u9020\u5727\u7E2E ", React.createElement("span", {
+                className: "font-mono text-[10px] opacity-50 ml-0.5"
+            }, "(terserCompress)")), React.createElement("span", {
+                className: "text-[9px] text-slate-500 font-normal"
+            }, "\u672C\u756A\u7528\u3002OFF\u306B\u3059\u308B\u3068\u81EA\u4F5CIR\u6700\u9069\u5316\u306E\u7D14\u7C8B\u306A\u52B9\u679C\u306E\u307F\u3092\u6E2C\u5B9A\u3067\u304D\u307E\u3059")), React.createElement("label", {
+                className: "relative inline-flex items-center cursor-pointer"
+            }, React.createElement("input", {
+                type: "checkbox",
+                className: "sr-only peer",
+                checked: state.config.terserCompress,
+                onChange: e => dispatch({
+                    type: 'SET_CONFIG',
+                    key: 'terserCompress',
+                    value: e.target.checked
+                })
+            }), React.createElement("div", {
+                className: "w-7 h-4 bg-[#1e2125] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-500 shadow-inner border border-white/5"
+            }))))))), React.createElement("div", {
                 className: "flex flex-col border-t border-white/5 gap-3 pt-4"
             }, React.createElement("div", {
                 className: "flex items-center gap-2 font-bold text-sky-400 text-xs tracking-wider uppercase"
@@ -4997,7 +5175,7 @@
                 })
             }), React.createElement("span", {
                 className: "checkmark"
-            }), "node_modules \u3092\u30B3\u30F3\u30D1\u30A4\u30EB\u5BFE\u8C61\u306B\u542B\u3080 ", React.createElement("span", {
+            }), "node_modules \u3092\u542B\u3080 ", React.createElement("span", {
                 className: "font-mono text-[10px] opacity-50 ml-1"
             }, "(includeNodeModules)")), React.createElement("div", {
                 className: "flex flex-col gap-1.5 mt-1"
@@ -5007,7 +5185,7 @@
                 className: "font-mono text-[10px] opacity-50 ml-1"
             }, "(excludePatterns)")), React.createElement("input", {
                 type: "text",
-                className: "nop-input text-xs font-mono w-full px-3 py-2 bg-slate-950/40 border border-white/10 rounded-lg text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500",
+                className: "nop-input text-xs font-mono w-full px-3 py-2 bg-slate-950/40 border border-white/10 rounded-lg text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors",
                 placeholder: "\u4F8B: node_modules, \\\\.config\\\\., \\\\.d\\\\.ts",
                 value: state.config.excludePatternsStr || '',
                 onChange: e => dispatch({
@@ -5015,15 +5193,13 @@
                     key: 'excludePatternsStr',
                     value: e.target.value
                 })
-            }), React.createElement("p", {
-                className: "text-[10px] text-slate-500 leading-normal"
-            }, "\u6307\u5B9A\u3055\u308C\u305F\u6587\u5B57\u5217\u306B\u30DE\u30C3\u30C1\u3059\u308B\u30D1\u30B9\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u89E3\u6790\u30FB\u7D50\u5408\u304B\u3089\u9664\u5916\u3057\u307E\u3059\u3002\u6B63\u898F\u8868\u73FE\u3068\u3057\u3066\u5224\u5B9A\u3055\u308C\u307E\u3059\u3002")))), React.createElement("button", {
+            })))), React.createElement("button", {
                 className: "nop-btn w-full py-3 text-white bg-gradient-to-r from-[#0284c7] to-[#0ea5e9] font-bold tracking-wider rounded-xl shadow-lg shadow-black/20",
                 onClick: onCompile,
                 disabled: isLoading
             }, React.createElement(Play, {
                 className: "h-4 w-4 mr-1.5 inline"
-            }), " SoC\u30B4\u30EB\u30D5\u30B3\u30F3\u30D1\u30A4\u30EB\u3092\u5B9F\u884C")), React.createElement(AnimatePresence, null, state.files.size > 0 && React.createElement(motion.div, {
+            }), " SoC\u30B4\u30EB\u30D5\u30B3\u30F3\u30D1\u30A4\u30EB\u3092\u5B9F\u884C")), state.files.size > 0 && React.createElement(motion.div, {
                 initial: {
                     opacity: 0,
                     y: 10
@@ -5032,26 +5208,25 @@
                     opacity: 1,
                     y: 0
                 },
-                exit: {
-                    opacity: 0,
-                    y: 10
+                transition: {
+                    duration: 0.3,
+                    delay: 0.2
                 },
-                className: "nop-panel p-5 min-h-[250px] flex flex-col"
+                className: "nop-panel p-4 flex flex-col gap-3"
             }, React.createElement("div", {
-                className: "flex items-center justify-between border-b border-white/5 pb-3 mb-3 shrink-0"
-            }, React.createElement("div", {
-                className: "flex items-center gap-2"
+                className: "flex items-center gap-2 border-b border-white/5 pb-2 text-emerald-400 font-bold text-xs uppercase tracking-wider"
             }, React.createElement(FolderTree, {
-                className: "h-5 text-[#4da6ff] w-5"
-            }), React.createElement("h2", {
-                className: "font-bold text-sm text-slate-200"
-            }, "\u691C\u51FA\u3055\u308C\u305F\u30A2\u30BB\u30C3\u30C8 (", state.files.size, ")"))), React.createElement("div", {
-                className: "flex flex-col gap-1 flex-1 font-mono max-h-[300px] overflow-y-auto pr-1 text-xs"
-            }, Array.from(state.files.keys()).map(name => React.createElement("div", {
-                key: name,
-                className: "truncate opacity-80 hover:opacity-100 cursor-pointer",
-                title: name
-            }, "\uD83D\uDCC4 ", name))))));
+                className: "h-4 w-4"
+            }), " \u30ED\u30FC\u30C9\u6E08\u307F\u30D5\u30A1\u30A4\u30EB (", state.files.size, ")"), React.createElement("div", {
+                className: "max-h-48 overflow-y-auto pr-2 custom-scrollbar"
+            }, Array.from(state.files.keys()).map(f => React.createElement("div", {
+                key: f,
+                className: "text-[11px] text-slate-300 py-1.5 border-b border-white/5 truncate font-mono flex items-center justify-between group"
+            }, React.createElement("span", {
+                className: "truncate pr-2"
+            }, f), React.createElement("span", {
+                className: "text-slate-500 text-[9px] whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity"
+            }, (state.files.get(f)?.length || 0).toLocaleString(), " B"))))));
         }
         function Scoreboard({
             stats
@@ -5226,6 +5401,10 @@
             }, "\u30E2\u30B8\u30E5\u30FC\u30EB\u3092\u89E3\u6790\u4E2D...")))));
         }
         const compiler = new CompilerPipelineFacade();
+        const initialEnabledRules = {};
+        TransformRegistry.getAllRules().forEach(rule => {
+            initialEnabledRules[rule.id] = rule.defaultEnabled;
+        });
         const initialState = {
             files: new Map(),
             mode: 'html',
@@ -5234,12 +5413,17 @@
                 htmlOptJs: true,
                 htmlOptImg: true,
                 golfEnabled: true,
+                enableMangle: true,
+                terserCompress: true,
                 searchDepth: 10,
+                stage1Depth: 3,
+                stage2Depth: 10,
                 timeoutLimit: 15,
                 enableAsyncGolf: true,
                 enableBeamSearch: false,
                 beamWidth: 3,
                 maxIterations: 5,
+                enabledRuleIds: initialEnabledRules,
                 addStrict: true,
                 directLang: 'js',
                 htmlEntry: '',
