@@ -2732,14 +2732,32 @@
                 const newRootNode = this.applyMutations(this.baseState.irRoot);
                 return this.baseState.withIRRoot(newRootNode);
             }
-            applyMutations(node) {
+            applyMutations(node, excludedIds = new Set()) {
                 // ノード自体が置換対象の場合（ルートを含む部分木の置換など）
                 const nodeMutation = this.mutations.get(node.irNodeId);
-                if (nodeMutation && nodeMutation.type === 'replace' && nodeMutation.newNode) {
-                    return this.applyMutations(nodeMutation.newNode); // 挿入されるノード内にさらにMutationがあるかもしれないため再帰
+                if (nodeMutation && nodeMutation.type === 'replace' && nodeMutation.newNode && !excludedIds.has(node.irNodeId)) {
+                    excludedIds.add(node.irNodeId);
+                    const result = this.applyMutations(nodeMutation.newNode, excludedIds);
+                    excludedIds.delete(node.irNodeId); // バックトラック
+                    return result;
                 }
                 let hasChanges = false;
-                const newProps = {}; // プロパティ内の子ノード参照の更新
+                const newProps = {};
+                const getFinalId = id => {
+                    let currentId = id;
+                    const visited = new Set();
+                    while (true) {
+                        if (visited.has(currentId)) break;
+                        visited.add(currentId);
+                        const m = this.mutations.get(currentId);
+                        if (m && m.type === 'replace' && m.newNode) {
+                            currentId = m.newNode.irNodeId;
+                        } else {
+                            break;
+                        }
+                    }
+                    return currentId;
+                }; // プロパティ内の子ノード参照の更新
                 for (const [key, val] of Object.entries(node.props)) {
                     if (Array.isArray(val)) {
                         const newArray = [];
@@ -2749,14 +2767,17 @@
                                 const m = this.mutations.get(item.irNodeId);
                                 if (m && m.type === 'remove') {
                                     arrayChanged = true; // 削除
-                                } else if (m && m.type === 'replace' && m.newNode) {
-                                    arrayChanged = true;
-                                    newArray.push({
-                                        type: 'ref',
-                                        irNodeId: m.newNode.irNodeId
-                                    });
                                 } else {
-                                    newArray.push(item);
+                                    const finalId = getFinalId(item.irNodeId);
+                                    if (finalId !== item.irNodeId) {
+                                        arrayChanged = true;
+                                        newArray.push({
+                                            type: 'ref',
+                                            irNodeId: finalId
+                                        });
+                                    } else {
+                                        newArray.push(item);
+                                    }
                                 }
                             } else {
                                 newArray.push(item);
@@ -2769,14 +2790,17 @@
                         if (m && m.type === 'remove') {
                             hasChanges = true;
                             newProps[key] = null; // または適切に削除
-                        } else if (m && m.type === 'replace' && m.newNode) {
-                            hasChanges = true;
-                            newProps[key] = {
-                                type: 'ref',
-                                irNodeId: m.newNode.irNodeId
-                            };
                         } else {
-                            newProps[key] = val;
+                            const finalId = getFinalId(val.irNodeId);
+                            if (finalId !== val.irNodeId) {
+                                hasChanges = true;
+                                newProps[key] = {
+                                    type: 'ref',
+                                    irNodeId: finalId
+                                };
+                            } else {
+                                newProps[key] = val;
+                            }
                         }
                     } else {
                         newProps[key] = val;
@@ -2787,11 +2811,8 @@
                     const m = this.mutations.get(child.irNodeId);
                     if (m && m.type === 'remove') {
                         hasChanges = true; // 子ノードの削除
-                    } else if (m && m.type === 'replace' && m.newNode) {
-                        hasChanges = true;
-                        newChildren.push(this.applyMutations(m.newNode));
                     } else {
-                        const newChild = this.applyMutations(child);
+                        const newChild = this.applyMutations(child, excludedIds);
                         newChildren.push(newChild);
                         if (newChild !== child) {
                             hasChanges = true;
@@ -2857,9 +2878,14 @@
                     } // 3. ルール適用後の状態を次の探索ステップの候補として確定
                     for (const tx of ruleTransactions) {
                         const newState = tx.commit();
+                        const newlyApplied = new Set(baseState.metadata.appliedActions || []);
+                        for (const action of ruleActions) {
+                            newlyApplied.add(`${action.ruleId}:${action.targetIrNodeId}`);
+                        }
                         const newMetadata = {
                             ...newState.metadata,
-                            lastAction: `Applied rule: ${ruleId}`
+                            lastAction: `Applied rule: ${ruleId}`,
+                            appliedActions: newlyApplied
                         };
                         nextStates.push(new CompilationState(newState.irRoot, newMetadata, newState.analysisSnapshot));
                     }
@@ -2871,10 +2897,10 @@
         }
         class CostEstimator {
             /**
-               * 文字列を生成せずに、IRツリーから最終的なJS出力時の文字数(バイト数)をO(N)で推測計算する
+               * 文字列を実際に生成することなく、IRツリーから最終的なJavaScript出力時の文字数（バイト数）をO(N)で推測計算します。
                */
             static estimate(node) {
-                if (!node) return 0; // 子ノードを高速に引くためのマップを構築
+                if (!node) return 0; // 子ノードへの高速アクセスのため、マップを構築
                 const nodeMap = new Map();
                 const buildMap = n => {
                     nodeMap.set(n.irNodeId, n);
@@ -2884,57 +2910,176 @@
                 const calc = n => {
                     if (!n) return 0;
                     switch (n.type) {
+                        // --- プログラム・ブロック構造 ---
                         case 'IRRoot':
                         case 'File':
                         case 'Program':
                         case 'BlockStatement':
+                        case 'ClassBody':
                             return n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
+                        // --- 宣言 ---
                         case 'VariableDeclaration':
-                            // 例: "let " / "const " など（大まかに6文字とする） + 宣言子の長さ
                             return 6 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
                         case 'VariableDeclarator':
-                            // id = init
                             return calcChild(n.props['id'], nodeMap, calc) + 3 + calcChild(n.props['init'], nodeMap, calc);
+                        // --- 識別子・リテラル ---
                         case 'Identifier':
+                        case 'JSXIdentifier':
                             return n.props['name'] ? String(n.props['name']).length : 0;
                         case 'NumericLiteral':
                         case 'BooleanLiteral':
                             return n.props['value'] !== undefined ? String(n.props['value']).length : 0;
                         case 'StringLiteral':
+                        case 'DirectiveLiteral':
                             return n.props['value'] ? String(n.props['value']).length + 2 : 2;
-                        // +2 はクォート分
+                        // クォート分の2バイトを加算
+                        case 'RegExpLiteral':
+                            return n.props['pattern'] ? String(n.props['pattern']).length + 2 : 2;
+                        // /pattern/形式
+                        case 'NullLiteral':
+                            return 4;
+                        // "null"
+                        case 'ThisExpression':
+                            return 4;
+                        // "this"
+                        // --- 式・演算 ---
                         case 'BinaryExpression':
                         case 'LogicalExpression':
-                            // left op right
                             const op = n.props['operator'] ? String(n.props['operator']).length : 0;
                             return calcChild(n.props['left'], nodeMap, calc) + op + 2 + calcChild(n.props['right'], nodeMap, calc);
-                        // +2 for spaces
+                        case 'AssignmentExpression':
+                            const assignOp = n.props['operator'] ? String(n.props['operator']).length : 1;
+                            return calcChild(n.props['left'], nodeMap, calc) + assignOp + 2 + calcChild(n.props['right'], nodeMap, calc);
+                        case 'UnaryExpression':
+                            const uOp = n.props['operator'] ? String(n.props['operator']) : '';
+                            return uOp.length + (uOp.match(/[a-z]/i) ? 1 : 0) + calcChild(n.props['argument'], nodeMap, calc);
+                        // typeof x と !x の差分考慮
+                        case 'UpdateExpression':
+                            return calcChild(n.props['argument'], nodeMap, calc) + 2;
+                        // ++ または --
                         case 'ExpressionStatement':
                             return calcChild(n.props['expression'], nodeMap, calc) + 1;
-                        // +1 はセミコロン
+                        // セミコロンの1バイト
+                        // --- 関数・メソッド呼び出し ---
                         case 'CallExpression':
-                            // callee(args)
                             let argsCost = 0;
                             const args = n.props['arguments'];
                             if (Array.isArray(args)) {
-                                for (const arg of args) {
-                                    if (arg && arg.type === 'ref') {
-                                        const child = nodeMap.get(arg.irNodeId);
-                                        if (child) {
-                                            argsCost += calc(child) + 2; // +2 for comma and space
-                                        }
-                                    }
-                                }
+                                for (const arg of args) argsCost += calcChild(arg, nodeMap, calc) + 1; // カンマの1バイト
                             }
                             return calcChild(n.props['callee'], nodeMap, calc) + 2 + argsCost;
-                        // 2 for parentheses
+                        // 丸括弧の2バイト
+                        case 'NewExpression':
+                            let newArgsCost = 0;
+                            const newArgs = n.props['arguments'];
+                            if (Array.isArray(newArgs)) {
+                                for (const arg of newArgs) newArgsCost += calcChild(arg, nodeMap, calc) + 1;
+                            }
+                            return 4 + calcChild(n.props['callee'], nodeMap, calc) + 2 + newArgsCost;
+                        // "new " の4バイトを加算
                         case 'MemberExpression':
-                            // object.property
-                            return calcChild(n.props['object'], nodeMap, calc) + 1 + calcChild(n.props['property'], nodeMap, calc);
-                        // 1 for dot
+                            const isComputed = n.props['computed'];
+                            return calcChild(n.props['object'], nodeMap, calc) + (isComputed ? 2 : 1) + calcChild(n.props['property'], nodeMap, calc);
+                        // obj[prop] と obj.prop の考慮
+                        // --- 配列・オブジェクト ---
+                        case 'ArrayExpression':
+                        case 'ArrayPattern':
+                            const arrEls = n.props['elements'] || [];
+                            let arrCost = 2; // []の2バイト
+                            if (Array.isArray(arrEls)) {
+                                for (const el of arrEls) arrCost += calcChild(el, nodeMap, calc) + 1;
+                            }
+                            return arrCost;
+                        case 'ObjectExpression':
+                        case 'ObjectPattern':
+                            const objProps = n.props['properties'] || [];
+                            let objCost = 2; // {}の2バイト
+                            if (Array.isArray(objProps)) {
+                                for (const prop of objProps) objCost += calcChild(prop, nodeMap, calc) + 1;
+                            }
+                            return objCost;
+                        case 'ObjectProperty':
+                            return calcChild(n.props['key'], nodeMap, calc) + 1 + calcChild(n.props['value'], nodeMap, calc);
+                        // key: valueのコロン分
+                        case 'SpreadElement':
+                        case 'RestElement':
+                            return 3 + calcChild(n.props['argument'], nodeMap, calc);
+                        // スプレッド演算子...の3バイト
+                        // --- 制御構文・分岐 ---
+                        case 'IfStatement':
+                        case 'ConditionalExpression':
+                            return 4 + calcChild(n.props['test'], nodeMap, calc) + 2 + calcChild(n.props['consequent'], nodeMap, calc) + (n.props['alternate'] ? 4 + calcChild(n.props['alternate'], nodeMap, calc) : 0);
+                        case 'SwitchStatement':
+                            let casesCost = 0;
+                            const cases = n.props['cases'] || [];
+                            if (Array.isArray(cases)) {
+                                for (const c of cases) casesCost += calcChild(c, nodeMap, calc);
+                            }
+                            return 8 + calcChild(n.props['discriminant'], nodeMap, calc) + 4 + casesCost;
+                        // switch(x) {}
+                        case 'SwitchCase':
+                            return (n.props['test'] ? 5 + calcChild(n.props['test'], nodeMap, calc) : 7) + 1 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
+                        // case x: または default:
+                        // --- ループ ---
+                        case 'ForStatement':
+                            return 4 + calcChild(n.props['init'], nodeMap, calc) + 1 + calcChild(n.props['test'], nodeMap, calc) + 1 + calcChild(n.props['update'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
+                        case 'ForOfStatement':
+                        case 'ForInStatement':
+                            return 5 + calcChild(n.props['left'], nodeMap, calc) + 4 + calcChild(n.props['right'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
+                        case 'WhileStatement':
+                            return 7 + calcChild(n.props['test'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
+                        case 'DoWhileStatement':
+                            return 5 + calcChild(n.props['body'], nodeMap, calc) + 7 + calcChild(n.props['test'], nodeMap, calc) + 2;
+                        // do {} while();
+                        // --- 制御移動・例外処理 ---
+                        case 'ReturnStatement':
+                            return 7 + calcChild(n.props['argument'], nodeMap, calc);
+                        // "return " + arg
+                        case 'BreakStatement':
+                        case 'ContinueStatement':
+                            return (n.type === 'BreakStatement' ? 5 : 8) + (n.props['label'] ? 1 + calcChild(n.props['label'], nodeMap, calc) : 0) + 1;
+                        case 'ThrowStatement':
+                            return 6 + calcChild(n.props['argument'], nodeMap, calc);
+                        case 'TryStatement':
+                            return 5 + calcChild(n.props['block'], nodeMap, calc) + calcChild(n.props['handler'], nodeMap, calc) + (n.props['finalizer'] ? 7 + calcChild(n.props['finalizer'], nodeMap, calc) : 0);
+                        case 'CatchClause':
+                            return 5 + calcChild(n.props['param'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
+                        // --- テンプレート文字列 ---
+                        case 'TemplateLiteral':
+                            let tmplCost = 2; // バッククォートの2バイト
+                            if (Array.isArray(n.props['quasis'])) tmplCost += n.props['quasis'].reduce((acc, q) => acc + calcChild(q, nodeMap, calc), 0);
+                            if (Array.isArray(n.props['expressions'])) tmplCost += n.props['expressions'].reduce((acc, e) => acc + 3 + calcChild(e, nodeMap, calc), 0); // ${}
+                            return tmplCost;
+                        case 'TemplateElement':
+                            return n.props['value']?.raw ? String(n.props['value'].raw).length : 0;
+                        // --- 関数・クラス定義 ---
+                        case 'ArrowFunctionExpression':
+                        case 'FunctionDeclaration':
+                        case 'FunctionExpression':
+                        case 'ClassMethod':
+                            let paramCost = 0;
+                            const params = n.props['params'] || [];
+                            if (Array.isArray(params)) {
+                                for (const p of params) paramCost += calcChild(p, nodeMap, calc) + 1;
+                            }
+                            const baseCost = n.type === 'ArrowFunctionExpression' ? 4 : 9; // "()=>" vs "function "
+                            return baseCost + paramCost + calcChild(n.props['id'], nodeMap, calc) + calcChild(n.props['body'], nodeMap, calc);
+                        case 'ClassDeclaration':
+                        case 'ClassExpression':
+                            return 6 + calcChild(n.props['id'], nodeMap, calc) + (n.props['superClass'] ? 9 + calcChild(n.props['superClass'], nodeMap, calc) : 0) + calcChild(n.props['body'], nodeMap, calc);
+                        // --- モジュール構文 ---
+                        case 'ImportDeclaration':
+                        case 'ExportNamedDeclaration':
+                        case 'ExportDefaultDeclaration':
+                        case 'ExportAllDeclaration':
+                            return 15 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
+                        // --- コメント (無視) ---
+                        case 'CommentLine':
+                        case 'CommentBlock':
+                            return 0;
+                        // --- 未知のノード (データ駆動フォールバック) ---
                         default:
-                            // 未定義のノードタイプが検出された場合は警告を出力し、フォールバック値を使用する
-                            console.warn(`[CostEstimator] Unknown node type encountered: '${n.type}' (NodeID: ${n.irNodeId}). Using fallback estimation.`); // 未定義ノードに対するフォールバック計算
+                            // 子ノードの合計コストと、デフォルトオーバーヘッドを算出して概算
                             return n.children.reduce((acc, c) => acc + calc(c) + 1, 0) + 2;
                     }
                 };
@@ -3082,6 +3227,7 @@
             }
         }
         const CFG_BRANCH_RULES = {
+            // --- 条件分岐 ---
             'IfStatement': {
                 type: 'branch',
                 cond: 'test',
@@ -3094,11 +3240,30 @@
                 trueBranch: 'consequent',
                 falseBranch: 'alternate'
             },
+            // --- ショートサーキット評価 ---
             'LogicalExpression': {
                 type: 'short-circuit',
                 left: 'left',
                 right: 'right'
             },
+            'OptionalCallExpression': {
+                type: 'short-circuit',
+                left: 'callee',
+                right: 'arguments'
+            },
+            // obj?.()
+            'OptionalMemberExpression': {
+                type: 'short-circuit',
+                left: 'object',
+                right: 'property'
+            },
+            // obj?.prop
+            'AssignmentPattern': {
+                type: 'short-circuit',
+                left: 'left',
+                right: 'right'
+            },
+            // デフォルト代入（値がない時だけ右辺を実行）
             'WhileStatement': {
                 type: 'loop-while',
                 cond: 'test',
@@ -3111,6 +3276,24 @@
                 update: 'update',
                 body: 'body'
             },
+            'ForInStatement': {
+                type: 'loop-for-in-of',
+                left: 'left',
+                right: 'right',
+                body: 'body'
+            },
+            'ForOfStatement': {
+                type: 'loop-for-in-of',
+                left: 'left',
+                right: 'right',
+                body: 'body'
+            },
+            'DoWhileStatement': {
+                type: 'loop-do-while',
+                cond: 'test',
+                body: 'body'
+            },
+            // --- 例外・ジャンプ ---
             'TryStatement': {
                 type: 'try-catch',
                 block: 'block',
@@ -3122,6 +3305,7 @@
                 discriminant: 'discriminant',
                 cases: 'cases'
             },
+            // --- 関数・メソッド・独立ブロック（スコープ分離） ---
             'FunctionDeclaration': {
                 type: 'function',
                 body: 'body'
@@ -3133,7 +3317,23 @@
             'ArrowFunctionExpression': {
                 type: 'function',
                 body: 'body'
-            }
+            },
+            'ClassMethod': {
+                type: 'function',
+                body: 'body'
+            },
+            'ClassPrivateMethod': {
+                type: 'function',
+                body: 'body'
+            },
+            'ObjectMethod': {
+                type: 'function',
+                body: 'body'
+            },
+            'StaticBlock': {
+                type: 'function',
+                body: 'body'
+            } // クラス静的ブロック（独立したフローとして分離）
         };
         class CFGBuilder {
             static build(irRoot) {
@@ -3167,20 +3367,51 @@
                 const entryBlock = createBlock();
                 let currentBlock = entryBlock;
                 const loopStack = [];
-                const finallyStack = []; // Push the global context
+                const finallyStack = [];
                 const contextStack = [{
                     exitBlock: null,
                     catchBlock: null
                 }];
+                let pendingLabel = null; // LabeledStatement 用の保留ラベル
                 const walk = (node, parentId = null) => {
                     if (!node) return;
-                    if (parentId) parentMap.set(node.irNodeId, parentId); // 未サポートの制御フロー構文に対する整合性検証
-                    if (['ForInStatement', 'ForOfStatement', 'DoWhileStatement'].includes(node.type)) {
-                        console.warn(`[CFGBuilder] Unsupported control flow node encountered: '${node.type}'. The CFG will be inaccurate, which may compromise optimization safety.`);
+                    if (parentId) parentMap.set(node.irNodeId, parentId); // ラベルのキャプチャ
+                    if (node.type === 'LabeledStatement') {
+                        const labelRef = node.props['label'];
+                        if (labelRef && labelRef.type === 'ref') {
+                            const labelNode = node.children.find(c => c.irNodeId === labelRef.irNodeId);
+                            if (labelNode && labelNode.type === 'Identifier') {
+                                pendingLabel = labelNode.props['name'];
+                            }
+                        }
+                        const body = getChild(node, 'body');
+                        walk(body, node.irNodeId);
+                        return; // LabeledStatement自体はイベントノードではないのでここでリターン
                     }
                     const rule = CFG_BRANCH_RULES[node.type];
                     if (!currentBlock) {
                         currentBlock = createBlock();
+                    } // 論理代入演算子 (&&=, ||=, ??=) のショートサーキット展開
+                    if (node.type === 'AssignmentExpression') {
+                        const op = node.props['operator'];
+                        if (op === '&&=' || op === '||=' || op === '??=') {
+                            walk(getChild(node, 'left'), node.irNodeId);
+                            const preRightBlock = currentBlock;
+                            const rightBlock = createBlock();
+                            link(preRightBlock, rightBlock);
+                            currentBlock = rightBlock;
+                            walk(getChild(node, 'right'), node.irNodeId);
+                            const postRightBlock = currentBlock;
+                            const mergeBlock = createBlock();
+                            link(preRightBlock, mergeBlock);
+                            link(postRightBlock, mergeBlock);
+                            currentBlock = mergeBlock;
+                            if (currentBlock) {
+                                currentBlock.nodes.push(node);
+                                nodeToBlock.set(node.irNodeId, currentBlock.id);
+                            }
+                            return;
+                        }
                     }
                     if (rule) {
                         if (rule.type === 'function') {
@@ -3213,17 +3444,12 @@
                             loopStack.push(...savedLoopStack);
                             finallyStack.push(...savedFinallyStack);
                             currentBlock = savedBlock;
-                            if (currentBlock && ['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration'].includes(node.type)) {
+                            if (currentBlock) {
                                 currentBlock.nodes.push(node);
                                 nodeToBlock.set(node.irNodeId, currentBlock.id);
                             }
                             return;
                         } else if (rule.type === 'try-catch') {
-                            // 【技術的負債/簡易実装に関する制約】
-                            // 現在の制御フロー解析（CFG）では、try-catch-finally のエッジ合流は近似的な簡易実装です。
-                            // try ブロック内の return や throw が発生した際、本来であれば finally を経由した後に
-                            // 元の exitBlock 等へ正確に復帰する必要がありますが、本コンパイラの最適化範囲においては
-                            // finally の末尾から一律に endBlock へリンクさせることでグラフ構造を簡略化しています。
                             const block = getChild(node, rule.block);
                             const handler = getChild(node, rule.handler);
                             const finalizer = getChild(node, rule.finalizer);
@@ -3242,13 +3468,12 @@
                             }
                             currentContext.catchBlock = prevCatch;
                             if (handler) {
-                                currentBlock = catchEntryBlock; // For CatchClause, parameter is evaluated
+                                currentBlock = catchEntryBlock;
                                 walk(handler, node.irNodeId);
                                 if (currentBlock) {
                                     link(currentBlock, finallyEntryBlock || endBlock);
                                 }
                             } else {
-                                // Empty catch is rare but could happen in AST
                                 link(catchEntryBlock, finallyEntryBlock || endBlock);
                             }
                             if (finallyEntryBlock) {
@@ -3264,13 +3489,15 @@
                             currentBlock = endBlock;
                             return;
                         } else if (rule.type === 'switch') {
-                            // Evaluate discriminant
                             walk(getChild(node, rule.discriminant), node.irNodeId);
-                            const exitBlock = createBlock(); // We push the exitBlock onto loopStack so that `break` can target it.
+                            const exitBlock = createBlock(); // ラベルの適用
+                            const currentLabel = pendingLabel;
+                            pendingLabel = null;
                             loopStack.push({
+                                label: currentLabel || undefined,
                                 breakTarget: exitBlock
                             });
-                            const preSwitchBlock = currentBlock; // Get cases list. Each case is a SwitchCase IRNode.
+                            const preSwitchBlock = currentBlock;
                             const casesRefs = node.props.cases || [];
                             const caseNodes = [];
                             for (const ref of casesRefs) {
@@ -3280,49 +3507,33 @@
                                 }
                             }
                             let prevCaseEndBlock = null;
-                            const caseBlocks = []; // First pass: create entry blocks for all cases so we can link them
+                            const caseBlocks = [];
                             for (let i = 0; i < caseNodes.length; i++) {
                                 caseBlocks.push(createBlock());
-                            } // Link the switch pre-block to all case entry blocks.
-                            // If there is no default case, we also link preSwitchBlock to exitBlock.
+                            }
                             let hasDefault = false;
                             for (const caseNode of caseNodes) {
-                                if (!caseNode.props.test) {
-                                    hasDefault = true;
-                                }
+                                if (!caseNode.props.test) hasDefault = true;
                             }
-                            for (const cb of caseBlocks) {
-                                link(preSwitchBlock, cb);
-                            }
-                            if (!hasDefault) {
-                                link(preSwitchBlock, exitBlock);
-                            }
+                            for (const cb of caseBlocks) link(preSwitchBlock, cb);
+                            if (!hasDefault) link(preSwitchBlock, exitBlock);
                             for (let i = 0; i < caseNodes.length; i++) {
                                 const caseNode = caseNodes[i];
-                                const cb = caseBlocks[i]; // If previous case ended without a break/return (prevCaseEndBlock is not null),
-                                // it falls through to this case entry block.
-                                if (prevCaseEndBlock) {
-                                    link(prevCaseEndBlock, cb);
-                                }
-                                currentBlock = cb; // Walk the test first if present
+                                const cb = caseBlocks[i];
+                                if (prevCaseEndBlock) link(prevCaseEndBlock, cb);
+                                currentBlock = cb;
                                 const testNode = getChild(caseNode, 'test');
-                                if (testNode) {
-                                    walk(testNode, caseNode.irNodeId);
-                                } // Walk the consequent statements
+                                if (testNode) walk(testNode, caseNode.irNodeId);
                                 const consequentRefs = caseNode.props.consequent || [];
                                 for (const stmtRef of consequentRefs) {
                                     if (stmtRef && stmtRef.type === 'ref') {
                                         const stmtNode = caseNode.children.find(c => c.irNodeId === stmtRef.irNodeId);
-                                        if (stmtNode) {
-                                            walk(stmtNode, caseNode.irNodeId);
-                                        }
+                                        if (stmtNode) walk(stmtNode, caseNode.irNodeId);
                                     }
-                                } // The end of this case block
+                                }
                                 prevCaseEndBlock = currentBlock;
-                            } // The last case's end falls through to exitBlock
-                            if (prevCaseEndBlock) {
-                                link(prevCaseEndBlock, exitBlock);
                             }
+                            if (prevCaseEndBlock) link(prevCaseEndBlock, exitBlock);
                             loopStack.pop();
                             currentBlock = exitBlock;
                             return;
@@ -3350,17 +3561,36 @@
                             const rightBlock = createBlock();
                             link(preRightBlock, rightBlock);
                             currentBlock = rightBlock;
-                            walk(getChild(node, rule.right), node.irNodeId);
+                            if (node.type === 'OptionalCallExpression') {
+                                // arguments is an array
+                                const args = node.props['arguments'];
+                                if (Array.isArray(args)) {
+                                    for (const arg of args) {
+                                        if (arg && arg.type === 'ref') {
+                                            const aNode = node.children.find(c => c.irNodeId === arg.irNodeId);
+                                            if (aNode) walk(aNode, node.irNodeId);
+                                        }
+                                    }
+                                }
+                            } else {
+                                walk(getChild(node, rule.right), node.irNodeId);
+                            }
                             const postRightBlock = currentBlock;
                             const mergeBlock = createBlock();
-                            link(preRightBlock, mergeBlock);
-                            link(postRightBlock, mergeBlock);
+                            link(preRightBlock, mergeBlock); // Short-circuit path
+                            link(postRightBlock, mergeBlock); // Evaluated path
                             currentBlock = mergeBlock;
+                            if (currentBlock) {
+                                currentBlock.nodes.push(node);
+                                nodeToBlock.set(node.irNodeId, currentBlock.id);
+                            }
                             return;
                         } else if (rule.type === 'loop-while') {
                             const headerBlock = createBlock();
                             const bodyBlock = createBlock();
                             const exitBlock = createBlock();
+                            const currentLabel = pendingLabel;
+                            pendingLabel = null;
                             link(currentBlock, headerBlock);
                             currentBlock = headerBlock;
                             walk(getChild(node, rule.cond), node.irNodeId);
@@ -3368,6 +3598,7 @@
                             link(currentBlock, exitBlock);
                             currentBlock = bodyBlock;
                             loopStack.push({
+                                label: currentLabel || undefined,
                                 continueTarget: headerBlock,
                                 breakTarget: exitBlock
                             });
@@ -3382,6 +3613,8 @@
                             const bodyBlock = createBlock();
                             const updateBlock = createBlock();
                             const exitBlock = createBlock();
+                            const currentLabel = pendingLabel;
+                            pendingLabel = null;
                             link(currentBlock, headerBlock);
                             currentBlock = headerBlock;
                             walk(getChild(node, rule.cond), node.irNodeId);
@@ -3389,6 +3622,7 @@
                             link(currentBlock, exitBlock);
                             currentBlock = bodyBlock;
                             loopStack.push({
+                                label: currentLabel || undefined,
                                 continueTarget: updateBlock,
                                 breakTarget: exitBlock
                             });
@@ -3400,19 +3634,102 @@
                             link(currentBlock, headerBlock);
                             currentBlock = exitBlock;
                             return;
+                        } else if (rule.type === 'loop-for-in-of') {
+                            walk(getChild(node, rule.right), node.irNodeId);
+                            const headerBlock = createBlock();
+                            const bodyBlock = createBlock();
+                            const exitBlock = createBlock();
+                            const currentLabel = pendingLabel;
+                            pendingLabel = null;
+                            link(currentBlock, headerBlock);
+                            currentBlock = headerBlock;
+                            walk(getChild(node, rule.left), node.irNodeId);
+                            link(currentBlock, bodyBlock);
+                            link(currentBlock, exitBlock);
+                            currentBlock = bodyBlock;
+                            loopStack.push({
+                                label: currentLabel || undefined,
+                                continueTarget: headerBlock,
+                                breakTarget: exitBlock
+                            });
+                            walk(getChild(node, rule.body), node.irNodeId);
+                            loopStack.pop();
+                            link(currentBlock, headerBlock);
+                            currentBlock = exitBlock;
+                            return;
+                        } else if (rule.type === 'loop-do-while') {
+                            const bodyBlock = createBlock();
+                            const testBlock = createBlock();
+                            const exitBlock = createBlock();
+                            const currentLabel = pendingLabel;
+                            pendingLabel = null;
+                            link(currentBlock, bodyBlock);
+                            currentBlock = bodyBlock;
+                            loopStack.push({
+                                label: currentLabel || undefined,
+                                continueTarget: testBlock,
+                                breakTarget: exitBlock
+                            });
+                            walk(getChild(node, rule.body), node.irNodeId);
+                            loopStack.pop();
+                            link(currentBlock, testBlock);
+                            currentBlock = testBlock;
+                            walk(getChild(node, rule.cond), node.irNodeId);
+                            link(currentBlock, bodyBlock);
+                            link(currentBlock, exitBlock);
+                            currentBlock = exitBlock;
+                            return;
                         }
-                    }
+                    } // ラベルの消費忘れ防止
+                    pendingLabel = null;
                     if (node.type === 'BreakStatement') {
-                        if (loopStack.length > 0) link(currentBlock, loopStack[loopStack.length - 1].breakTarget);
+                        const labelRef = node.props['label'];
+                        let targetLabel = null;
+                        if (labelRef && labelRef.type === 'ref') {
+                            const labelNode = node.children.find(c => c.irNodeId === labelRef.irNodeId);
+                            if (labelNode && labelNode.type === 'Identifier') targetLabel = labelNode.props['name'];
+                        }
+                        if (loopStack.length > 0) {
+                            let targetBlock = loopStack[loopStack.length - 1].breakTarget;
+                            if (targetLabel) {
+                                // 指定されたラベル名を持つスタックを探す
+                                for (let i = loopStack.length - 1; i >= 0; i--) {
+                                    if (loopStack[i].label === targetLabel) {
+                                        targetBlock = loopStack[i].breakTarget;
+                                        break;
+                                    }
+                                }
+                            }
+                            link(currentBlock, targetBlock);
+                        }
                         currentBlock = null;
                         return;
                     }
                     if (node.type === 'ContinueStatement') {
-                        for (let i = loopStack.length - 1; i >= 0; i--) {
-                            if (loopStack[i].continueTarget) {
-                                link(currentBlock, loopStack[i].continueTarget);
-                                break;
+                        const labelRef = node.props['label'];
+                        let targetLabel = null;
+                        if (labelRef && labelRef.type === 'ref') {
+                            const labelNode = node.children.find(c => c.irNodeId === labelRef.irNodeId);
+                            if (labelNode && labelNode.type === 'Identifier') targetLabel = labelNode.props['name'];
+                        }
+                        if (loopStack.length > 0) {
+                            let targetBlock = null;
+                            if (targetLabel) {
+                                for (let i = loopStack.length - 1; i >= 0; i--) {
+                                    if (loopStack[i].label === targetLabel && loopStack[i].continueTarget) {
+                                        targetBlock = loopStack[i].continueTarget;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                for (let i = loopStack.length - 1; i >= 0; i--) {
+                                    if (loopStack[i].continueTarget) {
+                                        targetBlock = loopStack[i].continueTarget;
+                                        break;
+                                    }
+                                }
                             }
+                            if (targetBlock) link(currentBlock, targetBlock);
                         }
                         currentBlock = null;
                         return;
@@ -3445,7 +3762,7 @@
                         currentBlock = null;
                         return;
                     }
-                    const isEvent = ['Identifier', 'AssignmentExpression', 'VariableDeclarator', 'CallExpression', 'NewExpression', 'UpdateExpression', 'FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type);
+                    const isEvent = ['Identifier', 'AssignmentExpression', 'VariableDeclarator', 'CallExpression', 'NewExpression', 'UpdateExpression', 'FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ClassMethod', 'ObjectMethod', 'ClassPrivateMethod', 'AwaitExpression', 'YieldExpression'].includes(node.type);
                     for (const child of node.children || []) {
                         walk(child, node.irNodeId);
                     }
@@ -4168,6 +4485,9 @@
         };
         function generateIrId_3() {
             return `ir_generated_ds_${Math.random().toString(36).substring(2, 9)}`;
+        } // 副作用を持たない安全なノードかどうかを判定
+        function isSimple(node) {
+            return node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral';
         }
         const DeadStoreEliminationRule = {
             id: 'micro:dead-store-elimination',
@@ -4193,7 +4513,16 @@
                     if (!idRef) return false;
                     const idNode = declNode.children.find(c => c.irNodeId === idRef.irNodeId);
                     if (!idNode || idNode.type !== 'Identifier') return false;
-                    if (!declNode.props.init) return false;
+                    if (!declNode.props.init) return false; // const宣言における初期化子の削除は構文エラーとなるため最適化対象から除外
+                    const parentId = state.analysisSnapshot.parentMap.get(declNode.irNodeId);
+                    if (parentId) {
+                        const parentNode = state.analysisSnapshot.nodeMap.get(parentId);
+                        if (parentNode && parentNode.type === 'VariableDeclaration' && parentNode.props.kind === 'const') {
+                            return false;
+                        }
+                    } // 初期化子が副作用を伴う可能性（関数呼び出し等）がある場合は削除対象から除外
+                    const initNode = declNode.children.find(c => c.irNodeId === declNode.props.init.irNodeId);
+                    if (!initNode || !isSimple(initNode)) return false;
                     const declId = idNode.irNodeId;
                     const isLive = state.analysisSnapshot.isVariableLiveAfter(declId, declNode.irNodeId);
                     return !isLive;
@@ -4892,7 +5221,7 @@
         function generateIrId_10() {
             return `ir_generated_inl_${Math.random().toString(36).substring(2, 9)}`;
         }
-        const isSimple = node => node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral';
+        const isSimple_1 = node => node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral';
         function getFunctionNode(calleeRefNode, state) {
             if (calleeRefNode.type === 'ArrowFunctionExpression') {
                 return calleeRefNode;
@@ -5029,7 +5358,7 @@
                     const argRef = callNode.props.arguments[i];
                     if (paramNode && argRef) {
                         const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
-                        if (argNode && !isSimple(argNode)) {
+                        if (argNode && !isSimple_1(argNode)) {
                             // Argument is complex. We must ensure parameter is used EXACTLY once.
                             // (If > 1, side effects are duplicated. If === 0, side effects are skipped!)
                             const refCount = state.analysisSnapshot?.referenceCounts.get(paramNode.irNodeId) || 0;
@@ -5044,7 +5373,7 @@
                         const argRef = callNode.props.arguments[i];
                         if (argRef) {
                             const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
-                            if (argNode && !isSimple(argNode)) {
+                            if (argNode && !isSimple_1(argNode)) {
                                 return false; // Unsafe to discard side-effects from extra arguments
                             }
                         }
@@ -5097,6 +5426,9 @@
                 return [inlinedNode];
             }
         };
+        function isSimple_2(node) {
+            return node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral';
+        }
         const DeadCodeEliminationRule = {
             id: 'macro:dead-code-elimination',
             type: 'macro',
@@ -5108,7 +5440,14 @@
                 const varNode = node;
                 const declarations = varNode.props.declarations;
                 if (!Array.isArray(declarations) || declarations.length === 0) return false;
-                if (!state.analysisSnapshot) return false;
+                if (!state.analysisSnapshot) return false; // 親が for-of や for-in の場合、構文エラー( for(of arr) )を防ぐためにDCEから保護する
+                const parentId = state.analysisSnapshot.parentMap.get(varNode.irNodeId);
+                if (parentId) {
+                    const parentNode = state.analysisSnapshot.nodeMap.get(parentId);
+                    if (parentNode && (parentNode.type === 'ForOfStatement' || parentNode.type === 'ForInStatement' || parentNode.type === 'ForStatement')) {
+                        return false;
+                    }
+                }
                 let allUnused = true;
                 for (const declRef of declarations) {
                     const decl = varNode.children.find(c => c.irNodeId === declRef.irNodeId);
@@ -5140,6 +5479,13 @@
                     if (state.analysisSnapshot.escapedVars.has(identNode.irNodeId)) {
                         allUnused = false;
                         break;
+                    } // 右辺に関数呼び出しなどの副作用が含まれる場合は、使われていなくても削除してはならない
+                    if (declNode.props.init) {
+                        const initNode = declNode.children.find(c => c.irNodeId === declNode.props.init.irNodeId);
+                        if (initNode && !isSimple_2(initNode)) {
+                            allUnused = false;
+                            break;
+                        }
                     }
                 }
                 return allUnused;
@@ -5161,23 +5507,18 @@
             match: (node, state) => {
                 if (node.type !== 'Program') return false;
                 const snapshot = state.analysisSnapshot;
-                if (!snapshot) return false; // 頻出するグローバル変数をカウント
+                if (!snapshot) return false;
                 const globalCounts = new Map();
                 for (const [id, irNode] of snapshot.nodeMap.entries()) {
                     if (irNode.type === 'Identifier') {
                         const name = irNode.props.name;
                         if (snapshot.escapedVars.has(id) && !snapshot.refToDeclMap.has(id)) {
-                            // It's a global reference!
-                            // Let's filter some obvious ones we can alias
-                            // Skip 'undefined', 'NaN', 'Infinity' just in case, though aliasing them is valid.
-                            // Wait, terser transforms undefined to void 0, which is 6 bytes.
                             if (name.length > 2) {
                                 globalCounts.set(name, (globalCounts.get(name) || 0) + 1);
                             }
                         }
                     }
-                } // Aliasing criteria: N * (L - 1) > L + 4
-                // Example: Math (4) -> N * 3 > 8 -> N >= 3
+                }
                 let canAlias = false;
                 for (const [name, count] of globalCounts.entries()) {
                     const L = name.length;
@@ -5207,85 +5548,59 @@
                 }
                 const targets = new Map();
                 let aliasIndex = 0;
-                const genAlias = () => {
-                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'; // We just use a single/double character alias, Terser will mangle it anyway,
-                    // but we need a valid identifier name that doesn't conflict.
-                    // Since Terser mangles, the actual name here doesn't matter much for bytes,
-                    // but let's use something unique.
-                    return `_gAlias_${aliasIndex++}`;
-                };
+                const genAlias = () => `_gAlias_${aliasIndex++}`;
+                const targetIds = new Map();
                 for (const [name, data] of globalCounts.entries()) {
                     const L = name.length;
                     if (data.count * (L - 1) > L + 4) {
+                        const alias = genAlias();
+                        const declId = generateIrId_11();
                         targets.set(name, {
-                            alias: genAlias(),
-                            ids: data.ids
+                            alias,
+                            declId
                         });
+                        for (const id of data.ids) {
+                            targetIds.set(id, {
+                                alias,
+                                declId
+                            });
+                        }
                     }
                 }
-                if (targets.size === 0) return [];
-                const targetIds = new Map(); // irNodeId -> new alias name
-                for (const [name, data] of targets.entries()) {
-                    for (const id of data.ids) {
-                        targetIds.set(id, data.alias);
-                    }
-                } // Deep clone the ProgramIR, replacing Identifiers
-                const oldToNewId = new Map();
+                if (targets.size === 0) return []; // 元のNode IDを維持したまま、安全にツリーをディープクローンする
                 const cloneNode = n => {
-                    const newId = generateIrId_11();
-                    oldToNewId.set(n.irNodeId, newId);
                     const newChildren = [];
                     for (const child of n.children) {
                         newChildren.push(cloneNode(child));
                     }
                     let newProps = {
                         ...n.props
-                    };
+                    }; // 配列（bodyやargumentsなど）の浅いコピー
+                    for (const [key, val] of Object.entries(newProps)) {
+                        if (Array.isArray(val)) {
+                            newProps[key] = [...val];
+                        }
+                    }
                     if (n.type === 'Identifier' && targetIds.has(n.irNodeId)) {
-                        newProps.name = targetIds.get(n.irNodeId);
+                        const info = targetIds.get(n.irNodeId);
+                        newProps.name = info.alias;
+                        newProps._declId = info.declId; // DCEに参照されていることを認識させる
                     }
                     return {
                         type: n.type,
-                        irNodeId: newId,
+                        irNodeId: n.irNodeId,
+                        // IDを維持
                         props: newProps,
                         children: newChildren
                     };
                 };
-                const newProgBase = cloneNode(prog); // Update refs
-                const updateRefs = n => {
-                    for (const [key, val] of Object.entries(n.props)) {
-                        if (Array.isArray(val)) {
-                            const newArray = [];
-                            for (let item of val) {
-                                const itemAny = item;
-                                if (itemAny && itemAny.type === 'ref' && oldToNewId.has(itemAny.irNodeId)) {
-                                    newArray.push({
-                                        type: 'ref',
-                                        irNodeId: oldToNewId.get(itemAny.irNodeId)
-                                    });
-                                } else {
-                                    newArray.push(item);
-                                }
-                            }
-                            n.props[key] = newArray;
-                        } else if (val && val.type === 'ref' && oldToNewId.has(val.irNodeId)) {
-                            n.props[key] = {
-                                type: 'ref',
-                                irNodeId: oldToNewId.get(val.irNodeId)
-                            };
-                        }
-                    }
-                    for (const child of n.children) {
-                        updateRefs(child);
-                    }
-                };
-                updateRefs(newProgBase); // Prepend VariableDeclaration
+                const newProgBase = cloneNode(prog);
                 const decls = [];
                 const declRefs = [];
                 for (const [name, data] of targets.entries()) {
                     const aliasIdNode = {
                         type: 'Identifier',
-                        irNodeId: generateIrId_11(),
+                        irNodeId: data.declId,
                         props: {
                             name: data.alias
                         },
@@ -5925,23 +6240,50 @@
                     const schedules = PhaseScheduler.getSchedules(baseBeamWidth, config, config.enabledRuleIds);
                     for (const schedule of schedules) {
                         console.debug(`[IROptimizer] Entering ${schedule.id} (Depth: ${schedule.maxDepth}, Beam: ${schedule.beamWidth})`);
+                        let noImprovementCount = 0;
+                        let scheduleBestCost = bestOverallCost;
                         for (let depth = 0; depth < schedule.maxDepth; depth++) {
                             let allNextStates = [];
+                            let hasNewActions = false;
                             for (const state of currentStates) {
                                 const snapshot = NativeFlowAnalyzer.analyze(state.irRoot);
                                 const analyzedState = state.withAnalysis(snapshot); // ミクロ・マクロの全ルールを一括スキャン
-                                const actions = ActionScanner.scan(analyzedState, schedule.rules);
-                                const expandedStates = StateExpander.expand(analyzedState, actions);
-                                allNextStates.push(...expandedStates);
+                                const actions = ActionScanner.scan(analyzedState, schedule.rules); // Tabu List (禁忌リスト) によるフィルタリング
+                                const appliedActions = state.metadata.appliedActions || new Set();
+                                const validActions = actions.filter(action => {
+                                    const key = `${action.ruleId}:${action.targetIrNodeId}`;
+                                    return !appliedActions.has(key);
+                                });
+                                if (validActions.length > 0) {
+                                    hasNewActions = true;
+                                    const expandedStates = StateExpander.expand(analyzedState, validActions);
+                                    allNextStates.push(...expandedStates);
+                                } else {
+                                    allNextStates.push(analyzedState);
+                                }
                             }
-                            if (allNextStates.length === 0) break; // DecisionEngineによる状態の評価と枝刈り
+                            if (!hasNewActions) {
+                                console.debug(`[IROptimizer] Search space exhausted (0 new valid actions). Breaking ${schedule.id} early at depth ${depth + 1}.`);
+                                break;
+                            } // DecisionEngineによる状態の評価と枝刈り
                             currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth);
                             const currentBestCost = DecisionEngine.getInitialCost(currentStates[0]); // 最小コストを更新した場合は状態を保存する
                             if (currentBestCost < bestOverallCost) {
                                 bestOverallState = currentStates[0];
                                 bestOverallCost = currentBestCost;
-                            } // コストが悪化した場合でも探索を中断せず、最大深度(maxDepth)まで探索を継続する
+                            } // スケジュール内での改善チェック
+                            if (currentBestCost < scheduleBestCost) {
+                                scheduleBestCost = currentBestCost;
+                                noImprovementCount = 0;
+                            } else {
+                                noImprovementCount++;
+                            }
                             console.debug(`[IROptimizer] Depth ${depth + 1}/${schedule.maxDepth} | Current Best Cost: ${currentBestCost} | Overall Best: ${bestOverallCost}`);
+                            const patienceLimit = config.patience !== undefined ? config.patience : 3;
+                            if (noImprovementCount >= patienceLimit) {
+                                console.debug(`[IROptimizer] Cost stagnation detected (${noImprovementCount} steps without improvement). Breaking ${schedule.id} early at depth ${depth + 1}.`);
+                                break;
+                            }
                         }
                     } // 以前のイテレーションと比較してコストが改善しなかった場合は早期に終了する
                     if (bestOverallCost >= lastBestCost) {
@@ -6320,9 +6662,10 @@
                                     const cleanCode = optCode.replace(/^["']use strict["'];?\s*/i, '');
                                     vfs.write(item.path, cleanCode);
                                 } catch (e) {
+                                    const errorMsg = `Skipped optimizing inline script ${item.path}: ${e.message}\nStack: ${e.stack || 'No stack trace available'}`;
                                     logger({
                                         type: 'error',
-                                        msg: `Skipped optimizing inline script ${item.path}: ${e.message}`
+                                        msg: errorMsg
                                     });
                                 }
                             }
@@ -6369,9 +6712,10 @@
                             }
                         });
                     } catch (err) {
+                        const errorMsg = `Error: ${err.message}\nStack: ${err.stack || 'No stack trace available'}`;
                         logger({
                             type: 'error',
-                            msg: `Error: ${err.message}`
+                            msg: errorMsg
                         });
                         reject(err);
                     }
@@ -6658,8 +7002,8 @@
             }, React.createElement(Repeat, {
                 className: "w-3 h-3"
             }), "\u5168\u4F53\u53CD\u5FA9\u5236\u5FA1 (Orchestrator)"), React.createElement("div", {
-                className: "mt-1"
-            }, renderSlider('maxIterations', '最大イテレーション', '限界に達するまで全体を回す最大周回数', 1, 20, 'text-amber-400'))), React.createElement("div", {
+                className: "mt-1 flex flex-col gap-3"
+            }, renderSlider('maxIterations', '最大イテレーション', '限界に達するまで全体を回す最大周回数', 1, 20, 'text-amber-400'), renderSlider('patience', '収束判定の許容停滞回数 (Patience)', '改善が見られないまま探索を継続する最大ステップ数', 1, 10, 'text-amber-400'))), React.createElement("div", {
                 className: "flex flex-col border border-emerald-500/20 rounded-lg bg-emerald-500/5 p-3 shadow-inner ml-2 mb-4"
             }, React.createElement("div", {
                 className: "flex items-center gap-1.5 text-[10px] font-bold text-emerald-500/90 mb-3 uppercase tracking-wider"
@@ -6993,7 +7337,7 @@
                 className: "space-y-1 flex-1 overflow-y-auto"
             }, logs.map((l, i) => React.createElement("div", {
                 key: i,
-                className: l.type === 'error' ? 'text-red-400' : l.type === 'success' ? 'text-emerald-400' : 'text-slate-300'
+                className: l.type === 'error' ? 'text-red-400 whitespace-pre-wrap' : l.type === 'success' ? 'text-emerald-400' : 'text-slate-300 whitespace-pre-wrap'
             }, l.msg)))), React.createElement("div", {
                 className: "flex flex-col flex-1 min-h-0 overflow-hidden relative"
             }, React.createElement("div", {
@@ -7060,6 +7404,7 @@
                 searchDepth: 10,
                 stage1Depth: 3,
                 stage2Depth: 10,
+                patience: 3,
                 timeoutLimit: 15,
                 enableAsyncGolf: true,
                 enableBeamSearch: false,
