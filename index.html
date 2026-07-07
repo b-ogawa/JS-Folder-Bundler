@@ -347,14 +347,15 @@
                                         const isJSX = content.includes('React.') || /<[A-Z][A-Za-z0-9]*\s*\/?>/.test(content);
                                         let ext = '.js';
                                         if (isTS) ext = isJSX ? '.tsx' : '.ts'; else if (isJSX) ext = '.jsx';
-                                        const inlinePath = `_inline_script_${idx}${ext}`;
+                                        const namespace = config.htmlEntry.replace(/[^a-zA-Z0-9_]/g, '_');
+                                        const inlinePath = `_inline_script_${namespace}_${idx}${ext}`;
                                         vfs.write(inlinePath, content); // タグを消さずにプレースホルダーをセットする（定位置を記憶）
-                                        const placeholder = `___INLINE_SCRIPT_${idx}___`;
+                                        const placeholder = `___INLINE_SCRIPT_${namespace}_${idx}___`;
                                         script.textContent = placeholder;
                                         const metaStr = vfs.read('_meta_inline_scripts.json');
                                         const inlineList = metaStr ? JSON.parse(metaStr) : [];
                                         inlineList.push({
-                                            id: idx,
+                                            id: `${namespace}_${idx}`,
                                             placeholder,
                                             path: inlinePath
                                         });
@@ -401,7 +402,17 @@
                 const tsconfigContent = typeof vfs.read === 'function' ? vfs.read('tsconfig.json') || vfs.read('/tsconfig.json') : null;
                 if (tsconfigContent) {
                     try {
-                        const cleaned = tsconfigContent.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
+                        const placeholders = [];
+                        const stringRegex = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g;
+                        let cleaned = tsconfigContent.replace(stringRegex, match => {
+                            const id = `___JSONC_STR_${placeholders.length}___`;
+                            placeholders.push(match);
+                            return id;
+                        });
+                        cleaned = cleaned.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+                        for (let i = placeholders.length - 1; i >= 0; i--) {
+                            cleaned = cleaned.replace(`___JSONC_STR_${i}___`, () => placeholders[i]);
+                        }
                         const parsed = JSON.parse(cleaned);
                         const compilerOptions = parsed?.compilerOptions;
                         if (compilerOptions) {
@@ -869,7 +880,17 @@
                     if (tsconfigContent) {
                         try {
                             // コメント付きJSONを処理するため、簡易的なクリーンアップを行ってパースを試みる
-                            const cleaned = tsconfigContent.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
+                            const placeholders = [];
+                            const stringRegex = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g;
+                            let cleaned = tsconfigContent.replace(stringRegex, match => {
+                                const id = `___JSONC_STR_${placeholders.length}___`;
+                                placeholders.push(match);
+                                return id;
+                            });
+                            cleaned = cleaned.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+                            for (let i = placeholders.length - 1; i >= 0; i--) {
+                                cleaned = cleaned.replace(`___JSONC_STR_${i}___`, () => placeholders[i]);
+                            }
                             const config = JSON.parse(cleaned);
                             if (config && Array.isArray(config.exclude)) {
                                 config.exclude.forEach(pat => {
@@ -1041,17 +1062,17 @@
         class CssMinifier {
             static minify(css) {
                 if (!css) return '';
-                let minified = css.replace(/\/\*[\s\S]*?\*\//g, '');
                 const placeholders = [];
                 const stringRegex = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|url\([^)]+\))/gi;
-                minified = minified.replace(stringRegex, match => {
+                let minified = css.replace(stringRegex, match => {
                     const id = `___CSS_STR_${placeholders.length}___`;
                     placeholders.push(match);
                     return id;
-                }); // 1. 改行や連続スペースを単一スペースに
-                minified = minified.replace(/\s+/g, ' '); // 2. { } ; , の前後のスペースを削除（コロンはここでは除外）
-                minified = minified.replace(/\s*([{};,])\s*/g, '$1'); // 3. コロンの後ろのスペースのみ削除（.btn :hover などの疑似クラス保護のため）
-                minified = minified.replace(/:\s+/g, ':'); // 4. 不要なセミコロンの削除
+                }); // 1. コメント削除
+                minified = minified.replace(/\/\*[\s\S]*?\*\//g, ''); // 2. 改行や連続スペースを単一スペースに
+                minified = minified.replace(/\s+/g, ' '); // 3. { } ; , の前後のスペースを削除（コロンはここでは除外）
+                minified = minified.replace(/\s*([{};,])\s*/g, '$1'); // 4. コロンの後ろのスペースのみ削除（.btn :hover などの疑似クラス保護のため）
+                minified = minified.replace(/:\s+/g, ':'); // 5. 不要なセミコロンの削除
                 minified = minified.replace(/;\}/g, '}'); // アロー関数で返すことで、コード内の $& や $1 による自己破壊を防ぐ
                 for (let i = placeholders.length - 1; i >= 0; i--) {
                     minified = minified.replace(`___CSS_STR_${i}___`, () => placeholders[i]);
@@ -1469,14 +1490,19 @@
                 return resolved;
             }
         }
-        const createPromiseResolveObject = (properties, refToDeclMap) => {
+        const createPromiseThenDynamicImport = thunkName => {
             const suffix = Math.random().toString(36).substr(2, 6);
             const promiseId = `promise_${suffix}`;
             const resolveId = `resolve_${suffix}`;
             const memberId = `member_${suffix}`;
-            const objId = `obj_${suffix}`;
             const callId = `call_${suffix}`;
-            const promiseIdNode = {
+            const thenId = `then_${suffix}`;
+            const thenMemberId = `then_member_${suffix}`;
+            const arrowId = `arrow_${suffix}`;
+            const thunkCallId = `thunk_call_${suffix}`;
+            const thunkIdentId = `thunk_ident_${suffix}`;
+            const thenCallId = `then_call_${suffix}`;
+            const promiseNode = {
                 type: 'Identifier',
                 irNodeId: promiseId,
                 props: {
@@ -1484,7 +1510,7 @@
                 },
                 children: []
             };
-            const resolveIdNode = {
+            const resolveNode = {
                 type: 'Identifier',
                 irNodeId: resolveId,
                 props: {
@@ -1492,7 +1518,7 @@
                 },
                 children: []
             };
-            const memberExprNode = {
+            const memberNode = {
                 type: 'MemberExpression',
                 irNodeId: memberId,
                 props: {
@@ -1506,15 +1532,188 @@
                     },
                     computed: false
                 },
-                children: [promiseIdNode, resolveIdNode]
+                children: [promiseNode, resolveNode]
+            };
+            const callNode = {
+                type: 'CallExpression',
+                irNodeId: callId,
+                props: {
+                    callee: {
+                        type: 'ref',
+                        irNodeId: memberId
+                    },
+                    arguments: []
+                },
+                children: [memberNode]
+            };
+            const thenNode = {
+                type: 'Identifier',
+                irNodeId: thenId,
+                props: {
+                    name: 'then'
+                },
+                children: []
+            };
+            const thenMemberNode = {
+                type: 'MemberExpression',
+                irNodeId: thenMemberId,
+                props: {
+                    object: {
+                        type: 'ref',
+                        irNodeId: callId
+                    },
+                    property: {
+                        type: 'ref',
+                        irNodeId: thenId
+                    },
+                    computed: false
+                },
+                children: [callNode, thenNode]
+            };
+            const thunkIdentNode = {
+                type: 'Identifier',
+                irNodeId: thunkIdentId,
+                props: {
+                    name: thunkName
+                },
+                children: []
+            };
+            const thunkCallNode = {
+                type: 'CallExpression',
+                irNodeId: thunkCallId,
+                props: {
+                    callee: {
+                        type: 'ref',
+                        irNodeId: thunkIdentId
+                    },
+                    arguments: []
+                },
+                children: [thunkIdentNode]
+            };
+            const arrowNode = {
+                type: 'ArrowFunctionExpression',
+                irNodeId: arrowId,
+                props: {
+                    params: [],
+                    body: {
+                        type: 'ref',
+                        irNodeId: thunkCallId
+                    },
+                    expression: true
+                },
+                children: [thunkCallNode]
+            };
+            const thenCallNode = {
+                type: 'CallExpression',
+                irNodeId: thenCallId,
+                props: {
+                    callee: {
+                        type: 'ref',
+                        irNodeId: thenMemberId
+                    },
+                    arguments: [{
+                        type: 'ref',
+                        irNodeId: arrowId
+                    }]
+                },
+                children: [thenMemberNode, arrowNode]
+            };
+            return thenCallNode;
+        };
+        const createThunkFunction = (thunkName, bodyStatements, exportsProperties, refToDeclMap, renameJobs, allTopLevelDecls) => {
+            const suffix = Math.random().toString(36).substr(2, 6);
+            const cacheVarName = `${thunkName}_cache`;
+            const cacheVarDeclId = `cache_decl_${suffix}`;
+            const cacheVarIdId = `cache_id_${suffix}`;
+            const cacheVarDeclaratorId = `cache_dec_${suffix}`;
+            const cacheVarIdNode = {
+                type: 'Identifier',
+                irNodeId: cacheVarIdId,
+                props: {
+                    name: cacheVarName
+                },
+                children: []
+            };
+            const cacheVarDeclaratorNode = {
+                type: 'VariableDeclarator',
+                irNodeId: cacheVarDeclaratorId,
+                props: {
+                    id: {
+                        type: 'ref',
+                        irNodeId: cacheVarIdId
+                    },
+                    init: null
+                },
+                children: [cacheVarIdNode]
+            };
+            const cacheVarDeclNode = {
+                type: 'VariableDeclaration',
+                irNodeId: cacheVarDeclId,
+                props: {
+                    kind: 'let',
+                    declarations: [{
+                        type: 'ref',
+                        irNodeId: cacheVarDeclaratorId
+                    }]
+                },
+                children: [cacheVarDeclaratorNode]
+            };
+            const ifId = `if_${suffix}`;
+            const condId = `cond_id_${suffix}`;
+            const retCacheId = `ret_cache_${suffix}`;
+            const retCacheStmtId = `ret_cache_stmt_${suffix}`;
+            const condNode = {
+                type: 'Identifier',
+                irNodeId: condId,
+                props: {
+                    name: cacheVarName
+                },
+                children: []
+            };
+            const retCacheNode = {
+                type: 'Identifier',
+                irNodeId: retCacheId,
+                props: {
+                    name: cacheVarName
+                },
+                children: []
+            };
+            const retCacheStmtNode = {
+                type: 'ReturnStatement',
+                irNodeId: retCacheStmtId,
+                props: {
+                    argument: {
+                        type: 'ref',
+                        irNodeId: retCacheId
+                    }
+                },
+                children: [retCacheNode]
+            };
+            const ifNode = {
+                type: 'IfStatement',
+                irNodeId: ifId,
+                props: {
+                    test: {
+                        type: 'ref',
+                        irNodeId: condId
+                    },
+                    consequent: {
+                        type: 'ref',
+                        irNodeId: retCacheStmtId
+                    },
+                    alternate: null
+                },
+                children: [condNode, retCacheStmtNode]
             };
             const objectProperties = [];
             const objectPropertyRefs = [];
-            for (const prop of properties) {
+            for (const prop of exportsProperties) {
                 const propSuffix = Math.random().toString(36).substr(2, 6);
                 const propKeyId = `prop_key_${propSuffix}`;
                 const propValId = `prop_val_${propSuffix}`;
                 const propId = `prop_${propSuffix}`;
+                const targetInfo = allTopLevelDecls.get(prop.targetDeclId);
+                const actualName = renameJobs.get(prop.targetDeclId) || (targetInfo ? targetInfo.varName : prop.keyName);
                 const propKeyNode = {
                     type: 'Identifier',
                     irNodeId: propKeyId,
@@ -1527,7 +1726,7 @@
                     type: 'Identifier',
                     irNodeId: propValId,
                     props: {
-                        name: prop.keyName
+                        name: actualName
                     },
                     children: []
                 };
@@ -1555,6 +1754,7 @@
                     irNodeId: propId
                 });
             }
+            const objId = `obj_${suffix}`;
             const objectExprNode = {
                 type: 'ObjectExpression',
                 irNodeId: objId,
@@ -1563,24 +1763,98 @@
                 },
                 children: objectProperties
             };
-            const callExprNode = {
-                type: 'CallExpression',
-                irNodeId: callId,
+            const assignId = `assign_${suffix}`;
+            const cacheVarIdNodeForAssign = {
+                type: 'Identifier',
+                irNodeId: `cache_id_assign_${suffix}`,
                 props: {
-                    callee: {
+                    name: cacheVarName
+                },
+                children: []
+            };
+            const assignNode = {
+                type: 'AssignmentExpression',
+                irNodeId: assignId,
+                props: {
+                    operator: '=',
+                    left: {
                         type: 'ref',
-                        irNodeId: memberId
+                        irNodeId: cacheVarIdNodeForAssign.irNodeId
                     },
-                    arguments: [{
+                    right: {
                         type: 'ref',
                         irNodeId: objId
-                    }]
+                    }
                 },
-                children: [memberExprNode, objectExprNode]
+                children: [cacheVarIdNodeForAssign, objectExprNode]
             };
-            return callExprNode;
+            const returnStmtId = `return_stmt_${suffix}`;
+            const returnStmtNode = {
+                type: 'ReturnStatement',
+                irNodeId: returnStmtId,
+                props: {
+                    argument: {
+                        type: 'ref',
+                        irNodeId: assignId
+                    }
+                },
+                children: [assignNode]
+            };
+            const funcBodyId = `func_body_${suffix}`;
+            const bodyRefs = [];
+            const funcBodyChildren = [ifNode];
+            bodyRefs.push({
+                type: 'ref',
+                irNodeId: ifNode.irNodeId
+            });
+            for (const stmt of bodyStatements) {
+                funcBodyChildren.push(stmt);
+                bodyRefs.push({
+                    type: 'ref',
+                    irNodeId: stmt.irNodeId
+                });
+            }
+            funcBodyChildren.push(returnStmtNode);
+            bodyRefs.push({
+                type: 'ref',
+                irNodeId: returnStmtNode.irNodeId
+            });
+            const funcBodyNode = {
+                type: 'BlockStatement',
+                irNodeId: funcBodyId,
+                props: {
+                    body: bodyRefs
+                },
+                children: funcBodyChildren
+            };
+            const funcDeclId = `func_decl_${suffix}`;
+            const funcIdNode = {
+                type: 'Identifier',
+                irNodeId: `func_id_${suffix}`,
+                props: {
+                    name: thunkName
+                },
+                children: []
+            };
+            const funcDeclNode = {
+                type: 'FunctionDeclaration',
+                irNodeId: funcDeclId,
+                props: {
+                    id: {
+                        type: 'ref',
+                        irNodeId: funcIdNode.irNodeId
+                    },
+                    params: [],
+                    body: {
+                        type: 'ref',
+                        irNodeId: funcBodyId
+                    }
+                },
+                children: [funcIdNode, funcBodyNode]
+            };
+            return [cacheVarDeclNode, funcDeclNode];
         };
-        const replaceDynamicImports = (node, refToDeclMap, currentFilePath, existingFiles, irTrees, exportsMap, isExternalModule, getBase) => {
+        const replaceDynamicImports = (node, refToDeclMap, currentFilePath, existingFiles, irTrees, exportsMap, isExternalModule, getBase, dynamicImportedBases) => {
             if (node.children) {
                 for (let i = 0; i < node.children.length; i++) {
                     const child = node.children[i];
@@ -1597,15 +1871,9 @@
                                         if (modulePath && !isExternalModule(modulePath, currentFilePath)) {
                                             const resolvedPath = PathResolver.resolve(currentFilePath, modulePath, existingFiles);
                                             const targetBase = getBase(resolvedPath);
-                                            const targetExports = exportsMap.get(targetBase) || exportsMap.get(targetBase + '/index');
-                                            const properties = [];
-                                            if (targetExports) {
-                                                for (const [expName, declId] of targetExports.entries()) properties.push({
-                                                    keyName: expName,
-                                                    targetDeclId: declId
-                                                });
-                                            }
-                                            const replacementNode = createPromiseResolveObject(properties, refToDeclMap);
+                                            dynamicImportedBases.add(targetBase);
+                                            const thunkName = `__dynamic_import_${targetBase.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+                                            const replacementNode = createPromiseThenDynamicImport(thunkName);
                                             node.children[i] = replacementNode;
                                             for (const key of Object.keys(node.props)) {
                                                 const prop = node.props[key];
@@ -1631,7 +1899,7 @@
                             }
                         }
                     }
-                    replaceDynamicImports(child, refToDeclMap, currentFilePath, existingFiles, irTrees, exportsMap, isExternalModule, getBase);
+                    replaceDynamicImports(child, refToDeclMap, currentFilePath, existingFiles, irTrees, exportsMap, isExternalModule, getBase, dynamicImportedBases);
                 }
             }
         };
@@ -1811,11 +2079,12 @@
                         }
                     }
                 }
+                const dynamicImportedBases = new Set();
                 const allRefToDeclMaps = new Map();
                 for (const tree of irTrees) {
                     const refToDeclMap = ScopeResolver.resolve(tree);
                     allRefToDeclMaps.set(tree.filePath, refToDeclMap);
-                    replaceDynamicImports(tree, refToDeclMap, tree.filePath, existingFiles, irTrees, exportsMap, isExternalModule, getBase);
+                    replaceDynamicImports(tree, refToDeclMap, tree.filePath, existingFiles, irTrees, exportsMap, isExternalModule, getBase, dynamicImportedBases);
                     const fileProgram = tree.children[0]?.children?.find(c => c.type === 'Program');
                     if (!fileProgram) continue;
                     const bodyRefs = fileProgram.props['body'];
@@ -2158,6 +2427,8 @@
                             props: newProps
                         } : node;
                     };
+                    const isDynamic = dynamicImportedBases.has(getBase(tree.filePath)) || dynamicImportedBases.has(getBase(tree.filePath) + '/index');
+                    const fileBodyStatements = [];
                     const updatedFileProgram = replaceNodes(fileProgram);
                     const updatedBodyRefs = updatedFileProgram.props['body'];
                     if (!Array.isArray(updatedBodyRefs)) continue;
@@ -2194,22 +2465,44 @@
                                 const declNode = child.children.find(c => c.irNodeId === declRef.irNodeId);
                                 if (declNode) {
                                     if (declNode.type === 'VariableDeclaration' || declNode.type === 'FunctionDeclaration' || declNode.type === 'ClassDeclaration') {
-                                        programNode.children.push(declNode);
-                                        programNode.props['body'].push({
-                                            type: 'ref',
-                                            irNodeId: declNode.irNodeId
-                                        });
+                                        fileBodyStatements.push(declNode);
                                     }
                                 }
                             }
                             continue;
                         }
                         if (child.type === 'ExportAllDeclaration') continue;
-                        programNode.children.push(child);
-                        programNode.props['body'].push({
-                            type: 'ref',
-                            irNodeId: child.irNodeId
-                        });
+                        fileBodyStatements.push(child);
+                    }
+                    if (isDynamic) {
+                        const targetBase = getBase(tree.filePath);
+                        const thunkName = `__dynamic_import_${targetBase.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+                        const targetExports = exportsMap.get(targetBase) || exportsMap.get(targetBase + '/index');
+                        const properties = [];
+                        if (targetExports) {
+                            for (const [expName, declId] of targetExports.entries()) {
+                                properties.push({
+                                    keyName: expName,
+                                    targetDeclId: declId
+                                });
+                            }
+                        }
+                        const thunkNodes = createThunkFunction(thunkName, fileBodyStatements, properties, refToDeclMap, renameJobs, allTopLevelDecls);
+                        for (const tNode of thunkNodes) {
+                            programNode.children.push(tNode);
+                            programNode.props['body'].push({
+                                type: 'ref',
+                                irNodeId: tNode.irNodeId
+                            });
+                        }
+                    } else {
+                        for (const stmt of fileBodyStatements) {
+                            programNode.children.push(stmt);
+                            programNode.props['body'].push({
+                                type: 'ref',
+                                irNodeId: stmt.irNodeId
+                            });
+                        }
                     }
                 } // 全ファイルのAST統合が完了した後、最後に1回だけグローバルな重複排除を行う
                 const mergedImports = new Map();
@@ -2802,6 +3095,11 @@
                 handler: 'handler',
                 finalizer: 'finalizer'
             },
+            'SwitchStatement': {
+                type: 'switch',
+                discriminant: 'discriminant',
+                cases: 'cases'
+            },
             'FunctionDeclaration': {
                 type: 'function',
                 body: 'body'
@@ -2846,7 +3144,8 @@
                 };
                 const entryBlock = createBlock();
                 let currentBlock = entryBlock;
-                const loopStack = []; // Push the global context
+                const loopStack = [];
+                const finallyStack = []; // Push the global context
                 const contextStack = [{
                     exitBlock: null,
                     catchBlock: null
@@ -2854,7 +3153,7 @@
                 const walk = (node, parentId = null) => {
                     if (!node) return;
                     if (parentId) parentMap.set(node.irNodeId, parentId); // 未サポートの制御フロー構文に対する整合性検証
-                    if (['SwitchStatement', 'ForInStatement', 'ForOfStatement', 'DoWhileStatement'].includes(node.type)) {
+                    if (['ForInStatement', 'ForOfStatement', 'DoWhileStatement'].includes(node.type)) {
                         console.warn(`[CFGBuilder] Unsupported control flow node encountered: '${node.type}'. The CFG will be inaccurate, which may compromise optimization safety.`);
                     }
                     const rule = CFG_BRANCH_RULES[node.type];
@@ -2871,6 +3170,10 @@
                                 catchBlock: null
                             });
                             currentBlock = funcEntry;
+                            const savedLoopStack = [...loopStack];
+                            loopStack.length = 0;
+                            const savedFinallyStack = [...finallyStack];
+                            finallyStack.length = 0;
                             if (node.props.params && Array.isArray(node.props.params)) {
                                 for (const param of node.props.params) {
                                     if (param && param.type === 'ref') {
@@ -2885,6 +3188,8 @@
                                 link(currentBlock, funcExit);
                             }
                             contextStack.pop();
+                            loopStack.push(...savedLoopStack);
+                            finallyStack.push(...savedFinallyStack);
                             currentBlock = savedBlock;
                             if (currentBlock && ['FunctionExpression', 'ArrowFunctionExpression', 'FunctionDeclaration'].includes(node.type)) {
                                 currentBlock.nodes.push(node);
@@ -2892,6 +3197,11 @@
                             }
                             return;
                         } else if (rule.type === 'try-catch') {
+                            // 【技術的負債/簡易実装に関する制約】
+                            // 現在の制御フロー解析（CFG）では、try-catch-finally のエッジ合流は近似的な簡易実装です。
+                            // try ブロック内の return や throw が発生した際、本来であれば finally を経由した後に
+                            // 元の exitBlock 等へ正確に復帰する必要がありますが、本コンパイラの最適化範囲においては
+                            // finally の末尾から一律に endBlock へリンクさせることでグラフ構造を簡略化しています。
                             const block = getChild(node, rule.block);
                             const handler = getChild(node, rule.handler);
                             const finalizer = getChild(node, rule.finalizer);
@@ -2901,6 +3211,9 @@
                             const currentContext = contextStack[contextStack.length - 1];
                             const prevCatch = currentContext.catchBlock;
                             currentContext.catchBlock = catchEntryBlock;
+                            if (finallyEntryBlock) {
+                                finallyStack.push(finallyEntryBlock);
+                            }
                             walk(block, node.irNodeId);
                             if (currentBlock) {
                                 link(currentBlock, finallyEntryBlock || endBlock);
@@ -2917,6 +3230,9 @@
                                 link(catchEntryBlock, finallyEntryBlock || endBlock);
                             }
                             if (finallyEntryBlock) {
+                                finallyStack.pop();
+                            }
+                            if (finallyEntryBlock) {
                                 currentBlock = finallyEntryBlock;
                                 walk(finalizer, node.irNodeId);
                                 if (currentBlock) {
@@ -2924,6 +3240,69 @@
                                 }
                             }
                             currentBlock = endBlock;
+                            return;
+                        } else if (rule.type === 'switch') {
+                            // Evaluate discriminant
+                            walk(getChild(node, rule.discriminant), node.irNodeId);
+                            const exitBlock = createBlock(); // We push the exitBlock onto loopStack so that `break` can target it.
+                            loopStack.push({
+                                breakTarget: exitBlock
+                            });
+                            const preSwitchBlock = currentBlock; // Get cases list. Each case is a SwitchCase IRNode.
+                            const casesRefs = node.props.cases || [];
+                            const caseNodes = [];
+                            for (const ref of casesRefs) {
+                                if (ref && ref.type === 'ref') {
+                                    const cNode = node.children.find(c => c.irNodeId === ref.irNodeId);
+                                    if (cNode) caseNodes.push(cNode);
+                                }
+                            }
+                            let prevCaseEndBlock = null;
+                            const caseBlocks = []; // First pass: create entry blocks for all cases so we can link them
+                            for (let i = 0; i < caseNodes.length; i++) {
+                                caseBlocks.push(createBlock());
+                            } // Link the switch pre-block to all case entry blocks.
+                            // If there is no default case, we also link preSwitchBlock to exitBlock.
+                            let hasDefault = false;
+                            for (const caseNode of caseNodes) {
+                                if (!caseNode.props.test) {
+                                    hasDefault = true;
+                                }
+                            }
+                            for (const cb of caseBlocks) {
+                                link(preSwitchBlock, cb);
+                            }
+                            if (!hasDefault) {
+                                link(preSwitchBlock, exitBlock);
+                            }
+                            for (let i = 0; i < caseNodes.length; i++) {
+                                const caseNode = caseNodes[i];
+                                const cb = caseBlocks[i]; // If previous case ended without a break/return (prevCaseEndBlock is not null),
+                                // it falls through to this case entry block.
+                                if (prevCaseEndBlock) {
+                                    link(prevCaseEndBlock, cb);
+                                }
+                                currentBlock = cb; // Walk the test first if present
+                                const testNode = getChild(caseNode, 'test');
+                                if (testNode) {
+                                    walk(testNode, caseNode.irNodeId);
+                                } // Walk the consequent statements
+                                const consequentRefs = caseNode.props.consequent || [];
+                                for (const stmtRef of consequentRefs) {
+                                    if (stmtRef && stmtRef.type === 'ref') {
+                                        const stmtNode = caseNode.children.find(c => c.irNodeId === stmtRef.irNodeId);
+                                        if (stmtNode) {
+                                            walk(stmtNode, caseNode.irNodeId);
+                                        }
+                                    }
+                                } // The end of this case block
+                                prevCaseEndBlock = currentBlock;
+                            } // The last case's end falls through to exitBlock
+                            if (prevCaseEndBlock) {
+                                link(prevCaseEndBlock, exitBlock);
+                            }
+                            loopStack.pop();
+                            currentBlock = exitBlock;
                             return;
                         } else if (rule.type === 'branch') {
                             walk(getChild(node, rule.cond), node.irNodeId);
@@ -3007,26 +3386,39 @@
                         return;
                     }
                     if (node.type === 'ContinueStatement') {
-                        if (loopStack.length > 0) link(currentBlock, loopStack[loopStack.length - 1].continueTarget);
+                        for (let i = loopStack.length - 1; i >= 0; i--) {
+                            if (loopStack[i].continueTarget) {
+                                link(currentBlock, loopStack[i].continueTarget);
+                                break;
+                            }
+                        }
                         currentBlock = null;
                         return;
                     }
                     if (node.type === 'ReturnStatement') {
                         walk(getChild(node, 'argument'), node.irNodeId);
-                        const currentContext = contextStack[contextStack.length - 1];
-                        if (currentContext.exitBlock) {
-                            link(currentBlock, currentContext.exitBlock);
+                        if (finallyStack.length > 0) {
+                            link(currentBlock, finallyStack[finallyStack.length - 1]);
+                        } else {
+                            const currentContext = contextStack[contextStack.length - 1];
+                            if (currentContext.exitBlock) {
+                                link(currentBlock, currentContext.exitBlock);
+                            }
                         }
                         currentBlock = null;
                         return;
                     }
                     if (node.type === 'ThrowStatement') {
                         walk(getChild(node, 'argument'), node.irNodeId);
-                        const currentContext = contextStack[contextStack.length - 1];
-                        if (currentContext.catchBlock) {
-                            link(currentBlock, currentContext.catchBlock);
-                        } else if (currentContext.exitBlock) {
-                            link(currentBlock, currentContext.exitBlock);
+                        if (finallyStack.length > 0) {
+                            link(currentBlock, finallyStack[finallyStack.length - 1]);
+                        } else {
+                            const currentContext = contextStack[contextStack.length - 1];
+                            if (currentContext.catchBlock) {
+                                link(currentBlock, currentContext.catchBlock);
+                            } else if (currentContext.exitBlock) {
+                                link(currentBlock, currentContext.exitBlock);
+                            }
                         }
                         currentBlock = null;
                         return;
@@ -3084,142 +3476,61 @@
             const parent = nodeMap.get(parentId);
             if (!parent) return false;
             if (parent.type === 'VariableDeclarator' && getChild(parent, 'id')?.irNodeId === node.irNodeId) return true;
-            if (parent.type === 'AssignmentExpression' && getChild(parent, 'left')?.irNodeId === node.irNodeId) return true;
+            if (parent.type === 'AssignmentExpression' && getChild(parent, 'left')?.irNodeId === node.irNodeId) {
+                // Compound assignments (e.g., +=) require reading the variable before writing to it.
+                // Thus, we treat it as an LVal for DEF purposes, but we will explicitly register its USE in extractLivenessData.
+                return true;
+            }
             if (parent.type === 'UpdateExpression' && getChild(parent, 'argument')?.irNodeId === node.irNodeId) return true;
             return false;
         }
-        class DFACalculator {
-            static compute(blocks, nodeToBlock, parentMap, refToDeclMap) {
-                // Collect all nodes into a map for fast lookup
-                const nodeMap = new Map();
+        class IRDataFlowExtractor {
+            static extractLivenessData(blocks, refToDeclMap, parentMap, nodeMap) {
+                const dataMap = new Map();
                 for (const block of blocks.values()) {
                     for (const node of block.nodes) {
-                        nodeMap.set(node.irNodeId, node);
-                    }
-                }
-                const blockIn = new Map();
-                const blockOut = new Map();
-                for (const blockId of blocks.keys()) {
-                    blockIn.set(blockId, new Set());
-                    blockOut.set(blockId, new Set());
-                }
-                const worklist = Array.from(blocks.values());
-                const equals = (a, b) => {
-                    if (a.size !== b.size) return false;
-                    for (const item of a) if (!b.has(item)) return false;
-                    return true;
-                };
-                while (worklist.length > 0) {
-                    const block = worklist.shift(); // Liveness is backward: OUT is union of IN of successors
-                    if (block.successors.length > 0) {
-                        const outSet = new Set();
-                        for (const succId of block.successors) {
-                            const succIn = blockIn.get(succId);
-                            if (succIn) {
-                                for (const v of succIn) outSet.add(v);
-                            }
-                        }
-                        blockOut.set(block.id, outSet);
-                    }
-                    let currentState = new Set(blockOut.get(block.id)); // Traverse events in reverse order
-                    for (let i = block.nodes.length - 1; i >= 0; i--) {
-                        const node = block.nodes[i]; // Transfer function for Liveness: IN = (OUT - DEF) U USE
-                        // 1. Remove DEFs
+                        const def = new Set();
+                        const use = new Set();
                         const definedVars = getDefinedVars(node, refToDeclMap);
                         for (const varName of definedVars) {
-                            currentState.delete(varName);
-                        } // 2. Re-add USEs
+                            def.add(varName);
+                        }
                         if (node.type === 'Identifier' && !isLVal(node, parentMap, nodeMap)) {
                             const declId = refToDeclMap.get(node.irNodeId);
-                            if (declId) currentState.add(declId);
+                            if (declId) use.add(declId);
                         }
                         if (node.type === 'UpdateExpression') {
                             const arg = getChild(node, 'argument');
                             if (arg && arg.type === 'Identifier') {
                                 const declId = refToDeclMap.get(arg.irNodeId);
-                                if (declId) currentState.add(declId);
+                                if (declId) use.add(declId);
                             }
                         }
-                    }
-                    if (!equals(currentState, blockIn.get(block.id))) {
-                        blockIn.set(block.id, currentState);
-                        for (const predId of block.predecessors) {
-                            const predBlock = blocks.get(predId);
-                            if (predBlock && !worklist.includes(predBlock)) {
-                                worklist.push(predBlock);
+                        if (node.type === 'AssignmentExpression') {
+                            const op = node.props.operator;
+                            if (op && op !== '=') {
+                                const leftNode = getChild(node, 'left');
+                                if (leftNode && leftNode.type === 'Identifier') {
+                                    const declId = refToDeclMap.get(leftNode.irNodeId);
+                                    if (declId) use.add(declId);
+                                }
                             }
                         }
-                    }
-                } // Map the results back to individual nodes
-                const livenessStates = new Map();
-                for (const block of blocks.values()) {
-                    let currentState = new Set(blockOut.get(block.id));
-                    for (let i = block.nodes.length - 1; i >= 0; i--) {
-                        const node = block.nodes[i];
-                        const nextState = new Set(currentState);
-                        const definedVars = getDefinedVars(node, refToDeclMap);
-                        for (const varName of definedVars) {
-                            nextState.delete(varName);
-                        }
-                        if (node.type === 'Identifier' && !isLVal(node, parentMap, nodeMap)) {
-                            const declId = refToDeclMap.get(node.irNodeId);
-                            if (declId) nextState.add(declId);
-                        }
-                        if (node.type === 'UpdateExpression') {
-                            const arg = getChild(node, 'argument');
-                            if (arg && arg.type === 'Identifier') {
-                                const declId = refToDeclMap.get(arg.irNodeId);
-                                if (declId) nextState.add(declId);
-                            }
-                        }
-                        livenessStates.set(node.irNodeId, {
-                            in: nextState,
-                            out: currentState
+                        dataMap.set(node.irNodeId, {
+                            def,
+                            use
                         });
-                        currentState = nextState;
                     }
                 }
-                return livenessStates;
+                return dataMap;
             }
-        }
-        function getChild_1(node, propName) {
-            const ref = node.props[propName];
-            if (ref && ref.type === 'ref') {
-                return node.children.find(c => c.irNodeId === ref.irNodeId) || null;
-            }
-            return null;
-        }
-        function getDefinedVars_1(node, refToDeclMap) {
-            const vars = [];
-            if (node.type === 'VariableDeclarator') {
-                const idNode = getChild_1(node, 'id');
-                if (idNode && idNode.type === 'Identifier') {
-                    const declId = refToDeclMap.get(idNode.irNodeId) || idNode.irNodeId;
-                    vars.push(declId);
-                }
-            } else if (node.type === 'AssignmentExpression') {
-                const leftNode = getChild_1(node, 'left');
-                if (leftNode && leftNode.type === 'Identifier') {
-                    const declId = refToDeclMap.get(leftNode.irNodeId);
-                    if (declId) vars.push(declId);
-                }
-            } else if (node.type === 'UpdateExpression') {
-                const argNode = getChild_1(node, 'argument');
-                if (argNode && argNode.type === 'Identifier') {
-                    const declId = refToDeclMap.get(argNode.irNodeId);
-                    if (declId) vars.push(declId);
-                }
-            }
-            return vars;
-        }
-        class ReachingDefCalculator {
-            static compute(blocks, nodeToBlock, refToDeclMap) {
-                // 1. Collect all definitions for each variable (declId)
-                const defsByVar = new Map(); // declId -> Set of definition irNodeIds
-                const defToVar = new Map(); // definition irNodeId -> declId
+            static extractReachingDefData(blocks, refToDeclMap) {
+                const dataMap = new Map();
+                const defsByVar = new Map();
+                const defToVar = new Map(); // First pass: Collect all definitions
                 for (const block of blocks.values()) {
                     for (const node of block.nodes) {
-                        const definedVars = getDefinedVars_1(node, refToDeclMap);
+                        const definedVars = getDefinedVars(node, refToDeclMap);
                         for (const declId of definedVars) {
                             if (!defsByVar.has(declId)) {
                                 defsByVar.set(declId, new Set());
@@ -3228,86 +3539,187 @@
                             defToVar.set(node.irNodeId, declId);
                         }
                     }
-                }
-                const blockIn = new Map();
-                const blockOut = new Map();
-                for (const blockId of blocks.keys()) {
-                    blockIn.set(blockId, new Set());
-                    blockOut.set(blockId, new Set());
-                }
-                const worklist = Array.from(blocks.values());
-                const equals = (a, b) => {
-                    if (a.size !== b.size) return false;
-                    for (const item of a) if (!b.has(item)) return false;
-                    return true;
-                }; // Forward analysis
-                while (worklist.length > 0) {
-                    const block = worklist.shift(); // IN is union of OUT of predecessors
-                    if (block.predecessors.length > 0) {
-                        const inSet = new Set();
-                        for (const predId of block.predecessors) {
-                            const predOut = blockOut.get(predId);
-                            if (predOut) {
-                                for (const v of predOut) inSet.add(v);
-                            }
-                        }
-                        blockIn.set(block.id, inSet);
-                    }
-                    let currentState = new Set(blockIn.get(block.id)); // Traverse events in forward order
-                    for (let i = 0; i < block.nodes.length; i++) {
-                        const node = block.nodes[i];
-                        const definedVars = getDefinedVars_1(node, refToDeclMap); // OUT = (IN - KILL) U GEN
-                        if (definedVars.length > 0) {
-                            for (const declId of definedVars) {
-                                const allDefsForVar = defsByVar.get(declId);
-                                if (allDefsForVar) {
-                                    for (const defId of allDefsForVar) {
-                                        currentState.delete(defId);
-                                    }
-                                }
-                            }
-                            currentState.add(node.irNodeId);
-                        }
-                    }
-                    if (!equals(currentState, blockOut.get(block.id))) {
-                        blockOut.set(block.id, currentState);
-                        for (const succId of block.successors) {
-                            const succBlock = blocks.get(succId);
-                            if (succBlock && !worklist.includes(succBlock)) {
-                                worklist.push(succBlock);
-                            }
-                        }
-                    }
-                }
-                const reachingDefStates = new Map();
+                } // Second pass: Compute gen and kill sets
                 for (const block of blocks.values()) {
-                    let currentState = new Set(blockIn.get(block.id));
-                    for (let i = 0; i < block.nodes.length; i++) {
-                        const node = block.nodes[i];
-                        const nextState = new Set(currentState);
-                        const definedVars = getDefinedVars_1(node, refToDeclMap);
+                    for (const node of block.nodes) {
+                        const gen = new Set();
+                        const kill = new Set();
+                        const definedVars = getDefinedVars(node, refToDeclMap);
                         if (definedVars.length > 0) {
                             for (const declId of definedVars) {
                                 const allDefsForVar = defsByVar.get(declId);
                                 if (allDefsForVar) {
                                     for (const defId of allDefsForVar) {
-                                        nextState.delete(defId);
+                                        kill.add(defId);
                                     }
                                 }
                             }
-                            nextState.add(node.irNodeId);
+                            gen.add(node.irNodeId);
                         }
-                        reachingDefStates.set(node.irNodeId, {
-                            in: currentState,
-                            out: nextState
+                        dataMap.set(node.irNodeId, {
+                            gen,
+                            kill
                         });
-                        currentState = nextState;
                     }
                 }
                 return {
-                    reachingDefStates,
+                    dataMap,
+                    defsByVar,
                     defToVar
                 };
+            }
+        }
+        class DataFlowSolver {
+            static solve(problem, blocks, nodeDataMap) {
+                const blockIn = new Map();
+                const blockOut = new Map();
+                for (const blockId of blocks.keys()) {
+                    blockIn.set(blockId, problem.initialState());
+                    blockOut.set(blockId, problem.initialState());
+                }
+                const worklist = Array.from(blocks.values());
+                while (worklist.length > 0) {
+                    const block = worklist.shift();
+                    if (problem.direction === 'forward') {
+                        if (block.predecessors.length > 0) {
+                            const predStates = block.predecessors.map(id => blockOut.get(id));
+                            blockIn.set(block.id, problem.meet(predStates));
+                        } else {
+                            blockIn.set(block.id, problem.boundaryCondition());
+                        } // Isolate blockIn state by cloning before applying in-place node transformations
+                        let currentState = problem.clone(blockIn.get(block.id));
+                        for (let i = 0; i < block.nodes.length; i++) {
+                            const node = block.nodes[i];
+                            const data = nodeDataMap.get(node.irNodeId);
+                            currentState = problem.transferNode(data, currentState);
+                        }
+                        if (!problem.equals(currentState, blockOut.get(block.id))) {
+                            blockOut.set(block.id, currentState);
+                            for (const succId of block.successors) {
+                                const succBlock = blocks.get(succId);
+                                if (succBlock && !worklist.includes(succBlock)) {
+                                    worklist.push(succBlock);
+                                }
+                            }
+                        }
+                    } else {
+                        // backward
+                        if (block.successors.length > 0) {
+                            const succStates = block.successors.map(id => blockIn.get(id));
+                            blockOut.set(block.id, problem.meet(succStates));
+                        } else {
+                            blockOut.set(block.id, problem.boundaryCondition());
+                        } // Isolate blockOut state by cloning before applying in-place node transformations
+                        let currentState = problem.clone(blockOut.get(block.id));
+                        for (let i = block.nodes.length - 1; i >= 0; i--) {
+                            const node = block.nodes[i];
+                            const data = nodeDataMap.get(node.irNodeId);
+                            currentState = problem.transferNode(data, currentState);
+                        }
+                        if (!problem.equals(currentState, blockIn.get(block.id))) {
+                            blockIn.set(block.id, currentState);
+                            for (const predId of block.predecessors) {
+                                const predBlock = blocks.get(predId);
+                                if (predBlock && !worklist.includes(predBlock)) {
+                                    worklist.push(predBlock);
+                                }
+                            }
+                        }
+                    }
+                } // Map results back to individual nodes with independent clones
+                const nodeStates = new Map();
+                for (const block of blocks.values()) {
+                    if (problem.direction === 'forward') {
+                        let currentState = problem.clone(blockIn.get(block.id));
+                        for (let i = 0; i < block.nodes.length; i++) {
+                            const node = block.nodes[i];
+                            const data = nodeDataMap.get(node.irNodeId);
+                            const inState = problem.clone(currentState);
+                            currentState = problem.transferNode(data, currentState);
+                            const outState = problem.clone(currentState);
+                            nodeStates.set(node.irNodeId, {
+                                in: inState,
+                                out: outState
+                            });
+                        }
+                    } else {
+                        let currentState = problem.clone(blockOut.get(block.id));
+                        for (let i = block.nodes.length - 1; i >= 0; i--) {
+                            const node = block.nodes[i];
+                            const data = nodeDataMap.get(node.irNodeId);
+                            const outState = problem.clone(currentState);
+                            currentState = problem.transferNode(data, currentState);
+                            const inState = problem.clone(currentState);
+                            nodeStates.set(node.irNodeId, {
+                                in: inState,
+                                out: outState
+                            });
+                        }
+                    }
+                }
+                return nodeStates;
+            }
+        }
+        class LivenessAnalysis {
+            direction = 'backward';
+            meet(states) {
+                const result = new Set();
+                for (const state of states) {
+                    for (const v of state) {
+                        result.add(v);
+                    }
+                }
+                return result;
+            }
+            boundaryCondition() {
+                return new Set();
+            }
+            initialState() {
+                return new Set();
+            }
+            transferNode(data, inputState) {
+                for (const d of data.def) inputState.delete(d);
+                for (const u of data.use) inputState.add(u);
+                return inputState;
+            }
+            equals(a, b) {
+                if (a.size !== b.size) return false;
+                for (const item of a) if (!b.has(item)) return false;
+                return true;
+            }
+            clone(state) {
+                return new Set(state);
+            }
+        }
+        class ReachingDefinitionAnalysis {
+            direction = 'forward';
+            meet(states) {
+                const result = new Set();
+                for (const state of states) {
+                    for (const v of state) {
+                        result.add(v);
+                    }
+                }
+                return result;
+            }
+            boundaryCondition() {
+                return new Set();
+            }
+            initialState() {
+                return new Set();
+            }
+            transferNode(data, inputState) {
+                for (const k of data.kill) inputState.delete(k);
+                for (const g of data.gen) inputState.add(g);
+                return inputState;
+            }
+            equals(a, b) {
+                if (a.size !== b.size) return false;
+                for (const item of a) if (!b.has(item)) return false;
+                return true;
+            }
+            clone(state) {
+                return new Set(state);
             }
         }
         class NativeFlowAnalyzer {
@@ -3343,12 +3755,17 @@
                             escapedVars.add(escapedIrId);
                         }
                     }
-                }
-                const livenessStates = DFACalculator.compute(blocks, nodeToBlock, parentMap, refToDeclMap);
+                } // --- New Data-Driven DFA Engine ---
+                // 1. Data Extraction Phase
+                const livenessDataMap = IRDataFlowExtractor.extractLivenessData(blocks, refToDeclMap, parentMap, nodeMap);
                 const {
-                    reachingDefStates,
+                    dataMap: reachingDefDataMap,
                     defToVar
-                } = ReachingDefCalculator.compute(blocks, nodeToBlock, refToDeclMap);
+                } = IRDataFlowExtractor.extractReachingDefData(blocks, refToDeclMap); // 2. Solving Phase
+                const livenessProblem = new LivenessAnalysis();
+                const livenessStates = DataFlowSolver.solve(livenessProblem, blocks, livenessDataMap);
+                const reachingDefProblem = new ReachingDefinitionAnalysis();
+                const reachingDefStates = DataFlowSolver.solve(reachingDefProblem, blocks, reachingDefDataMap);
                 return new AnalysisSnapshot(blocks, nodeToBlock, livenessStates, parentMap, refToDeclMap, referenceCounts, escapedVars, reachingDefStates, defToVar, nodeMap);
             }
         }
@@ -3912,6 +4329,446 @@
             }
         };
         function generateIrId_6() {
+            return `ir_generated_objprop_${Math.random().toString(36).substring(2, 9)}`;
+        }
+        const ObjectPropertyPropagationRule = {
+            id: 'micro:object-property-propagation',
+            type: 'micro',
+            name: 'オブジェクト・プロパティの定数伝播',
+            description: 'オブジェクトリテラルとして定義され、ミューテーションを受けていないオブジェクトのプロパティアクセスをリテラル値に展開します。',
+            defaultEnabled: true,
+            match: (node, state) => {
+                if (node.type !== 'MemberExpression') return false;
+                if (!state.analysisSnapshot) return false;
+                const memNode = node;
+                if (memNode.props.computed) {
+                    // Computed properties (e.g. obj['a']) could be supported if property is StringLiteral,
+                    // but for simplicity let's stick to non-computed or StringLiteral computed.
+                    const propNode = memNode.children.find(c => c.irNodeId === memNode.props.property?.irNodeId);
+                    if (!propNode || propNode.type !== 'StringLiteral') {
+                        return false;
+                    }
+                }
+                const objRef = memNode.props.object;
+                if (!objRef) return false;
+                const snapshot = state.analysisSnapshot;
+                const objNode = snapshot.nodeMap.get(objRef.irNodeId);
+                if (!objNode || objNode.type !== 'Identifier') return false;
+                const identNode = objNode; // 自分が代入の左辺などにいないかチェック
+                const parentId = snapshot.parentMap.get(memNode.irNodeId);
+                if (parentId) {
+                    const parent = snapshot.nodeMap.get(parentId);
+                    if (parent) {
+                        if (parent.type === 'AssignmentExpression' && parent.props.left?.irNodeId === memNode.irNodeId) return false;
+                        if (parent.type === 'UpdateExpression' && parent.props.argument?.irNodeId === memNode.irNodeId) return false;
+                    }
+                }
+                const a_decl = snapshot.refToDeclMap.get(identNode.irNodeId);
+                if (!a_decl) return false;
+                if (snapshot.escapedVars.has(a_decl)) return false;
+                const a_defs = snapshot.getReachingDefinitions(identNode.irNodeId, a_decl);
+                if (a_defs.size !== 1) return false;
+                const defId = Array.from(a_defs)[0];
+                const defNode = snapshot.nodeMap.get(defId);
+                if (!defNode) return false;
+                let sourceNode = null;
+                if (defNode.type === 'VariableDeclarator') {
+                    const dNode = defNode;
+                    const initRef = dNode.props.init;
+                    if (initRef) {
+                        sourceNode = dNode.children.find(c => c.irNodeId === initRef.irNodeId) || null;
+                    }
+                } else if (defNode.type === 'AssignmentExpression') {
+                    const aNode = defNode;
+                    const rightRef = aNode.props.right;
+                    if (rightRef) {
+                        sourceNode = aNode.children.find(c => c.irNodeId === rightRef.irNodeId) || null;
+                    }
+                }
+                if (!sourceNode || sourceNode.type !== 'ObjectExpression') return false; // ミューテーション検査: 対象のオブジェクトに対する変更がないか
+                // このオブジェクト(a_decl)への全ての参照をチェックし、プロパティ変更や引数渡しなどがあれば安全のため伝播を諦める
+                let isMutatedOrEscaped = false;
+                for (const [refId, declId] of snapshot.refToDeclMap.entries()) {
+                    if (declId === a_decl) {
+                        const refParentId = snapshot.parentMap.get(refId);
+                        if (refParentId) {
+                            const refParent = snapshot.nodeMap.get(refParentId);
+                            if (refParent) {
+                                if (refParent.type === 'VariableDeclarator' && refParent.props.id?.irNodeId === refId) {// 宣言自身なのでOK
+                                } else if (refParent.type === 'MemberExpression' && refParent.props.object?.irNodeId === refId) {
+                                    // プロパティアクセス
+                                    const memParentId = snapshot.parentMap.get(refParent.irNodeId);
+                                    if (memParentId) {
+                                        const memParent = snapshot.nodeMap.get(memParentId);
+                                        if (memParent) {
+                                            if (memParent.type === 'AssignmentExpression' && memParent.props.left?.irNodeId === refParent.irNodeId) {
+                                                isMutatedOrEscaped = true; // プロパティへの代入
+                                                break;
+                                            }
+                                            if (memParent.type === 'UpdateExpression' && memParent.props.argument?.irNodeId === refParent.irNodeId) {
+                                                isMutatedOrEscaped = true; // プロパティの更新 (++, --)
+                                                break;
+                                            }
+                                            if (memParent.type === 'CallExpression' && memParent.props.callee?.irNodeId === refParent.irNodeId) {
+                                                // メソッド呼び出し (thisを通して変更される可能性があるため保守的に諦める)
+                                                // e.g. obj.method()
+                                                isMutatedOrEscaped = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } else if (refParent.type === 'AssignmentExpression' && refParent.props.left?.irNodeId === refId) {
+                                    // 再代入 (a_defs.size === 1 だが、別の箇所で再代入されているなら複雑化するので保守的に諦める)
+                                    isMutatedOrEscaped = true;
+                                    break;
+                                } else {
+                                    // 関数呼び出しの引数として渡されている(CallExpression arguments)など、その他の使われ方
+                                    // 保守的に諦める
+                                    isMutatedOrEscaped = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (isMutatedOrEscaped) return false; // プロパティ名を特定
+                let propName = '';
+                if (!memNode.props.computed) {
+                    const propNode = memNode.children.find(c => c.irNodeId === memNode.props.property?.irNodeId);
+                    if (propNode && propNode.type === 'Identifier') {
+                        propName = propNode.props.name;
+                    }
+                } else {
+                    const propNode = memNode.children.find(c => c.irNodeId === memNode.props.property?.irNodeId);
+                    if (propNode && propNode.type === 'StringLiteral') {
+                        propName = propNode.props.value;
+                    }
+                }
+                if (!propName) return false; // ObjectExpressionの中に該当するプロパティが存在し、かつ値が定数リテラルであるか
+                const objExp = sourceNode;
+                const properties = objExp.children.filter(c => c.type === 'ObjectProperty');
+                const targetProp = properties.find(p => {
+                    const keyNode = p.children.find(c => c.irNodeId === p.props.key?.irNodeId);
+                    if (keyNode?.type === 'Identifier') return keyNode.props.name === propName;
+                    if (keyNode?.type === 'StringLiteral') return keyNode.props.value === propName;
+                    return false;
+                });
+                if (!targetProp) return false;
+                const valNode = targetProp.children.find(c => c.irNodeId === targetProp.props.value?.irNodeId);
+                if (!valNode || valNode.type !== 'NumericLiteral' && valNode.type !== 'StringLiteral' && valNode.type !== 'BooleanLiteral') {
+                    return false; // 値が定数リテラルではない
+                }
+                return true;
+            },
+            candidates: (node, state) => {
+                const memNode = node;
+                const snapshot = state.analysisSnapshot;
+                const objRef = memNode.props.object;
+                const identNode = snapshot.nodeMap.get(objRef.irNodeId);
+                const a_decl = snapshot.refToDeclMap.get(identNode.irNodeId);
+                const a_defs = snapshot.getReachingDefinitions(identNode.irNodeId, a_decl);
+                const defId = Array.from(a_defs)[0];
+                const defNode = snapshot.nodeMap.get(defId);
+                let sourceNode;
+                if (defNode.type === 'VariableDeclarator') {
+                    sourceNode = defNode.children.find(c => c.irNodeId === defNode.props.init?.irNodeId);
+                } else {
+                    sourceNode = defNode.children.find(c => c.irNodeId === defNode.props.right?.irNodeId);
+                }
+                let propName = '';
+                if (!memNode.props.computed) {
+                    const propNode = memNode.children.find(c => c.irNodeId === memNode.props.property?.irNodeId);
+                    propName = propNode.props.name;
+                } else {
+                    const propNode = memNode.children.find(c => c.irNodeId === memNode.props.property?.irNodeId);
+                    propName = propNode.props.value;
+                }
+                const properties = sourceNode.children.filter(c => c.type === 'ObjectProperty');
+                const targetProp = properties.find(p => {
+                    const keyNode = p.children.find(c => c.irNodeId === p.props.key?.irNodeId);
+                    if (keyNode?.type === 'Identifier') return keyNode.props.name === propName;
+                    if (keyNode?.type === 'StringLiteral') return keyNode.props.value === propName;
+                    return false;
+                });
+                const valNode = targetProp.children.find(c => c.irNodeId === targetProp.props.value?.irNodeId);
+                const newNode = {
+                    ...valNode,
+                    irNodeId: generateIrId_6(),
+                    children: []
+                };
+                console.debug(`[TransformRule] ${ObjectPropertyPropagationRule.id} matched. Propagating property '${propName}' with value ${String(newNode.props.value)}.`);
+                return [newNode];
+            }
+        };
+        function generateIrId_7() {
+            return `ir_logic_${Math.random().toString(36).substring(2, 9)}`;
+        }
+        const LogicalSimplificationRule = {
+            id: 'micro:logical-simplification',
+            type: 'micro',
+            name: '論理式の代数的単純化',
+            description: '論理式（&&, ||, == など）に対してブール代数の法則を適用し、不要なキャストや比較を削減します。',
+            defaultEnabled: true,
+            match: (node, state) => {
+                if (node.type === 'BinaryExpression') {
+                    const bin = node;
+                    const left = bin.children.find(c => c.irNodeId === bin.props.left?.irNodeId);
+                    const right = bin.children.find(c => c.irNodeId === bin.props.right?.irNodeId);
+                    if (!left || !right) return false; // typeof a === 'undefined'
+                    if ((bin.props.operator === '===' || bin.props.operator === '==') && left.type === 'UnaryExpression' && left.props.operator === 'typeof' && right.type === 'StringLiteral' && right.props.value === 'undefined') {
+                        return true;
+                    } // a == true -> a
+                    if ((bin.props.operator === '==' || bin.props.operator === '===') && right.type === 'BooleanLiteral' && right.props.value === true) {
+                        return true;
+                    }
+                }
+                if (node.type === 'LogicalExpression') {
+                    const log = node;
+                    const right = log.children.find(c => c.irNodeId === log.props.right?.irNodeId);
+                    if (!right) return false; // a || false -> a
+                    if (log.props.operator === '||' && right.type === 'BooleanLiteral' && right.props.value === false) {
+                        return true;
+                    } // a && true -> a
+                    if (log.props.operator === '&&' && right.type === 'BooleanLiteral' && right.props.value === true) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            candidates: (node, state) => {
+                if (node.type === 'BinaryExpression') {
+                    const bin = node;
+                    const left = bin.children.find(c => c.irNodeId === bin.props.left?.irNodeId);
+                    const right = bin.children.find(c => c.irNodeId === bin.props.right?.irNodeId);
+                    if (left.type === 'UnaryExpression' && left.props.operator === 'typeof') {
+                        // typeof a === 'undefined' -> a === void 0
+                        const typeofArg = left.children.find(c => c.irNodeId === left.props.argument?.irNodeId);
+                        if (typeofArg) {
+                            const voidNode = {
+                                type: 'UnaryExpression',
+                                irNodeId: generateIrId_7(),
+                                props: {
+                                    operator: 'void',
+                                    prefix: true,
+                                    argument: {
+                                        type: 'ref',
+                                        irNodeId: generateIrId_7()
+                                    }
+                                },
+                                children: [{
+                                    type: 'NumericLiteral',
+                                    irNodeId: 'tmp',
+                                    // will be replaced
+                                    props: {
+                                        value: 0
+                                    },
+                                    children: []
+                                }]
+                            };
+                            voidNode.children[0].irNodeId = voidNode.props.argument.irNodeId;
+                            const newBin = {
+                                type: 'BinaryExpression',
+                                irNodeId: generateIrId_7(),
+                                props: {
+                                    operator: '===',
+                                    left: {
+                                        type: 'ref',
+                                        irNodeId: typeofArg.irNodeId
+                                    },
+                                    right: {
+                                        type: 'ref',
+                                        irNodeId: voidNode.irNodeId
+                                    }
+                                },
+                                children: [typeofArg, voidNode]
+                            };
+                            console.debug(`[TransformRule] ${LogicalSimplificationRule.id} matched: typeof x === 'undefined' -> x === void 0`);
+                            return [newBin];
+                        }
+                    }
+                    if (right.type === 'BooleanLiteral' && right.props.value === true) {
+                        console.debug(`[TransformRule] ${LogicalSimplificationRule.id} matched: a == true -> a`);
+                        return [left]; // just return left node
+                    }
+                }
+                if (node.type === 'LogicalExpression') {
+                    const log = node;
+                    const left = log.children.find(c => c.irNodeId === log.props.left?.irNodeId);
+                    console.debug(`[TransformRule] ${LogicalSimplificationRule.id} matched: a || false -> a or a && true -> a`);
+                    return [left];
+                }
+                return [];
+            }
+        };
+        function generateIrId_8() {
+            return `ir_pure_${Math.random().toString(36).substring(2, 9)}`;
+        }
+        const PureFunctionEvaluationRule = {
+            id: 'micro:pure-function-evaluation',
+            type: 'micro',
+            name: 'Pure関数（純粋関数）の評価と消去',
+            description: '引数がすべて定数で、副作用のない関数呼び出しをコンパイル時に計算して結果の定数に置き換えます。',
+            defaultEnabled: true,
+            match: (node, state) => {
+                if (node.type !== 'CallExpression') return false;
+                const callNode = node;
+                const snapshot = state.analysisSnapshot;
+                if (!snapshot) return false; // Check if all arguments are literals
+                for (const argRef of callNode.props.arguments) {
+                    const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
+                    if (!argNode) return false;
+                    if (argNode.type !== 'NumericLiteral' && argNode.type !== 'StringLiteral' && argNode.type !== 'BooleanLiteral') {
+                        return false;
+                    }
+                } // Find the callee function
+                const calleeNode = callNode.children.find(c => c.irNodeId === callNode.props.callee?.irNodeId);
+                if (!calleeNode || calleeNode.type !== 'Identifier') return false;
+                const calleeIdent = calleeNode;
+                const declId = snapshot.refToDeclMap.get(calleeIdent.irNodeId);
+                if (!declId) return false;
+                const defs = snapshot.getReachingDefinitions(calleeIdent.irNodeId, declId);
+                if (defs.size !== 1) return false;
+                const defId = Array.from(defs)[0];
+                const defNode = snapshot.nodeMap.get(defId);
+                if (!defNode) return false;
+                let funcNode = null;
+                if (defNode.type === 'FunctionDeclaration') {
+                    funcNode = defNode;
+                } else if (defNode.type === 'VariableDeclarator') {
+                    const dNode = defNode;
+                    const initRef = dNode.props.init;
+                    if (initRef) {
+                        funcNode = dNode.children.find(c => c.irNodeId === initRef.irNodeId) || null;
+                    }
+                }
+                if (!funcNode || funcNode.type !== 'FunctionDeclaration' && funcNode.type !== 'ArrowFunctionExpression' && funcNode.type !== 'FunctionExpression') {
+                    return false;
+                } // Now, check if the function is "pure".
+                // A function is pure if it doesn't reference any variables declared outside its body,
+                // EXCEPT for a whitelist of safe globals.
+                const safeGlobals = new Set(['Math', 'Number', 'String', 'Boolean', 'Object', 'Array', 'parseInt', 'parseFloat', 'isNaN', 'isFinite']); // Collect all IDs in the function's subtree
+                const funcSubtreeIds = new Set();
+                const traverseIds = n => {
+                    funcSubtreeIds.add(n.irNodeId);
+                    if (n.children) n.children.forEach(traverseIds);
+                };
+                traverseIds(funcNode);
+                let isPure = true;
+                const checkPure = n => {
+                    if (n.type === 'Identifier') {
+                        const ident = n; // If it's a property name, it's not a variable reference
+                        const parentId = snapshot.parentMap.get(ident.irNodeId);
+                        let isProperty = false;
+                        if (parentId) {
+                            const parent = snapshot.nodeMap.get(parentId);
+                            if (parent && parent.type === 'MemberExpression' && !parent.props.computed && parent.props.property?.irNodeId === ident.irNodeId) {
+                                isProperty = true;
+                            }
+                            if (parent && parent.type === 'ObjectProperty' && parent.props.key?.irNodeId === ident.irNodeId) {
+                                isProperty = true;
+                            }
+                        }
+                        if (!isProperty) {
+                            // Check if it resolves to a declaration inside the function
+                            const identDeclId = snapshot.refToDeclMap.get(ident.irNodeId);
+                            if (identDeclId) {
+                                if (!funcSubtreeIds.has(identDeclId)) {
+                                    // Reference to outside!
+                                    isPure = false;
+                                }
+                            } else if (snapshot.escapedVars.has(ident.irNodeId)) {
+                                // Unbound global reference
+                                if (!safeGlobals.has(ident.props.name)) {
+                                    isPure = false;
+                                }
+                            }
+                        }
+                    }
+                    if (isPure && n.children) {
+                        n.children.forEach(checkPure);
+                    }
+                };
+                checkPure(funcNode);
+                return isPure;
+            },
+            candidates: (node, state) => {
+                const callNode = node;
+                const snapshot = state.analysisSnapshot;
+                const calleeNode = callNode.children.find(c => c.irNodeId === callNode.props.callee?.irNodeId);
+                const declId = snapshot.refToDeclMap.get(calleeNode.irNodeId);
+                const defs = snapshot.getReachingDefinitions(calleeNode.irNodeId, declId);
+                const defId = Array.from(defs)[0];
+                const defNode = snapshot.nodeMap.get(defId);
+                let funcNode;
+                if (defNode.type === 'FunctionDeclaration') {
+                    funcNode = defNode;
+                } else {
+                    const dNode = defNode;
+                    funcNode = dNode.children.find(c => c.irNodeId === dNode.props.init?.irNodeId);
+                } // Convert funcNode to AST, then to JS
+                // Wait, since we are in the bundler, we don't have direct access to BabelGenerator in the same way as ASTBuilder.
+                // But we have `window.Babel`.
+                try {
+                    const Babel = window.Babel; // We need a helper to convert IR back to JS code for this specific function.
+                    // Let's use a simpler approach: extract the original source code using astNode mapping? No, we don't have source code here.
+                    // But we can do `IRtoASTConverter.convert(funcNode)`!
+                    const ast = IRtoASTConverter.convert(funcNode);
+                    const {
+                        code: funcCode
+                    } = Babel.transformFromAst({
+                        type: 'Program',
+                        body: [ast]
+                    }, '', {
+                        presets: [],
+                        ast: false
+                    }); // Generate arguments
+                    const args = callNode.props.arguments.map(argRef => {
+                        const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
+                        if (argNode.type === 'StringLiteral') return JSON.stringify(argNode.props.value);
+                        return argNode.props.value;
+                    }); // Execute
+                    const iifeCode = `return (${funcCode})(${args.join(', ')});`;
+                    const result = new Function(iifeCode)();
+                    let resultNode;
+                    if (typeof result === 'number') {
+                        resultNode = {
+                            type: 'NumericLiteral',
+                            irNodeId: generateIrId_8(),
+                            props: {
+                                value: result
+                            },
+                            children: []
+                        };
+                    } else if (typeof result === 'string') {
+                        resultNode = {
+                            type: 'StringLiteral',
+                            irNodeId: generateIrId_8(),
+                            props: {
+                                value: result
+                            },
+                            children: []
+                        };
+                    } else if (typeof result === 'boolean') {
+                        resultNode = {
+                            type: 'BooleanLiteral',
+                            irNodeId: generateIrId_8(),
+                            props: {
+                                value: result
+                            },
+                            children: []
+                        };
+                    } else {
+                        return []; // Unsupported return type
+                    }
+                    console.debug(`[TransformRule] ${PureFunctionEvaluationRule.id} matched. Evaluated ${calleeNode.props.name} -> ${result}`);
+                    return [resultNode];
+                } catch (e) {
+                    console.warn(`[TransformRule] ${PureFunctionEvaluationRule.id} evaluation failed: ${e.message}`);
+                    return [];
+                }
+            }
+        };
+        function generateIrId_9() {
             return `ir_generated_uce_${Math.random().toString(36).substring(2, 9)}`;
         }
         const UnreachableCodeEliminationRule = {
@@ -3958,7 +4815,7 @@
                         console.debug(`[TransformRule] ${UnreachableCodeEliminationRule.id} matched on IfStatement without alternate. Evaluated to false, removing.`);
                         const emptyNode = {
                             type: 'EmptyStatement',
-                            irNodeId: generateIrId_6(),
+                            irNodeId: generateIrId_9(),
                             props: {},
                             children: []
                         };
@@ -3968,7 +4825,7 @@
                         const emptyNode = {
                             type: 'Identifier',
                             // Using Identifier 'undefined' as fallback for expression
-                            irNodeId: generateIrId_6(),
+                            irNodeId: generateIrId_9(),
                             props: {
                                 name: 'undefined'
                             },
@@ -3980,7 +4837,7 @@
                 return [];
             }
         };
-        function generateIrId_7() {
+        function generateIrId_10() {
             return `ir_generated_inl_${Math.random().toString(36).substring(2, 9)}`;
         }
         const isSimple = node => node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral';
@@ -4024,7 +4881,7 @@
                     }
                 }
             }
-            const newIrId = generateIrId_7();
+            const newIrId = generateIrId_10();
             const clonedChildren = [];
             const props = {};
             for (const key of Object.keys(node.props)) {
@@ -4155,7 +5012,7 @@
                     console.debug(`[TransformRule] ${FunctionInliningRule.id} matched on CallExpression. Inlining empty return.`);
                     return [{
                         type: 'Identifier',
-                        irNodeId: generateIrId_7(),
+                        irNodeId: generateIrId_10(),
                         props: {
                             name: 'undefined'
                         },
@@ -4219,18 +5076,207 @@
                 return [];
             }
         };
+        function generateIrId_11() {
+            return `ir_alias_${Math.random().toString(36).substring(2, 9)}`;
+        }
+        const GlobalAliasingRule = {
+            id: 'macro:global-aliasing',
+            type: 'macro',
+            name: 'グローバル参照のエイリアス抽出',
+            description: '頻出するグローバルオブジェクトへの参照をエイリアス変数にまとめます。',
+            defaultEnabled: true,
+            match: (node, state) => {
+                if (node.type !== 'Program') return false;
+                const snapshot = state.analysisSnapshot;
+                if (!snapshot) return false; // 頻出するグローバル変数をカウント
+                const globalCounts = new Map();
+                for (const [id, irNode] of snapshot.nodeMap.entries()) {
+                    if (irNode.type === 'Identifier') {
+                        const name = irNode.props.name;
+                        if (snapshot.escapedVars.has(id) && !snapshot.refToDeclMap.has(id)) {
+                            // It's a global reference!
+                            // Let's filter some obvious ones we can alias
+                            // Skip 'undefined', 'NaN', 'Infinity' just in case, though aliasing them is valid.
+                            // Wait, terser transforms undefined to void 0, which is 6 bytes.
+                            if (name.length > 2) {
+                                globalCounts.set(name, (globalCounts.get(name) || 0) + 1);
+                            }
+                        }
+                    }
+                } // Aliasing criteria: N * (L - 1) > L + 4
+                // Example: Math (4) -> N * 3 > 8 -> N >= 3
+                let canAlias = false;
+                for (const [name, count] of globalCounts.entries()) {
+                    const L = name.length;
+                    if (count * (L - 1) > L + 4) {
+                        canAlias = true;
+                        break;
+                    }
+                }
+                return canAlias;
+            },
+            candidates: (node, state) => {
+                const prog = node;
+                const snapshot = state.analysisSnapshot;
+                const globalCounts = new Map();
+                for (const [id, irNode] of snapshot.nodeMap.entries()) {
+                    if (irNode.type === 'Identifier') {
+                        const name = irNode.props.name;
+                        if (snapshot.escapedVars.has(id) && !snapshot.refToDeclMap.has(id) && name.length > 2) {
+                            if (!globalCounts.has(name)) globalCounts.set(name, {
+                                count: 0,
+                                ids: new Set()
+                            });
+                            globalCounts.get(name).count++;
+                            globalCounts.get(name).ids.add(id);
+                        }
+                    }
+                }
+                const targets = new Map();
+                let aliasIndex = 0;
+                const genAlias = () => {
+                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'; // We just use a single/double character alias, Terser will mangle it anyway,
+                    // but we need a valid identifier name that doesn't conflict.
+                    // Since Terser mangles, the actual name here doesn't matter much for bytes,
+                    // but let's use something unique.
+                    return `_gAlias_${aliasIndex++}`;
+                };
+                for (const [name, data] of globalCounts.entries()) {
+                    const L = name.length;
+                    if (data.count * (L - 1) > L + 4) {
+                        targets.set(name, {
+                            alias: genAlias(),
+                            ids: data.ids
+                        });
+                    }
+                }
+                if (targets.size === 0) return [];
+                const targetIds = new Map(); // irNodeId -> new alias name
+                for (const [name, data] of targets.entries()) {
+                    for (const id of data.ids) {
+                        targetIds.set(id, data.alias);
+                    }
+                } // Deep clone the ProgramIR, replacing Identifiers
+                const oldToNewId = new Map();
+                const cloneNode = n => {
+                    const newId = generateIrId_11();
+                    oldToNewId.set(n.irNodeId, newId);
+                    const newChildren = [];
+                    for (const child of n.children) {
+                        newChildren.push(cloneNode(child));
+                    }
+                    let newProps = {
+                        ...n.props
+                    };
+                    if (n.type === 'Identifier' && targetIds.has(n.irNodeId)) {
+                        newProps.name = targetIds.get(n.irNodeId);
+                    }
+                    return {
+                        type: n.type,
+                        irNodeId: newId,
+                        props: newProps,
+                        children: newChildren
+                    };
+                };
+                const newProgBase = cloneNode(prog); // Update refs
+                const updateRefs = n => {
+                    for (const [key, val] of Object.entries(n.props)) {
+                        if (Array.isArray(val)) {
+                            const newArray = [];
+                            for (let item of val) {
+                                const itemAny = item;
+                                if (itemAny && itemAny.type === 'ref' && oldToNewId.has(itemAny.irNodeId)) {
+                                    newArray.push({
+                                        type: 'ref',
+                                        irNodeId: oldToNewId.get(itemAny.irNodeId)
+                                    });
+                                } else {
+                                    newArray.push(item);
+                                }
+                            }
+                            n.props[key] = newArray;
+                        } else if (val && val.type === 'ref' && oldToNewId.has(val.irNodeId)) {
+                            n.props[key] = {
+                                type: 'ref',
+                                irNodeId: oldToNewId.get(val.irNodeId)
+                            };
+                        }
+                    }
+                    for (const child of n.children) {
+                        updateRefs(child);
+                    }
+                };
+                updateRefs(newProgBase); // Prepend VariableDeclaration
+                const decls = [];
+                const declRefs = [];
+                for (const [name, data] of targets.entries()) {
+                    const aliasIdNode = {
+                        type: 'Identifier',
+                        irNodeId: generateIrId_11(),
+                        props: {
+                            name: data.alias
+                        },
+                        children: []
+                    };
+                    const initNode = {
+                        type: 'Identifier',
+                        irNodeId: generateIrId_11(),
+                        props: {
+                            name: name
+                        },
+                        children: []
+                    };
+                    const declaratorNode = {
+                        type: 'VariableDeclarator',
+                        irNodeId: generateIrId_11(),
+                        props: {
+                            id: {
+                                type: 'ref',
+                                irNodeId: aliasIdNode.irNodeId
+                            },
+                            init: {
+                                type: 'ref',
+                                irNodeId: initNode.irNodeId
+                            }
+                        },
+                        children: [aliasIdNode, initNode]
+                    };
+                    decls.push(declaratorNode);
+                    declRefs.push({
+                        type: 'ref',
+                        irNodeId: declaratorNode.irNodeId
+                    });
+                }
+                const varDeclNode = {
+                    type: 'VariableDeclaration',
+                    irNodeId: generateIrId_11(),
+                    props: {
+                        kind: 'const',
+                        declarations: declRefs
+                    },
+                    children: decls
+                };
+                newProgBase.children.unshift(varDeclNode);
+                newProgBase.props.body.unshift({
+                    type: 'ref',
+                    irNodeId: varDeclNode.irNodeId
+                });
+                console.debug(`[TransformRule] ${GlobalAliasingRule.id} matched. Hoisted ${targets.size} globals.`);
+                return [newProgBase];
+            }
+        };
         class TransformRegistry {
             /**
                * Get all registered micro rules.
                */
             static getMicroRules() {
-                return [ConstantFoldingRule, IfToTernaryRule, DeadStoreEliminationRule, CopyPropagationRule, ConstantPropagationRule, UnreachableCodeEliminationRule, FunctionInliningRule];
+                return [ConstantFoldingRule, IfToTernaryRule, DeadStoreEliminationRule, CopyPropagationRule, ConstantPropagationRule, ObjectPropertyPropagationRule, LogicalSimplificationRule, PureFunctionEvaluationRule, UnreachableCodeEliminationRule, FunctionInliningRule];
             }
             /**
                * Get all registered macro rules.
                */
             static getMacroRules() {
-                return [DeadCodeEliminationRule];
+                return [DeadCodeEliminationRule, GlobalAliasingRule];
             }
             /**
                * Get all registered rules (micro and macro).
