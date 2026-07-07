@@ -1009,23 +1009,96 @@
             }
         }
         class VariableMangler {
-            static async mangle(code, enableCompress = false) {
+            static terserLoadPromise = null;
+            /**
+               * TerserをCDNから動的にロードし、window.Terserにマウント
+               */
+            static async loadTerser() {
+                if (window.Terser) {
+                    return window.Terser;
+                }
+                if (this.terserLoadPromise) {
+                    return this.terserLoadPromise;
+                }
+                console.info("[VariableMangler] Terser is not found. Fetching from CDN...");
+                this.terserLoadPromise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script'); // jsdelivrでネットワークエラーになるケースがあるためunpkgに変更
+                    script.src = 'https://unpkg.com/terser/dist/bundle.min.js';
+                    script.onload = () => {
+                        if (window.Terser) {
+                            console.info("[VariableMangler] Terser successfully loaded from CDN.");
+                            resolve(window.Terser);
+                        } else {
+                            reject(new Error("Terser script loaded, but window.Terser is still undefined."));
+                        }
+                    };
+                    script.onerror = () => {
+                        reject(new Error("Failed to load Terser from CDN. It might be blocked by an AdBlocker or network issue."));
+                    };
+                    document.head.appendChild(script);
+                });
+                return this.terserLoadPromise;
+            }
+            static async mangle(code, enableCompress = false, logger) {
+                const log = (msg, type = 'info') => {
+                    console.log(`[VariableMangler] ${msg}`);
+                    if (logger) {
+                        logger({
+                            type,
+                            msg: `[VariableMangler] ${msg}`
+                        });
+                    }
+                };
+                log(`Starting mangle process... Code length: ${code.length}, enableCompress: ${enableCompress}`);
+                let Terser;
                 try {
-                    const Terser = window.Terser;
-                    if (!Terser) {
-                        console.warn("Terser is not loaded on window.");
-                        return code;
-                    } // Terser is the industry standard for safe variable mangling.
-                    // It correctly handles scopes, shadowing, and language quirks like eval/with.
-                    const result = await Terser.minify(code, {
-                        toplevel: true,
-                        mangle: true,
-                        compress: enableCompress // Dynamic compression toggled via argument
-                    });
-                    return result.code || code;
-                } catch (error) {
-                    console.error("Mangling failed:", error);
+                    Terser = await this.loadTerser();
+                    log(`Terser successfully loaded. Version: ${Terser.VERSION || 'unknown'}`);
+                } catch (e) {
+                    log(`Failed to load Terser: ${e.message}`, 'error');
                     return code;
+                }
+                try {
+                    const minifyOptions = {
+                        toplevel: false,
+                        mangle: {
+                            toplevel: false
+                        },
+                        compress: enableCompress ? {
+                            toplevel: false,
+                            passes: 2
+                        } : false,
+                        output: {
+                            beautify: false
+                        }
+                    };
+                    log(`Calling Terser.minify with options: ${JSON.stringify(minifyOptions)}`);
+                    const resultPromise = Terser.minify(code, minifyOptions);
+                    log(`Terser.minify returned type: ${typeof resultPromise}. Is Promise: ${resultPromise instanceof Promise}`);
+                    const result = await resultPromise;
+                    if (!result) {
+                        log('Terser returned null or undefined result', 'error');
+                        return code;
+                    }
+                    log(`Terser result keys: ${Object.keys(result).join(', ')}`);
+                    if (result.error) {
+                        log(`Terser inner error: ${result.error.message || result.error}`, 'error');
+                        if (result.error.stack) {
+                            log(`Terser error stack: ${result.error.stack}`, 'error');
+                        }
+                        return code;
+                    }
+                    if (result.code === undefined || result.code === null) {
+                        log('Terser result.code is undefined or null', 'error');
+                        return code;
+                    }
+                    log(`Terser minify completed successfully. Output length: ${result.code.length}`);
+                    log(`Original head: ${code.substring(0, 100)}...`);
+                    log(`Mangled head: ${result.code.substring(0, 100)}...`);
+                    return result.code;
+                } catch (error) {
+                    log(`Terser execution threw exception: ${error.message}\nStack: ${error.stack}`, 'error');
+                    return code; // 失敗時は元のコードを安全に返す
                 }
             }
         }
@@ -1334,9 +1407,13 @@
             }
         }
         class PhysicalCompressor {
-            static async compressAndMultiplex(jsCode, vfs, config) {
+            static async compressAndMultiplex(jsCode, vfs, config, logger) {
                 if (config.golfEnabled && config.enableMangle) {
-                    jsCode = await VariableMangler.mangle(jsCode, !!config.terserCompress);
+                    logger({
+                        type: 'info',
+                        msg: '[PhysicalCompressor] Executing VariableMangler...'
+                    });
+                    jsCode = await VariableMangler.mangle(jsCode, !!config.terserCompress, logger);
                 } // 空文字の場合は strict の付与を完全に諦めて空文字のまま返す
                 const cleanCode = jsCode.trim();
                 if (cleanCode === '') {
@@ -2898,9 +2975,10 @@
         class CostEstimator {
             /**
                * 文字列を実際に生成することなく、IRツリーから最終的なJavaScript出力時の文字数（バイト数）をO(N)で推測計算します。
+               * isTerserEnabled = true の場合、TerserによるPeephole変換（代入の短縮など）を先読みした見積もりを行います。
                */
-            static estimate(node) {
-                if (!node) return 0; // 子ノードへの高速アクセスのため、マップを構築
+            static estimate(node, isTerserEnabled = false) {
+                if (!node) return 0;
                 const nodeMap = new Map();
                 const buildMap = n => {
                     nodeMap.set(n.irNodeId, n);
@@ -2919,56 +2997,79 @@
                             return n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
                         // --- 宣言 ---
                         case 'VariableDeclaration':
-                            return 6 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
+                            return (isTerserEnabled ? 4 : 6) + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
                         case 'VariableDeclarator':
-                            return calcChild(n.props['id'], nodeMap, calc) + 3 + calcChild(n.props['init'], nodeMap, calc);
+                            return calcChild(n.props['id'], nodeMap, calc) + (isTerserEnabled ? 1 : 3) + calcChild(n.props['init'], nodeMap, calc);
                         // --- 識別子・リテラル ---
                         case 'Identifier':
                         case 'JSXIdentifier':
+                            if (isTerserEnabled && n.props['name'] === 'undefined') return 6; // Terser converts undefined to "void 0"
                             return n.props['name'] ? String(n.props['name']).length : 0;
                         case 'NumericLiteral':
+                            return n.props['value'] !== undefined ? String(n.props['value']).length : 0;
                         case 'BooleanLiteral':
+                            if (isTerserEnabled) return 2; // Terser converts true/false to !0 / !1
                             return n.props['value'] !== undefined ? String(n.props['value']).length : 0;
                         case 'StringLiteral':
                         case 'DirectiveLiteral':
                             return n.props['value'] ? String(n.props['value']).length + 2 : 2;
-                        // クォート分の2バイトを加算
                         case 'RegExpLiteral':
                             return n.props['pattern'] ? String(n.props['pattern']).length + 2 : 2;
-                        // /pattern/形式
                         case 'NullLiteral':
                             return 4;
-                        // "null"
                         case 'ThisExpression':
                             return 4;
-                        // "this"
                         // --- 式・演算 ---
                         case 'BinaryExpression':
                         case 'LogicalExpression':
-                            const op = n.props['operator'] ? String(n.props['operator']).length : 0;
-                            return calcChild(n.props['left'], nodeMap, calc) + op + 2 + calcChild(n.props['right'], nodeMap, calc);
+                            const opLen = n.props['operator'] ? String(n.props['operator']).length : 0;
+                            return calcChild(n.props['left'], nodeMap, calc) + opLen + (isTerserEnabled ? 0 : 2) + calcChild(n.props['right'], nodeMap, calc);
                         case 'AssignmentExpression':
-                            const assignOp = n.props['operator'] ? String(n.props['operator']).length : 1;
-                            return calcChild(n.props['left'], nodeMap, calc) + assignOp + 2 + calcChild(n.props['right'], nodeMap, calc);
+                            {
+                                const assignOpStr = String(n.props['operator'] || '=');
+                                const leftCost = calcChild(n.props['left'], nodeMap, calc);
+                                let rightCost = calcChild(n.props['right'], nodeMap, calc);
+                                let opCost = assignOpStr.length + (isTerserEnabled ? 0 : 2); // 空白削減
+                                // Terserによる複合代入とインクリメントの先読み最適化予測
+                                if (isTerserEnabled && assignOpStr === '=' && n.props['right'] && n.props['right'].type === 'ref') {
+                                    const rightNode = nodeMap.get(n.props['right'].irNodeId);
+                                    if (rightNode && rightNode.type === 'BinaryExpression') {
+                                        const binLeftNode = nodeMap.get(rightNode.props['left']?.irNodeId);
+                                        const binRightNode = nodeMap.get(rightNode.props['right']?.irNodeId);
+                                        const leftNode = nodeMap.get(n.props['left']?.irNodeId);
+                                        if (leftNode && leftNode.type === 'Identifier') {
+                                            const leftName = leftNode.props['name'];
+                                            const isLeftMatch = binLeftNode?.type === 'Identifier' && binLeftNode.props['name'] === leftName;
+                                            const isRightMatch = binRightNode?.type === 'Identifier' && binRightNode.props['name'] === leftName;
+                                            if (isLeftMatch || isRightMatch) {
+                                                const otherNode = isLeftMatch ? binRightNode : binLeftNode;
+                                                const binOpStr = String(rightNode.props['operator']); // x = x + 1 => x++ (2 chars)
+                                                if ((binOpStr === '+' || binOpStr === '-') && otherNode?.type === 'NumericLiteral' && otherNode.props['value'] === 1) {
+                                                    return leftCost + 2;
+                                                } // x = x * 2 => x*=2
+                                                opCost = binOpStr.length + 1; // e.g. "*="
+                                                rightCost = otherNode ? calc(otherNode) : rightCost;
+                                            }
+                                        }
+                                    }
+                                }
+                                return leftCost + opCost + rightCost;
+                            }
                         case 'UnaryExpression':
                             const uOp = n.props['operator'] ? String(n.props['operator']) : '';
-                            return uOp.length + (uOp.match(/[a-z]/i) ? 1 : 0) + calcChild(n.props['argument'], nodeMap, calc);
-                        // typeof x と !x の差分考慮
+                            return uOp.length + (uOp.match(/[a-z]/i) && !isTerserEnabled ? 1 : 0) + calcChild(n.props['argument'], nodeMap, calc);
                         case 'UpdateExpression':
                             return calcChild(n.props['argument'], nodeMap, calc) + 2;
-                        // ++ または --
                         case 'ExpressionStatement':
-                            return calcChild(n.props['expression'], nodeMap, calc) + 1;
-                        // セミコロンの1バイト
+                            return calcChild(n.props['expression'], nodeMap, calc) + (isTerserEnabled ? 0 : 1);
                         // --- 関数・メソッド呼び出し ---
                         case 'CallExpression':
                             let argsCost = 0;
                             const args = n.props['arguments'];
                             if (Array.isArray(args)) {
-                                for (const arg of args) argsCost += calcChild(arg, nodeMap, calc) + 1; // カンマの1バイト
+                                for (const arg of args) argsCost += calcChild(arg, nodeMap, calc) + 1;
                             }
                             return calcChild(n.props['callee'], nodeMap, calc) + 2 + argsCost;
-                        // 丸括弧の2バイト
                         case 'NewExpression':
                             let newArgsCost = 0;
                             const newArgs = n.props['arguments'];
@@ -2976,16 +3077,14 @@
                                 for (const arg of newArgs) newArgsCost += calcChild(arg, nodeMap, calc) + 1;
                             }
                             return 4 + calcChild(n.props['callee'], nodeMap, calc) + 2 + newArgsCost;
-                        // "new " の4バイトを加算
                         case 'MemberExpression':
                             const isComputed = n.props['computed'];
                             return calcChild(n.props['object'], nodeMap, calc) + (isComputed ? 2 : 1) + calcChild(n.props['property'], nodeMap, calc);
-                        // obj[prop] と obj.prop の考慮
                         // --- 配列・オブジェクト ---
                         case 'ArrayExpression':
                         case 'ArrayPattern':
                             const arrEls = n.props['elements'] || [];
-                            let arrCost = 2; // []の2バイト
+                            let arrCost = 2;
                             if (Array.isArray(arrEls)) {
                                 for (const el of arrEls) arrCost += calcChild(el, nodeMap, calc) + 1;
                             }
@@ -2993,51 +3092,45 @@
                         case 'ObjectExpression':
                         case 'ObjectPattern':
                             const objProps = n.props['properties'] || [];
-                            let objCost = 2; // {}の2バイト
+                            let objCost = 2;
                             if (Array.isArray(objProps)) {
                                 for (const prop of objProps) objCost += calcChild(prop, nodeMap, calc) + 1;
                             }
                             return objCost;
                         case 'ObjectProperty':
-                            return calcChild(n.props['key'], nodeMap, calc) + 1 + calcChild(n.props['value'], nodeMap, calc);
-                        // key: valueのコロン分
+                            return calcChild(n.props['key'], nodeMap, calc) + (isTerserEnabled ? 1 : 2) + calcChild(n.props['value'], nodeMap, calc);
                         case 'SpreadElement':
                         case 'RestElement':
                             return 3 + calcChild(n.props['argument'], nodeMap, calc);
-                        // スプレッド演算子...の3バイト
                         // --- 制御構文・分岐 ---
                         case 'IfStatement':
                         case 'ConditionalExpression':
-                            return 4 + calcChild(n.props['test'], nodeMap, calc) + 2 + calcChild(n.props['consequent'], nodeMap, calc) + (n.props['alternate'] ? 4 + calcChild(n.props['alternate'], nodeMap, calc) : 0);
+                            return (isTerserEnabled ? 2 : 4) + calcChild(n.props['test'], nodeMap, calc) + 2 + calcChild(n.props['consequent'], nodeMap, calc) + (n.props['alternate'] ? (isTerserEnabled ? 1 : 4) + calcChild(n.props['alternate'], nodeMap, calc) : 0);
                         case 'SwitchStatement':
                             let casesCost = 0;
                             const cases = n.props['cases'] || [];
                             if (Array.isArray(cases)) {
                                 for (const c of cases) casesCost += calcChild(c, nodeMap, calc);
                             }
-                            return 8 + calcChild(n.props['discriminant'], nodeMap, calc) + 4 + casesCost;
-                        // switch(x) {}
+                            return (isTerserEnabled ? 6 : 8) + calcChild(n.props['discriminant'], nodeMap, calc) + 4 + casesCost;
                         case 'SwitchCase':
-                            return (n.props['test'] ? 5 + calcChild(n.props['test'], nodeMap, calc) : 7) + 1 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
-                        // case x: または default:
+                            return (n.props['test'] ? (isTerserEnabled ? 4 : 5) + calcChild(n.props['test'], nodeMap, calc) : isTerserEnabled ? 6 : 7) + 1 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
                         // --- ループ ---
                         case 'ForStatement':
                             return 4 + calcChild(n.props['init'], nodeMap, calc) + 1 + calcChild(n.props['test'], nodeMap, calc) + 1 + calcChild(n.props['update'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
                         case 'ForOfStatement':
                         case 'ForInStatement':
-                            return 5 + calcChild(n.props['left'], nodeMap, calc) + 4 + calcChild(n.props['right'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
+                            return 5 + calcChild(n.props['left'], nodeMap, calc) + (isTerserEnabled ? 2 : 4) + calcChild(n.props['right'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
                         case 'WhileStatement':
-                            return 7 + calcChild(n.props['test'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
+                            return (isTerserEnabled ? 5 : 7) + calcChild(n.props['test'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
                         case 'DoWhileStatement':
-                            return 5 + calcChild(n.props['body'], nodeMap, calc) + 7 + calcChild(n.props['test'], nodeMap, calc) + 2;
-                        // do {} while();
+                            return 5 + calcChild(n.props['body'], nodeMap, calc) + (isTerserEnabled ? 5 : 7) + calcChild(n.props['test'], nodeMap, calc) + 2;
                         // --- 制御移動・例外処理 ---
                         case 'ReturnStatement':
-                            return 7 + calcChild(n.props['argument'], nodeMap, calc);
-                        // "return " + arg
+                            return (isTerserEnabled ? 6 : 7) + calcChild(n.props['argument'], nodeMap, calc);
                         case 'BreakStatement':
                         case 'ContinueStatement':
-                            return (n.type === 'BreakStatement' ? 5 : 8) + (n.props['label'] ? 1 + calcChild(n.props['label'], nodeMap, calc) : 0) + 1;
+                            return (n.type === 'BreakStatement' ? 5 : 8) + (n.props['label'] ? 1 + calcChild(n.props['label'], nodeMap, calc) : 0) + (isTerserEnabled ? 0 : 1);
                         case 'ThrowStatement':
                             return 6 + calcChild(n.props['argument'], nodeMap, calc);
                         case 'TryStatement':
@@ -3046,9 +3139,9 @@
                             return 5 + calcChild(n.props['param'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
                         // --- テンプレート文字列 ---
                         case 'TemplateLiteral':
-                            let tmplCost = 2; // バッククォートの2バイト
+                            let tmplCost = 2;
                             if (Array.isArray(n.props['quasis'])) tmplCost += n.props['quasis'].reduce((acc, q) => acc + calcChild(q, nodeMap, calc), 0);
-                            if (Array.isArray(n.props['expressions'])) tmplCost += n.props['expressions'].reduce((acc, e) => acc + 3 + calcChild(e, nodeMap, calc), 0); // ${}
+                            if (Array.isArray(n.props['expressions'])) tmplCost += n.props['expressions'].reduce((acc, e) => acc + 3 + calcChild(e, nodeMap, calc), 0);
                             return tmplCost;
                         case 'TemplateElement':
                             return n.props['value']?.raw ? String(n.props['value'].raw).length : 0;
@@ -3062,24 +3155,21 @@
                             if (Array.isArray(params)) {
                                 for (const p of params) paramCost += calcChild(p, nodeMap, calc) + 1;
                             }
-                            const baseCost = n.type === 'ArrowFunctionExpression' ? 4 : 9; // "()=>" vs "function "
+                            const baseCost = n.type === 'ArrowFunctionExpression' ? 4 : isTerserEnabled ? 8 : 9;
                             return baseCost + paramCost + calcChild(n.props['id'], nodeMap, calc) + calcChild(n.props['body'], nodeMap, calc);
                         case 'ClassDeclaration':
                         case 'ClassExpression':
                             return 6 + calcChild(n.props['id'], nodeMap, calc) + (n.props['superClass'] ? 9 + calcChild(n.props['superClass'], nodeMap, calc) : 0) + calcChild(n.props['body'], nodeMap, calc);
-                        // --- モジュール構文 ---
                         case 'ImportDeclaration':
                         case 'ExportNamedDeclaration':
                         case 'ExportDefaultDeclaration':
                         case 'ExportAllDeclaration':
                             return 15 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
-                        // --- コメント (無視) ---
                         case 'CommentLine':
                         case 'CommentBlock':
                             return 0;
-                        // --- 未知のノード (データ駆動フォールバック) ---
                         default:
-                            // 子ノードの合計コストと、デフォルトオーバーヘッドを算出して概算
+                            console.warn(`[CostEstimator] Unknown node type encountered: '${n.type}' (NodeID: ${n.irNodeId}). Using fallback estimation.`);
                             return n.children.reduce((acc, c) => acc + calc(c) + 1, 0) + 2;
                     }
                 };
@@ -3128,12 +3218,13 @@
                * 
                * @param states The array of states to evaluate.
                * @param beamWidth The maximum number of states to retain.
+               * @param isTerserEnabled Whether Terser is enabled for physical compression estimation.
                * @returns An array of the best unique CompilationStates up to beamWidth.
                */
-            static evaluateAndPrune(states, beamWidth) {
+            static evaluateAndPrune(states, beamWidth, isTerserEnabled = false) {
                 if (states.length === 0) return []; // Calculate cost and structural signature for each state
                 const evaluatedStates = states.map(state => {
-                    const cost = CostEstimator.estimate(state.irRoot);
+                    const cost = CostEstimator.estimate(state.irRoot, isTerserEnabled);
                     const signature = getIRSignature(state.irRoot);
                     return {
                         state,
@@ -3153,17 +3244,17 @@
                 }
                 return pruned;
             }
-            static checkConvergence(currentState, nextState) {
-                const currentCost = CostEstimator.estimate(currentState.irRoot);
-                const nextCost = CostEstimator.estimate(nextState.irRoot);
+            static checkConvergence(currentState, nextState, isTerserEnabled = false) {
+                const currentCost = CostEstimator.estimate(currentState.irRoot, isTerserEnabled);
+                const nextCost = CostEstimator.estimate(nextState.irRoot, isTerserEnabled);
                 return {
                     converged: nextCost >= currentCost,
                     currentCost,
                     nextCost
                 };
             }
-            static getInitialCost(state) {
-                return CostEstimator.estimate(state.irRoot);
+            static getInitialCost(state, isTerserEnabled = false) {
+                return CostEstimator.estimate(state.irRoot, isTerserEnabled);
             }
         }
         class AnalysisSnapshot {
@@ -6230,8 +6321,9 @@
             static optimize(initialRoot, config) {
                 const baseBeamWidth = config.enableBeamSearch ? config.beamWidth || 3 : 1;
                 const maxIterations = config.maxIterations !== undefined ? config.maxIterations : 5;
+                const isTerserEnabled = !!config.terserCompress;
                 let currentRoot = initialRoot;
-                let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot));
+                let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot), isTerserEnabled);
                 for (let iter = 0; iter < maxIterations; iter++) {
                     console.debug(`[IROptimizer] Iteration ${iter + 1}/${maxIterations} starting with Cost: ${lastBestCost}`);
                     let currentStates = [new CompilationState(currentRoot)];
@@ -6266,8 +6358,8 @@
                                 console.debug(`[IROptimizer] Search space exhausted (0 new valid actions). Breaking ${schedule.id} early at depth ${depth + 1}.`);
                                 break;
                             } // DecisionEngineによる状態の評価と枝刈り
-                            currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth);
-                            const currentBestCost = DecisionEngine.getInitialCost(currentStates[0]); // 最小コストを更新した場合は状態を保存する
+                            currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth, isTerserEnabled);
+                            const currentBestCost = DecisionEngine.getInitialCost(currentStates[0], isTerserEnabled); // 最小コストを更新した場合は状態を保存する
                             if (currentBestCost < bestOverallCost) {
                                 bestOverallState = currentStates[0];
                                 bestOverallCost = currentBestCost;
@@ -6698,7 +6790,7 @@
                             externalImports: Array.from(externalImportsSet),
                             cdnTemplate: state.config.cdnTemplate
                         };
-                        const outputCode = await PhysicalCompressor.compressAndMultiplex(jsCodeStr, vfs, compressorConfig);
+                        const outputCode = await PhysicalCompressor.compressAndMultiplex(jsCodeStr, vfs, compressorConfig, logger);
                         const finalSize = new Blob([outputCode]).size;
                         logger({
                             type: 'success',
@@ -7003,7 +7095,7 @@
                 className: "w-3 h-3"
             }), "\u5168\u4F53\u53CD\u5FA9\u5236\u5FA1 (Orchestrator)"), React.createElement("div", {
                 className: "mt-1 flex flex-col gap-3"
-            }, renderSlider('maxIterations', '最大イテレーション', '限界に達するまで全体を回す最大周回数', 1, 20, 'text-amber-400'), renderSlider('patience', '収束判定の許容停滞回数 (Patience)', '改善が見られないまま探索を継続する最大ステップ数', 1, 10, 'text-amber-400'))), React.createElement("div", {
+            }, renderSlider('maxIterations', '最大イテレーション', '限界に達するまで全体を回す最大周回数', 1, 100, 'text-amber-400'), renderSlider('patience', '収束判定の許容停滞回数 (Patience)', '改善が見られないまま探索を継続する最大ステップ数', 1, 50, 'text-amber-400'))), React.createElement("div", {
                 className: "flex flex-col border border-emerald-500/20 rounded-lg bg-emerald-500/5 p-3 shadow-inner ml-2 mb-4"
             }, React.createElement("div", {
                 className: "flex items-center gap-1.5 text-[10px] font-bold text-emerald-500/90 mb-3 uppercase tracking-wider"
@@ -7011,7 +7103,7 @@
                 className: "w-3.5 h-3.5"
             }), "\u5404\u5468\u56DE\u306E\u30D5\u30A7\u30FC\u30BA\u9032\u884C (Phase Scheduler)"), React.createElement("div", {
                 className: "flex flex-col gap-3"
-            }, renderSlider('stage1Depth', 'STAGE 1: 粗削り', '広域探索の深さ (Depth)', 1, 15, 'text-emerald-400'), renderSlider('stage2Depth', 'STAGE 2: 極限圧縮', '詳細探索の深さ (Depth)', 1, 50, 'text-emerald-400')), React.createElement("div", {
+            }, renderSlider('stage1Depth', 'STAGE 1: 粗削り', '広域探索の深さ (Depth)', 1, 100, 'text-emerald-400'), renderSlider('stage2Depth', 'STAGE 2: 極限圧縮', '詳細探索の深さ (Depth)', 1, 300, 'text-emerald-400')), React.createElement("div", {
                 className: "flex flex-col border border-sky-500/20 rounded-lg bg-sky-500/5 p-3 mt-4 shadow-inner ml-2"
             }, React.createElement("div", {
                 className: "flex items-center gap-1.5 text-[10px] font-bold text-sky-400/90 mb-3 uppercase tracking-wider"
@@ -7046,7 +7138,7 @@
                 className: "w-7 h-4 bg-[#1e2125] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-sky-500 shadow-inner border border-white/5"
             }))), state.config.enableBeamSearch && React.createElement("div", {
                 className: "mt-1 pl-2 border-l-2 border-sky-500/30"
-            }, renderSlider('beamWidth', '基本ビーム幅', '同時に保持する並行世界の最大数', 1, 10, 'text-sky-400')))), React.createElement("div", {
+            }, renderSlider('beamWidth', '基本ビーム幅', '同時に保持する並行世界の最大数', 1, 50, 'text-sky-400')))), React.createElement("div", {
                 className: "flex flex-col border border-purple-500/20 rounded-lg bg-purple-500/5 p-3 shadow-inner ml-2 mt-4 mb-1"
             }, React.createElement("div", {
                 className: "flex items-center gap-1.5 text-[10px] font-bold text-purple-400/90 mb-3 uppercase tracking-wider border-b border-purple-500/10 pb-1.5"
