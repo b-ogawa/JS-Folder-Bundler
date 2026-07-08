@@ -747,7 +747,19 @@
                         } else {
                             astNode[key] = prop;
                         }
+                    } // === Babel AST 復元時のフォールバックアサーション ===
+                    // 中間表現レイヤーで型変換（NewExpression -> CallExpression など）が行われた結果、
+                    // Babelが要求する必須のプロパティが抜け落ちていた場合、ここで透過的に自動補完する。
+                    if (astNode.type === 'CallExpression' || astNode.type === 'OptionalCallExpression') {
+                        if (astNode.optional === undefined || astNode.optional === null) {
+                            astNode.optional = false;
+                        }
                     }
+                    if (astNode.type === 'MemberExpression' || astNode.type === 'OptionalMemberExpression') {
+                        if (astNode.optional === undefined || astNode.optional === null) {
+                            astNode.optional = false;
+                        }
+                    } // ======================================================================
                     return astNode;
                 };
                 return convertInternal(node);
@@ -830,8 +842,12 @@
                             if (path.scope.hasBinding(name, true)) {
                                 const binding = path.scope.getBinding(name); // If it's used inside a function different from where it's declared
                                 if (binding && binding.scope !== path.scope) {
-                                    if (binding.identifier._astNodeId) {
-                                        scopeInfo.escapedVars.add(binding.identifier._astNodeId);
+                                    const bindingFn = binding.scope.getFunctionParent() || binding.scope.getProgramParent();
+                                    const pathFn = path.scope.getFunctionParent() || path.scope.getProgramParent();
+                                    if (bindingFn !== pathFn) {
+                                        if (binding.identifier._astNodeId) {
+                                            scopeInfo.escapedVars.add(binding.identifier._astNodeId);
+                                        }
                                     }
                                 }
                             } else {
@@ -2678,10 +2694,12 @@
         }
         class CompilationState {
             constructor(irRoot, metadata = {}, // 解析結果は外部から与えられる（未計算の場合は null）
-                analysisSnapshot = null) {
+                analysisSnapshot = null, services = {} // 追加
+            ) {
                 this.irRoot = irRoot;
                 this.metadata = metadata;
                 this.analysisSnapshot = analysisSnapshot;
+                this.services = services;
             }
             /**
                * IRRootを変更した新しい状態を返す (完全なイミュータビリティ)
@@ -2690,12 +2708,12 @@
                 // ツリーが更新された際、過去のスナップショットをそのまま引き継ぐ
                 return new CompilationState(newRoot, {
                     ...this.metadata
-                }, this.analysisSnapshot);
+                }, this.analysisSnapshot, this.services);
             }
             withAnalysis(newSnapshot) {
                 return new CompilationState(this.irRoot, {
                     ...this.metadata
-                }, newSnapshot);
+                }, newSnapshot, this.services);
             }
         }
         class ActionScanner {
@@ -3000,6 +3018,8 @@
                             return (isTerserEnabled ? 4 : 6) + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
                         case 'VariableDeclarator':
                             return calcChild(n.props['id'], nodeMap, calc) + (isTerserEnabled ? 1 : 3) + calcChild(n.props['init'], nodeMap, calc);
+                        case 'AssignmentPattern':
+                            return calcChild(n.props['left'], nodeMap, calc) + (isTerserEnabled ? 1 : 3) + calcChild(n.props['right'], nodeMap, calc);
                         // --- 識別子・リテラル ---
                         case 'Identifier':
                         case 'JSXIdentifier':
@@ -3150,13 +3170,27 @@
                         case 'FunctionDeclaration':
                         case 'FunctionExpression':
                         case 'ClassMethod':
-                            let paramCost = 0;
-                            const params = n.props['params'] || [];
-                            if (Array.isArray(params)) {
-                                for (const p of params) paramCost += calcChild(p, nodeMap, calc) + 1;
+                        case 'ObjectMethod':
+                            {
+                                let paramCost = 0;
+                                const params = n.props['params'] || [];
+                                if (Array.isArray(params)) {
+                                    for (const p of params) paramCost += calcChild(p, nodeMap, calc) + 1;
+                                }
+                                let methodKeyCost = 0;
+                                if (n.type === 'ClassMethod' || n.type === 'ObjectMethod') {
+                                    methodKeyCost = calcChild(n.props['key'], nodeMap, calc);
+                                    if (n.props['computed']) {
+                                        methodKeyCost += 2; // []
+                                    }
+                                    if (n.props['kind'] === 'get' || n.props['kind'] === 'set') {
+                                        methodKeyCost += 4; // 'get ' or 'set '
+                                    }
+                                }
+                                const baseCost = n.type === 'ArrowFunctionExpression' ? 4 : isTerserEnabled ? 8 : 9;
+                                const nameCost = n.type === 'ArrowFunctionExpression' ? 0 : n.type === 'ClassMethod' || n.type === 'ObjectMethod' ? methodKeyCost : calcChild(n.props['id'], nodeMap, calc);
+                                return baseCost + paramCost + nameCost + calcChild(n.props['body'], nodeMap, calc);
                             }
-                            const baseCost = n.type === 'ArrowFunctionExpression' ? 4 : isTerserEnabled ? 8 : 9;
-                            return baseCost + paramCost + calcChild(n.props['id'], nodeMap, calc) + calcChild(n.props['body'], nodeMap, calc);
                         case 'ClassDeclaration':
                         case 'ClassExpression':
                             return 6 + calcChild(n.props['id'], nodeMap, calc) + (n.props['superClass'] ? 9 + calcChild(n.props['superClass'], nodeMap, calc) : 0) + calcChild(n.props['body'], nodeMap, calc);
@@ -3315,6 +3349,56 @@
                     }
                 }
                 return result;
+            }
+            /**
+               * 変数の参照IDから、その実体となる関数ノード（FunctionDeclaration、ArrowFunctionExpression、または FunctionExpression）を安全に取得します。
+               * 直接指定された関数式・アロー関数式の解決、DFAによる再代入の追跡、および静的スコープによるグローバル参照やホイスティングの解決をカプセル化します。
+               */
+            resolveFunctionDefinition(refNodeId) {
+                // 0. 対象のノード自体がすでにアロー関数や関数式の場合は直接返す
+                const node = this.nodeMap.get(refNodeId);
+                if (node && (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression')) {
+                    return node;
+                }
+                const declId = this.refToDeclMap.get(refNodeId) || refNodeId;
+                const declNode = this.nodeMap.get(declId);
+                if (declNode && (declNode.type === 'ArrowFunctionExpression' || declNode.type === 'FunctionExpression')) {
+                    return declNode;
+                } // 1. DFA (Reaching Definitions) で追跡を試みる
+                const defs = this.getReachingDefinitions(refNodeId, declId);
+                if (defs && defs.size === 1) {
+                    const defId = Array.from(defs)[0];
+                    const defNode = this.nodeMap.get(defId);
+                    if (defNode) {
+                        if (defNode.type === 'FunctionDeclaration') return defNode;
+                        if (defNode.type === 'VariableDeclarator') {
+                            const initRef = defNode.props.init;
+                            if (initRef && initRef.type === 'ref') {
+                                const initNode = this.nodeMap.get(initRef.irNodeId);
+                                if (initNode && (initNode.type === 'ArrowFunctionExpression' || initNode.type === 'FunctionExpression')) {
+                                    return initNode;
+                                }
+                            }
+                        }
+                    }
+                } // 2. DFAが断絶している（グローバル関数やホイスティング）場合は、スコープツリーから静的に解決する
+                const parentId = this.parentMap.get(declId);
+                if (parentId) {
+                    const parent = this.nodeMap.get(parentId);
+                    if (parent) {
+                        if (parent.type === 'FunctionDeclaration') return parent;
+                        if (parent.type === 'VariableDeclarator') {
+                            const initRef = parent.props.init;
+                            if (initRef && initRef.type === 'ref') {
+                                const initNode = this.nodeMap.get(initRef.irNodeId);
+                                if (initNode && (initNode.type === 'ArrowFunctionExpression' || initNode.type === 'FunctionExpression')) {
+                                    return initNode;
+                                }
+                            }
+                        }
+                    }
+                }
+                return null;
             }
         }
         const CFG_BRANCH_RULES = {
@@ -5164,6 +5248,10 @@
                 return isPure;
             },
             candidates: (node, state) => {
+                // 評価サービスが注入されていない場合はスキップ
+                if (!state.services || !state.services.evaluatePureFunction) {
+                    return [];
+                }
                 const callNode = node;
                 const snapshot = state.analysisSnapshot;
                 const calleeNode = callNode.children.find(c => c.irNodeId === callNode.props.callee?.irNodeId);
@@ -5177,30 +5265,14 @@
                 } else {
                     const dNode = defNode;
                     funcNode = dNode.children.find(c => c.irNodeId === dNode.props.init?.irNodeId);
-                } // Convert funcNode to AST, then to JS
-                // Wait, since we are in the bundler, we don't have direct access to BabelGenerator in the same way as ASTBuilder.
-                // But we have `window.Babel`.
+                }
                 try {
-                    const Babel = window.Babel; // We need a helper to convert IR back to JS code for this specific function.
-                    // Let's use a simpler approach: extract the original source code using astNode mapping? No, we don't have source code here.
-                    // But we can do `IRtoASTConverter.convert(funcNode)`!
-                    const ast = IRtoASTConverter.convert(funcNode);
-                    const {
-                        code: funcCode
-                    } = Babel.transformFromAst({
-                        type: 'Program',
-                        body: [ast]
-                    }, '', {
-                        presets: [],
-                        ast: false
-                    }); // Generate arguments
+                    // 引数の値を抽出
                     const args = callNode.props.arguments.map(argRef => {
                         const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
-                        if (argNode.type === 'StringLiteral') return JSON.stringify(argNode.props.value);
-                        return argNode.props.value;
-                    }); // Execute
-                    const iifeCode = `return (${funcCode})(${args.join(', ')});`;
-                    const result = new Function(iifeCode)();
+                        return argNode.props.value; // リテラル値の抽出
+                    }); // 外部の評価サービスに処理を委譲
+                    const result = state.services.evaluatePureFunction(funcNode, args);
                     let resultNode;
                     if (typeof result === 'number') {
                         resultNode = {
@@ -5230,9 +5302,8 @@
                             children: []
                         };
                     } else {
-                        return []; // Unsupported return type
+                        return [];
                     }
-                    console.debug(`[TransformRule] ${PureFunctionEvaluationRule.id} matched. Evaluated ${calleeNode.props.name} -> ${result}`);
                     return [resultNode];
                 } catch (e) {
                     console.warn(`[TransformRule] ${PureFunctionEvaluationRule.id} evaluation failed: ${e.message}`);
@@ -5309,215 +5380,7 @@
                 return [];
             }
         };
-        function generateIrId_10() {
-            return `ir_generated_inl_${Math.random().toString(36).substring(2, 9)}`;
-        }
-        const isSimple_1 = node => node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral';
-        function getFunctionNode(calleeRefNode, state) {
-            if (calleeRefNode.type === 'ArrowFunctionExpression') {
-                return calleeRefNode;
-            }
-            if (calleeRefNode.type === 'Identifier') {
-                const snapshot = state.analysisSnapshot;
-                if (!snapshot) return null;
-                const declId = snapshot.refToDeclMap.get(calleeRefNode.irNodeId);
-                if (declId) {
-                    const defs = snapshot.getReachingDefinitions(calleeRefNode.irNodeId, declId);
-                    if (defs && defs.size === 1) {
-                        const defId = Array.from(defs)[0];
-                        const defNode = snapshot.nodeMap.get(defId);
-                        if (defNode && defNode.type === 'VariableDeclarator') {
-                            const initRef = defNode.props.init;
-                            if (initRef) {
-                                const initNode = defNode.children.find(c => c.irNodeId === initRef.irNodeId);
-                                if (initNode && initNode.type === 'ArrowFunctionExpression') {
-                                    return initNode;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            return null;
-        }
-        function cloneIRAndSubstitute(node, paramMap, state) {
-            if (node.type === 'Identifier') {
-                const ident = node;
-                const snapshot = state.analysisSnapshot;
-                if (snapshot) {
-                    const declId = snapshot.refToDeclMap.get(ident.irNodeId);
-                    if (declId && paramMap.has(declId)) {
-                        // Found a parameter usage, replace it with the cloned argument
-                        const argNode = paramMap.get(declId);
-                        return cloneIRAndSubstitute(argNode, new Map(), state);
-                    }
-                }
-            }
-            const newIrId = generateIrId_10();
-            const clonedChildren = [];
-            const props = {};
-            for (const key of Object.keys(node.props)) {
-                const val = node.props[key];
-                if (Array.isArray(val)) {
-                    props[key] = val.map(item => {
-                        if (item && typeof item === 'object' && item.type === 'ref') {
-                            const childNode = node.children.find(c => c.irNodeId === item.irNodeId);
-                            if (childNode) {
-                                const clonedChild = cloneIRAndSubstitute(childNode, paramMap, state);
-                                clonedChildren.push(clonedChild);
-                                return {
-                                    type: 'ref',
-                                    irNodeId: clonedChild.irNodeId
-                                };
-                            }
-                        }
-                        return item;
-                    });
-                } else if (val && typeof val === 'object' && val.type === 'ref') {
-                    const childNode = node.children.find(c => c.irNodeId === val.irNodeId);
-                    if (childNode) {
-                        const clonedChild = cloneIRAndSubstitute(childNode, paramMap, state);
-                        clonedChildren.push(clonedChild);
-                        props[key] = {
-                            type: 'ref',
-                            irNodeId: clonedChild.irNodeId
-                        };
-                    } else {
-                        props[key] = val;
-                    }
-                } else {
-                    props[key] = val;
-                }
-            }
-            if (node.type === 'Identifier') {
-                const snapshot = state.analysisSnapshot;
-                if (snapshot) {
-                    const declId = snapshot.refToDeclMap.get(node.irNodeId);
-                    if (declId) {
-                        props['_declId'] = declId;
-                    }
-                }
-            }
-            return {
-                type: node.type,
-                irNodeId: newIrId,
-                props,
-                children: clonedChildren
-            };
-        }
-        const FunctionInliningRule = {
-            id: 'micro:function-inlining',
-            type: 'micro',
-            name: '関数インライン化 (Function Inlining)',
-            description: '呼び出し頻度が高く、かつ小さい関数をインライン展開して呼び出しのオーバーヘッドを削減します。',
-            defaultEnabled: true,
-            match: (node, state) => {
-                if (node.type !== 'CallExpression') return false;
-                const callNode = node;
-                if (!callNode.props.callee) return false;
-                const calleeNode = callNode.children.find(c => c.irNodeId === callNode.props.callee.irNodeId);
-                if (!calleeNode) return false;
-                const fnNode = getFunctionNode(calleeNode, state);
-                if (!fnNode) return false;
-                let bodyNode = fnNode.children.find(c => c.irNodeId === fnNode.props.body.irNodeId);
-                if (!bodyNode) return false;
-                if (bodyNode.type === 'BlockStatement') {
-                    const bodyProps = bodyNode.props.body;
-                    if (Array.isArray(bodyProps) && bodyProps.length === 1) {
-                        const stmtRef = bodyProps[0];
-                        const stmtNode = bodyNode.children.find(c => c.irNodeId === stmtRef.irNodeId);
-                        if (stmtNode && stmtNode.type === 'ReturnStatement') {
-                            const retArgRef = stmtNode.props.argument;
-                            if (retArgRef) {
-                                bodyNode = stmtNode.children.find(c => c.irNodeId === retArgRef.irNodeId) || null;
-                            } else {
-                                // Return without argument
-                                return true;
-                            }
-                        } else {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-                if (!bodyNode) return true; // Will return undefined
-                // Check arguments safety
-                for (let i = 0; i < fnNode.props.params.length; i++) {
-                    const paramRef = fnNode.props.params[i];
-                    const paramNode = fnNode.children.find(c => c.irNodeId === paramRef.irNodeId);
-                    const argRef = callNode.props.arguments[i];
-                    if (paramNode && argRef) {
-                        const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
-                        if (argNode && !isSimple_1(argNode)) {
-                            // Argument is complex. We must ensure parameter is used EXACTLY once.
-                            // (If > 1, side effects are duplicated. If === 0, side effects are skipped!)
-                            const refCount = state.analysisSnapshot?.referenceCounts.get(paramNode.irNodeId) || 0;
-                            if (refCount !== 1) {
-                                return false; // Unsafe to duplicate or discard side-effects
-                            }
-                        }
-                    }
-                } // Check if there are extra arguments that might have side-effects and would be discarded
-                if (callNode.props.arguments.length > fnNode.props.params.length) {
-                    for (let i = fnNode.props.params.length; i < callNode.props.arguments.length; i++) {
-                        const argRef = callNode.props.arguments[i];
-                        if (argRef) {
-                            const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
-                            if (argNode && !isSimple_1(argNode)) {
-                                return false; // Unsafe to discard side-effects from extra arguments
-                            }
-                        }
-                    }
-                }
-                return true;
-            },
-            candidates: (node, state) => {
-                const callNode = node;
-                const calleeNode = callNode.children.find(c => c.irNodeId === callNode.props.callee.irNodeId);
-                const fnNode = getFunctionNode(calleeNode, state);
-                const paramMap = new Map();
-                for (let i = 0; i < fnNode.props.params.length; i++) {
-                    const paramRef = fnNode.props.params[i];
-                    const paramNode = fnNode.children.find(c => c.irNodeId === paramRef.irNodeId);
-                    const argRef = callNode.props.arguments[i];
-                    if (paramNode && argRef) {
-                        const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
-                        if (argNode) {
-                            // Map the parameter's DECLARATION ID to the argument node
-                            paramMap.set(paramNode.irNodeId, argNode);
-                        }
-                    }
-                }
-                let bodyNode = fnNode.children.find(c => c.irNodeId === fnNode.props.body.irNodeId);
-                if (bodyNode && bodyNode.type === 'BlockStatement') {
-                    const bodyProps = bodyNode.props.body;
-                    const stmtRef = bodyProps[0];
-                    const stmtNode = bodyNode.children.find(c => c.irNodeId === stmtRef.irNodeId);
-                    const retArgRef = stmtNode.props.argument;
-                    if (retArgRef) {
-                        bodyNode = stmtNode.children.find(c => c.irNodeId === retArgRef.irNodeId) || null;
-                    } else {
-                        bodyNode = null;
-                    }
-                }
-                if (!bodyNode) {
-                    console.debug(`[TransformRule] ${FunctionInliningRule.id} matched on CallExpression. Inlining empty return.`);
-                    return [{
-                        type: 'Identifier',
-                        irNodeId: generateIrId_10(),
-                        props: {
-                            name: 'undefined'
-                        },
-                        children: []
-                    }];
-                }
-                console.debug(`[TransformRule] ${FunctionInliningRule.id} matched on CallExpression. Inlining function body.`);
-                const inlinedNode = cloneIRAndSubstitute(bodyNode, paramMap, state);
-                return [inlinedNode];
-            }
-        };
-        function isSimple_2(node) {
+        function isSimple_1(node) {
             return node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral';
         }
         const DeadCodeEliminationRule = {
@@ -5573,7 +5436,7 @@
                     } // 右辺に関数呼び出しなどの副作用が含まれる場合は、使われていなくても削除してはならない
                     if (declNode.props.init) {
                         const initNode = declNode.children.find(c => c.irNodeId === declNode.props.init.irNodeId);
-                        if (initNode && !isSimple_2(initNode)) {
+                        if (initNode && !isSimple_1(initNode)) {
                             allUnused = false;
                             break;
                         }
@@ -5586,7 +5449,7 @@
                 return [];
             }
         };
-        function generateIrId_11() {
+        function generateIrId_10() {
             return `ir_alias_${Math.random().toString(36).substring(2, 9)}`;
         }
         const GlobalAliasingRule = {
@@ -5645,7 +5508,7 @@
                     const L = name.length;
                     if (data.count * (L - 1) > L + 4) {
                         const alias = genAlias();
-                        const declId = generateIrId_11();
+                        const declId = generateIrId_10();
                         targets.set(name, {
                             alias,
                             declId
@@ -5699,7 +5562,7 @@
                     };
                     const initNode = {
                         type: 'Identifier',
-                        irNodeId: generateIrId_11(),
+                        irNodeId: generateIrId_10(),
                         props: {
                             name: name
                         },
@@ -5707,7 +5570,7 @@
                     };
                     const declaratorNode = {
                         type: 'VariableDeclarator',
-                        irNodeId: generateIrId_11(),
+                        irNodeId: generateIrId_10(),
                         props: {
                             id: {
                                 type: 'ref',
@@ -5728,7 +5591,7 @@
                 }
                 const varDeclNode = {
                     type: 'VariableDeclaration',
-                    irNodeId: generateIrId_11(),
+                    irNodeId: generateIrId_10(),
                     props: {
                         kind: 'const',
                         declarations: declRefs
@@ -5744,11 +5607,11 @@
                 return [newProgBase];
             }
         };
-        function generateIrId_12() {
+        function generateIrId_11() {
             return `ir_generated_td_${Math.random().toString(36).substring(2, 9)}`;
         }
         function deepCopyIR(node, refToDeclMap) {
-            const newIrId = generateIrId_12();
+            const newIrId = generateIrId_11();
             const clonedChildren = [];
             const props = {};
             for (const key of Object.keys(node.props)) {
@@ -5798,7 +5661,7 @@
             };
         }
         function wrapInBlock(node) {
-            const newIrId = generateIrId_12();
+            const newIrId = generateIrId_11();
             if (node.type === 'BlockStatement') {
                 const blockNode = node; // 配列（props.body と children）を浅いコピー（Shallow Copy）して新しいブロックを作る
                 return {
@@ -5865,7 +5728,7 @@
                     const blockNode = node;
                     const res = findAndReplaceTargetBreaks(node.children, tailNodesCloner, refToDeclMap);
                     if (res.replaced) {
-                        const newIrId = generateIrId_12();
+                        const newIrId = generateIrId_11();
                         const newBlock = {
                             type: 'BlockStatement',
                             irNodeId: newIrId,
@@ -5905,7 +5768,7 @@
                         alternateRes = findAndReplaceTargetBreaks([alternateBlock], tailNodesCloner, refToDeclMap);
                     }
                     if (consequentRes.replaced || alternateRes.replaced) {
-                        const newIrId = generateIrId_12();
+                        const newIrId = generateIrId_11();
                         const newChildren = [];
                         if (testNode) newChildren.push(testNode);
                         const newConsequent = consequentRes.replaced ? consequentRes.newNodes[0] : consequentNode;
@@ -5943,7 +5806,7 @@
                 } else if (node.type === 'TryStatement' || node.type === 'CatchClause') {
                     const res = findAndReplaceTargetBreaks(node.children, tailNodesCloner, refToDeclMap);
                     if (res.replaced) {
-                        const newIrId = generateIrId_12();
+                        const newIrId = generateIrId_11();
                         const newProps = {
                             ...node.props
                         };
@@ -6048,18 +5911,18 @@
                     for (let i = targetIndex + 1; i < bodyRefs.length; i++) {
                         tailNodesToDuplicate.push(blockNode.children.find(c => c.irNodeId === bodyRefs[i].irNodeId));
                     }
-                    const newIfStmtId = generateIrId_12();
+                    const newIfStmtId = generateIrId_11();
                     const consequentNode = originalIfStmt.children.find(c => c.irNodeId === originalIfStmt.props.consequent.irNodeId);
                     const alternateNode = originalIfStmt.props.alternate ? originalIfStmt.children.find(c => c.irNodeId === originalIfStmt.props.alternate.irNodeId) : null;
                     const consequentBlock = consequentNode ? wrapInBlock(consequentNode) : wrapInBlock({
                         type: 'EmptyStatement',
-                        irNodeId: generateIrId_12(),
+                        irNodeId: generateIrId_11(),
                         props: {},
                         children: []
                     });
                     const alternateBlock = alternateNode ? wrapInBlock(alternateNode) : wrapInBlock({
                         type: 'EmptyStatement',
-                        irNodeId: generateIrId_12(),
+                        irNodeId: generateIrId_11(),
                         props: {},
                         children: []
                     });
@@ -6114,7 +5977,7 @@
                     });
                     const transformedBlock = {
                         type: 'BlockStatement',
-                        irNodeId: generateIrId_12(),
+                        irNodeId: generateIrId_11(),
                         props: {
                             body: finalBlockBodyRefs
                         },
@@ -6164,7 +6027,7 @@
                         return deepCopyIR(node, snapshot.refToDeclMap);
                     });
                     if (!hasDefault) {
-                        const newDefaultId = generateIrId_12();
+                        const newDefaultId = generateIrId_11();
                         const newDefaultCase = {
                             type: 'SwitchCase',
                             irNodeId: newDefaultId,
@@ -6199,7 +6062,7 @@
                                 finalConsequent = [...finalConsequent, ...clonedTails];
                             }
                         }
-                        const newCaseId = generateIrId_12();
+                        const newCaseId = generateIrId_11();
                         const newChildren = [];
                         if (testNode) {
                             newChildren.push(testNode);
@@ -6223,7 +6086,7 @@
                         rebuiltCaseNodes.push(newCaseNode);
                     }
                     const discriminantNode = originalSwitchStmt.children.find(c => c.irNodeId === originalSwitchStmt.props.discriminant.irNodeId);
-                    const newSwitchId = generateIrId_12();
+                    const newSwitchId = generateIrId_11();
                     const newSwitchStmt = {
                         type: 'SwitchStatement',
                         irNodeId: newSwitchId,
@@ -6256,7 +6119,7 @@
                     });
                     const transformedBlock = {
                         type: 'BlockStatement',
-                        irNodeId: generateIrId_12(),
+                        irNodeId: generateIrId_11(),
                         props: {
                             body: finalBlockBodyRefs
                         },
@@ -6267,18 +6130,1402 @@
                 }
             }
         };
+        function generateIrId_12() {
+            return `ir_tuple_${Math.random().toString(36).substring(2, 9)}`;
+        }
+        function findEligibleClasses(program, state) {
+            const snapshot = state.analysisSnapshot;
+            if (!snapshot) return [];
+            const infos = []; // Find all ClassDeclarations in the program
+            const classDecls = [];
+            for (const [id, irNode] of snapshot.nodeMap.entries()) {
+                if (irNode.type === 'ClassDeclaration') {
+                    classDecls.push(irNode);
+                }
+            }
+            for (const classDecl of classDecls) {
+                const classIdRef = classDecl.props.id;
+                if (!classIdRef) continue;
+                const classIdNode = snapshot.nodeMap.get(classIdRef.irNodeId);
+                if (!classIdNode || classIdNode.type !== 'Identifier') continue;
+                const className = classIdNode.props.name;
+                const classDeclId = classIdNode.irNodeId;
+                if (snapshot.escapedVars.has(classDeclId)) {
+                    continue;
+                }
+                if (classDecl.props.superClass) {
+                    continue;
+                }
+                const classBodyRef = classDecl.props.body;
+                if (!classBodyRef) continue;
+                const classBodyNode = snapshot.nodeMap.get(classBodyRef.irNodeId);
+                if (!classBodyNode || classBodyNode.type !== 'ClassBody') continue;
+                let constructorNode = null;
+                let hasOtherMethods = false;
+                const bodyRefs = classBodyNode.props.body || [];
+                for (const ref of bodyRefs) {
+                    const methodNode = snapshot.nodeMap.get(ref.irNodeId);
+                    if (methodNode && methodNode.type === 'ClassMethod') {
+                        if (methodNode.props.kind === 'constructor') {
+                            constructorNode = methodNode;
+                        } else {
+                            hasOtherMethods = true;
+                        }
+                    }
+                }
+                if (hasOtherMethods) {
+                    continue;
+                }
+                const propToIndex = new Map();
+                if (constructorNode) {
+                    const blockRef = constructorNode.props.body;
+                    const blockNode = blockRef ? snapshot.nodeMap.get(blockRef.irNodeId) : null;
+                    if (blockNode && blockNode.type === 'BlockStatement') {
+                        const stmtRefs = blockNode.props.body || [];
+                        for (const stmtRef of stmtRefs) {
+                            const stmtNode = snapshot.nodeMap.get(stmtRef.irNodeId);
+                            if (stmtNode && stmtNode.type === 'ExpressionStatement') {
+                                const exprRef = stmtNode.props.expression;
+                                const exprNode = exprRef ? snapshot.nodeMap.get(exprRef.irNodeId) : null;
+                                if (exprNode && exprNode.type === 'AssignmentExpression' && exprNode.props.operator === '=') {
+                                    const leftRef = exprNode.props.left;
+                                    const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                                    if (leftNode && leftNode.type === 'MemberExpression' && !leftNode.props.computed) {
+                                        const objRef = leftNode.props.object;
+                                        const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                                        if (objNode && objNode.type === 'ThisExpression') {
+                                            const propRef = leftNode.props.property;
+                                            const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                                            if (propNode && propNode.type === 'Identifier') {
+                                                const propName = propNode.props.name;
+                                                if (!propToIndex.has(propName)) {
+                                                    propToIndex.set(propName, propToIndex.size);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let isThisSafe = true;
+                if (constructorNode) {
+                    const findThisNodes = (n, result) => {
+                        if (n.type === 'ThisExpression') {
+                            result.push(n);
+                        }
+                        for (const child of n.children) {
+                            findThisNodes(child, result);
+                        }
+                    };
+                    const thisNodes = [];
+                    findThisNodes(constructorNode, thisNodes);
+                    for (const thisNode of thisNodes) {
+                        const parentId = snapshot.parentMap.get(thisNode.irNodeId);
+                        const parentNode = parentId ? snapshot.nodeMap.get(parentId) : null;
+                        if (!parentNode || parentNode.type !== 'MemberExpression' || parentNode.props.object.irNodeId !== thisNode.irNodeId) {
+                            isThisSafe = false;
+                            break;
+                        }
+                        const grandParentId = snapshot.parentMap.get(parentNode.irNodeId);
+                        const grandParentNode = grandParentId ? snapshot.nodeMap.get(grandParentId) : null;
+                        if (grandParentNode && grandParentNode.type === 'CallExpression' && grandParentNode.props.callee.irNodeId === parentNode.irNodeId) {
+                            isThisSafe = false;
+                            break;
+                        }
+                    }
+                }
+                if (!isThisSafe) {
+                    continue;
+                }
+                let hasInstanceof = false;
+                for (const [id, irNode] of snapshot.nodeMap.entries()) {
+                    if (irNode.type === 'BinaryExpression' && irNode.props.operator === 'instanceof') {
+                        const rightId = irNode.props.right.irNodeId;
+                        const rightDeclId = snapshot.refToDeclMap.get(rightId) || rightId;
+                        if (rightDeclId === classDeclId) {
+                            hasInstanceof = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasInstanceof) {
+                    continue;
+                }
+                const instDeclIds = new Set();
+                const arrayDeclIds = new Set();
+                let trackSuccess = true;
+                const initNewExprs = [];
+                for (const [id, irNode] of snapshot.nodeMap.entries()) {
+                    if (irNode.type === 'NewExpression') {
+                        const calleeId = irNode.props.callee.irNodeId;
+                        const calleeDeclId = snapshot.refToDeclMap.get(calleeId) || calleeId;
+                        if (calleeDeclId === classDeclId) {
+                            initNewExprs.push(irNode);
+                        }
+                    }
+                }
+                const queue = [...initNewExprs];
+                const visitedNew = new Set();
+                while (queue.length > 0) {
+                    const current = queue.shift();
+                    if (visitedNew.has(current.irNodeId)) continue;
+                    visitedNew.add(current.irNodeId);
+                    const parentId = snapshot.parentMap.get(current.irNodeId);
+                    const parentNode = parentId ? snapshot.nodeMap.get(parentId) : null;
+                    if (!parentNode) {
+                        trackSuccess = false;
+                        break;
+                    }
+                    if (parentNode.type === 'VariableDeclarator') {
+                        const idRef = parentNode.props.id;
+                        const idNode = idRef ? snapshot.nodeMap.get(idRef.irNodeId) : null;
+                        if (idNode && idNode.type === 'Identifier') {
+                            if (snapshot.escapedVars.has(idNode.irNodeId)) {
+                                trackSuccess = false;
+                                break;
+                            }
+                            instDeclIds.add(idNode.irNodeId);
+                        } else {
+                            trackSuccess = false;
+                            break;
+                        }
+                    } else if (parentNode.type === 'AssignmentExpression') {
+                        const leftRef = parentNode.props.left;
+                        const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                        if (leftNode && leftNode.type === 'Identifier') {
+                            const leftDeclId = snapshot.refToDeclMap.get(leftNode.irNodeId) || leftNode.irNodeId;
+                            if (snapshot.escapedVars.has(leftDeclId)) {
+                                trackSuccess = false;
+                                break;
+                            }
+                            instDeclIds.add(leftDeclId);
+                        } else {
+                            trackSuccess = false;
+                            break;
+                        }
+                    } else if (parentNode.type === 'CallExpression') {
+                        const calleeRef = parentNode.props.callee;
+                        const calleeNode = calleeRef ? snapshot.nodeMap.get(calleeRef.irNodeId) : null;
+                        if (calleeNode && calleeNode.type === 'MemberExpression' && !calleeNode.props.computed) {
+                            const objRef = calleeNode.props.object;
+                            const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                            const propRef = calleeNode.props.property;
+                            const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                            if (objNode && objNode.type === 'Identifier' && propNode && propNode.type === 'Identifier') {
+                                const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
+                                const methodName = propNode.props.name;
+                                const isSafeArrayMethod = methodName === 'push' || methodName === 'unshift' || methodName === 'concat';
+                                if (isSafeArrayMethod && !snapshot.escapedVars.has(objDeclId)) {
+                                    arrayDeclIds.add(objDeclId);
+                                    instDeclIds.add(objDeclId);
+                                } else {
+                                    trackSuccess = false;
+                                    break;
+                                }
+                            } else {
+                                trackSuccess = false;
+                                break;
+                            }
+                        } else {
+                            trackSuccess = false;
+                            break;
+                        }
+                    } else {
+                        trackSuccess = false;
+                        break;
+                    }
+                }
+                if (!trackSuccess) {
+                    continue;
+                }
+                let added = true;
+                while (added) {
+                    added = false;
+                    for (const [id, irNode] of snapshot.nodeMap.entries()) {
+                        if (irNode.type === 'VariableDeclarator') {
+                            const initRef = irNode.props.init;
+                            const initNode = initRef ? snapshot.nodeMap.get(initRef.irNodeId) : null;
+                            if (initNode) {
+                                let isFromInst = false;
+                                let isArraySource = false;
+                                if (initNode.type === 'Identifier') {
+                                    const initDeclId = snapshot.refToDeclMap.get(initNode.irNodeId) || initNode.irNodeId;
+                                    if (instDeclIds.has(initDeclId)) {
+                                        isFromInst = true;
+                                        if (arrayDeclIds.has(initDeclId)) isArraySource = true;
+                                    }
+                                } else if (initNode.type === 'MemberExpression') {
+                                    const objRef = initNode.props.object;
+                                    const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                                    if (objNode && objNode.type === 'Identifier') {
+                                        const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
+                                        if (instDeclIds.has(objDeclId)) {
+                                            isFromInst = true;
+                                            if (arrayDeclIds.has(objDeclId)) {
+                                                isArraySource = false;
+                                            } else {
+                                                isArraySource = true;
+                                            }
+                                        }
+                                    }
+                                } else if (initNode.type === 'CallExpression') {
+                                    const calleeRef = initNode.props.callee;
+                                    const calleeNode = calleeRef ? snapshot.nodeMap.get(calleeRef.irNodeId) : null;
+                                    if (calleeNode && calleeNode.type === 'MemberExpression') {
+                                        const objRef = calleeNode.props.object;
+                                        const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                                        if (objNode && objNode.type === 'Identifier') {
+                                            const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
+                                            if (instDeclIds.has(objDeclId)) {
+                                                isFromInst = true;
+                                                if (arrayDeclIds.has(objDeclId)) isArraySource = false; else isArraySource = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (isFromInst) {
+                                    const idRef = irNode.props.id;
+                                    const idNode = idRef ? snapshot.nodeMap.get(idRef.irNodeId) : null;
+                                    if (idNode && idNode.type === 'Identifier') {
+                                        if (!instDeclIds.has(idNode.irNodeId)) {
+                                            if (snapshot.escapedVars.has(idNode.irNodeId)) {
+                                                trackSuccess = false;
+                                                break;
+                                            }
+                                            instDeclIds.add(idNode.irNodeId);
+                                            if (isArraySource) {
+                                                arrayDeclIds.add(idNode.irNodeId);
+                                            }
+                                            added = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (irNode.type === 'AssignmentExpression') {
+                            const rightRef = irNode.props.right;
+                            const rightNode = rightRef ? snapshot.nodeMap.get(rightRef.irNodeId) : null;
+                            if (rightNode) {
+                                let isFromInst = false;
+                                let isArraySource = false;
+                                if (rightNode.type === 'Identifier') {
+                                    const rightDeclId = snapshot.refToDeclMap.get(rightNode.irNodeId) || rightNode.irNodeId;
+                                    if (instDeclIds.has(rightDeclId)) {
+                                        isFromInst = true;
+                                        if (arrayDeclIds.has(rightDeclId)) isArraySource = true;
+                                    }
+                                } else if (rightNode.type === 'MemberExpression') {
+                                    const objRef = rightNode.props.object;
+                                    const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                                    if (objNode && objNode.type === 'Identifier') {
+                                        const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
+                                        if (instDeclIds.has(objDeclId)) {
+                                            isFromInst = true;
+                                            if (arrayDeclIds.has(objDeclId)) {
+                                                isArraySource = false;
+                                            } else {
+                                                isArraySource = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (isFromInst) {
+                                    const leftRef = irNode.props.left;
+                                    const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                                    if (leftNode && leftNode.type === 'Identifier') {
+                                        const leftDeclId = snapshot.refToDeclMap.get(leftNode.irNodeId) || leftNode.irNodeId;
+                                        if (!instDeclIds.has(leftDeclId)) {
+                                            if (snapshot.escapedVars.has(leftDeclId)) {
+                                                trackSuccess = false;
+                                                break;
+                                            }
+                                            instDeclIds.add(leftDeclId);
+                                            if (isArraySource) {
+                                                arrayDeclIds.add(leftDeclId);
+                                            }
+                                            added = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (irNode.type === 'CallExpression') {
+                            const calleeRef = irNode.props.callee;
+                            const calleeNode = calleeRef ? snapshot.nodeMap.get(calleeRef.irNodeId) : null;
+                            if (calleeNode && calleeNode.type === 'MemberExpression' && !calleeNode.props.computed) {
+                                const objRef = calleeNode.props.object;
+                                const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                                const propRef = calleeNode.props.property;
+                                const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                                if (objNode && objNode.type === 'Identifier' && propNode && propNode.type === 'Identifier') {
+                                    const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
+                                    const methodName = propNode.props.name;
+                                    if (methodName === 'push' || methodName === 'unshift' || methodName === 'concat') {
+                                        const args = irNode.props.arguments || [];
+                                        let hasInstArg = false;
+                                        for (const argRef of args) {
+                                            if (argRef && argRef.type === 'ref') {
+                                                const argNode = snapshot.nodeMap.get(argRef.irNodeId);
+                                                if (argNode && argNode.type === 'Identifier') {
+                                                    const argDeclId = snapshot.refToDeclMap.get(argNode.irNodeId) || argNode.irNodeId;
+                                                    if (instDeclIds.has(argDeclId) && !arrayDeclIds.has(argDeclId)) {
+                                                        hasInstArg = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (hasInstArg) {
+                                            if (!arrayDeclIds.has(objDeclId)) {
+                                                if (snapshot.escapedVars.has(objDeclId)) {
+                                                    trackSuccess = false;
+                                                    break;
+                                                }
+                                                arrayDeclIds.add(objDeclId);
+                                                instDeclIds.add(objDeclId);
+                                                added = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (!trackSuccess) break;
+                }
+                if (!trackSuccess) {
+                    continue;
+                }
+                let hasDynamicAccess = false;
+                for (const [id, irNode] of snapshot.nodeMap.entries()) {
+                    if (irNode.type === 'MemberExpression' && irNode.props.computed) {
+                        const objRef = irNode.props.object;
+                        const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                        if (objNode && objNode.type === 'Identifier') {
+                            const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
+                            if (instDeclIds.has(objDeclId) && !arrayDeclIds.has(objDeclId)) {
+                                hasDynamicAccess = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (hasDynamicAccess) {
+                    continue;
+                }
+                infos.push({
+                    classDeclNode: classDecl,
+                    className,
+                    classDeclId,
+                    propToIndex,
+                    constructorNode,
+                    instDeclIds,
+                    arrayDeclIds
+                });
+            }
+            return infos;
+        }
+        const ClassToTupleRule = {
+            id: 'macro:class-to-tuple',
+            type: 'macro',
+            name: 'クラスの配列（タプル）化',
+            description: '完全に隠蔽されたデータ用クラス（DTO）を通常の配列へと変換し、高効率・低フットプリント化します。',
+            defaultEnabled: true,
+            match: (node, state) => {
+                if (node.type !== 'Program') return false;
+                const infos = findEligibleClasses(node, state);
+                return infos.length > 0;
+            },
+            candidates: (node, state) => {
+                const prog = node;
+                const snapshot = state.analysisSnapshot;
+                const infos = findEligibleClasses(prog, state);
+                if (infos.length === 0) return [];
+                let currentProg = prog;
+                for (const info of infos) {
+                    const classDeclNode = info.classDeclNode;
+                    const className = info.className;
+                    const classDeclId = info.classDeclId;
+                    const propToIndex = info.propToIndex;
+                    const constructorNode = info.constructorNode;
+                    const instDeclIds = info.instDeclIds;
+                    const arrayDeclIds = info.arrayDeclIds;
+                    const factoryFuncName = `_create_${className}`;
+                    const factoryFuncDeclId = generateIrId_12();
+                    const cloneNode = n => {
+                        if (n.type === 'ClassDeclaration' && n.irNodeId === classDeclNode.irNodeId) {
+                            return null;
+                        }
+                        const newChildren = [];
+                        const childIdMap = new Map();
+                        for (const child of n.children) {
+                            const clonedChild = cloneNode(child);
+                            if (clonedChild) {
+                                newChildren.push(clonedChild);
+                                if (child.irNodeId !== clonedChild.irNodeId) {
+                                    childIdMap.set(child.irNodeId, clonedChild.irNodeId);
+                                }
+                            }
+                        }
+                        let newProps = {
+                            ...n.props
+                        };
+                        for (const [key, val] of Object.entries(newProps)) {
+                            if (Array.isArray(val)) {
+                                newProps[key] = val.map(ref => {
+                                    if (ref && ref.type === 'ref') {
+                                        const childNode = snapshot.nodeMap.get(ref.irNodeId);
+                                        if (childNode && childNode.type === 'ClassDeclaration' && childNode.irNodeId === classDeclNode.irNodeId) {
+                                            return null;
+                                        }
+                                        if (childIdMap.has(ref.irNodeId)) {
+                                            return {
+                                                type: 'ref',
+                                                irNodeId: childIdMap.get(ref.irNodeId)
+                                            };
+                                        }
+                                        return ref;
+                                    }
+                                    return ref;
+                                }).filter(ref => ref !== null);
+                            } else if (val && typeof val === 'object' && val.type === 'ref') {
+                                const refNodeId = val.irNodeId;
+                                const childNode = snapshot.nodeMap.get(refNodeId);
+                                if (childNode && childNode.type === 'ClassDeclaration' && childNode.irNodeId === classDeclNode.irNodeId) {
+                                    newProps[key] = null;
+                                } else if (childIdMap.has(refNodeId)) {
+                                    newProps[key] = {
+                                        type: 'ref',
+                                        irNodeId: childIdMap.get(refNodeId)
+                                    };
+                                }
+                            }
+                        }
+                        if (n.type === 'NewExpression') {
+                            const calleeId = n.props.callee.irNodeId;
+                            const calleeDeclId = snapshot.refToDeclMap.get(calleeId) || calleeId;
+                            if (calleeDeclId === classDeclId) {
+                                const factoryIdNode = {
+                                    type: 'Identifier',
+                                    irNodeId: generateIrId_12(),
+                                    props: {
+                                        name: factoryFuncName,
+                                        _declId: factoryFuncDeclId
+                                    },
+                                    children: []
+                                };
+                                const finalChildren = newChildren.filter(c => c.irNodeId !== calleeId);
+                                finalChildren.push(factoryIdNode);
+                                newProps.callee = {
+                                    type: 'ref',
+                                    irNodeId: factoryIdNode.irNodeId
+                                };
+                                return {
+                                    type: 'CallExpression',
+                                    irNodeId: n.irNodeId,
+                                    props: newProps,
+                                    children: finalChildren
+                                };
+                            }
+                        }
+                        if (n.type === 'MemberExpression' && !n.props.computed) {
+                            const objId = n.props.object.irNodeId;
+                            const objNode = snapshot.nodeMap.get(objId);
+                            let isInstance = false;
+                            if (objNode) {
+                                if (objNode.type === 'Identifier') {
+                                    // 1. 変数アクセス (例: currentNode.x)
+                                    const objDeclId = snapshot.refToDeclMap.get(objId) || objId; // 配列変数自身（openList等）へのプロパティアクセス（length等）を誤変換しないよう除外
+                                    if (instDeclIds.has(objDeclId) && !arrayDeclIds.has(objDeclId)) {
+                                        isInstance = true;
+                                    }
+                                } else if (objNode.type === 'MemberExpression' && objNode.props.computed) {
+                                    // 2. 配列インデックスアクセス (例: openList[i].x)
+                                    const listObjRef = objNode.props.object;
+                                    const listObjNode = listObjRef ? snapshot.nodeMap.get(listObjRef.irNodeId) : null;
+                                    if (listObjNode && listObjNode.type === 'Identifier') {
+                                        const listDeclId = snapshot.refToDeclMap.get(listObjNode.irNodeId) || listObjNode.irNodeId; // その配列自身がインスタンスのコンテナとしてトラッカーに登録されているか
+                                        if (arrayDeclIds.has(listDeclId)) {
+                                            isInstance = true;
+                                        }
+                                    }
+                                }
+                            }
+                            if (isInstance) {
+                                const propRef = n.props.property;
+                                const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                                if (propNode && propNode.type === 'Identifier') {
+                                    const propName = propNode.props.name;
+                                    if (propToIndex.has(propName)) {
+                                        const idx = propToIndex.get(propName);
+                                        const numLiteralNode = {
+                                            type: 'NumericLiteral',
+                                            irNodeId: generateIrId_12(),
+                                            props: {
+                                                value: idx
+                                            },
+                                            children: []
+                                        };
+                                        const finalChildren = newChildren.filter(c => c.irNodeId !== propNode.irNodeId);
+                                        finalChildren.push(numLiteralNode);
+                                        return {
+                                            type: 'MemberExpression',
+                                            irNodeId: n.irNodeId,
+                                            props: {
+                                                ...newProps,
+                                                object: newProps.object,
+                                                property: {
+                                                    type: 'ref',
+                                                    irNodeId: numLiteralNode.irNodeId
+                                                },
+                                                computed: true
+                                            },
+                                            children: finalChildren
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                        return {
+                            type: n.type,
+                            irNodeId: n.irNodeId,
+                            props: newProps,
+                            children: newChildren
+                        };
+                    };
+                    const newProgBase = cloneNode(currentProg);
+                    const paramIdMap = new Map(); // Step 1: 元のパラメータ宣言の declId を特定し、新しい ID を事前に割り当てる
+                    if (constructorNode && constructorNode.props.params) {
+                        for (const paramRef of constructorNode.props.params) {
+                            const paramNode = snapshot.nodeMap.get(paramRef.irNodeId);
+                            if (paramNode) {
+                                if (paramNode.type === 'Identifier') {
+                                    paramIdMap.set(paramNode.irNodeId, generateIrId_12());
+                                } else if (paramNode.type === 'AssignmentPattern') {
+                                    const leftRef = paramNode.props.left;
+                                    if (leftRef && leftRef.type === 'ref') {
+                                        paramIdMap.set(leftRef.irNodeId, generateIrId_12());
+                                    }
+                                }
+                            }
+                        }
+                    } // Step 2: 汎用ディープクローン関数（パラメータや式を安全に再帰コピーする）
+                    const cloneExpression = n => {
+                        const newChildren = [];
+                        for (const child of n.children) {
+                            newChildren.push(cloneExpression(child));
+                        }
+                        let newProps = {
+                            ...n.props
+                        };
+                        if (n.type === 'Identifier') {
+                            const declId = snapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
+                            const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId) : declId; // 自分が「宣言」そのものである場合は、先ほど事前生成したIDを付与する
+                            const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId) : generateIrId_12();
+                            return {
+                                type: 'Identifier',
+                                irNodeId: newId,
+                                props: {
+                                    ...n.props,
+                                    _declId: finalDeclId
+                                },
+                                children: []
+                            };
+                        }
+                        const childIdMap = new Map();
+                        for (let i = 0; i < n.children.length; i++) {
+                            childIdMap.set(n.children[i].irNodeId, newChildren[i].irNodeId);
+                        }
+                        for (const [key, val] of Object.entries(newProps)) {
+                            if (Array.isArray(val)) {
+                                newProps[key] = val.map(ref => {
+                                    if (ref && ref.type === 'ref') {
+                                        if (childIdMap.has(ref.irNodeId)) {
+                                            return {
+                                                type: 'ref',
+                                                irNodeId: childIdMap.get(ref.irNodeId)
+                                            };
+                                        }
+                                    }
+                                    return ref;
+                                });
+                            } else if (val && typeof val === 'object' && val.type === 'ref') {
+                                const refNodeId = val.irNodeId;
+                                if (childIdMap.has(refNodeId)) {
+                                    newProps[key] = {
+                                        type: 'ref',
+                                        irNodeId: childIdMap.get(refNodeId)
+                                    };
+                                }
+                            }
+                        }
+                        return {
+                            type: n.type,
+                            irNodeId: generateIrId_12(),
+                            props: newProps,
+                            children: newChildren
+                        };
+                    }; // Step 3: パラメータリスト全体を安全にディープクローン
+                    const paramsRefs = [];
+                    const factoryParamsChildren = [];
+                    if (constructorNode && constructorNode.props.params) {
+                        for (const paramRef of constructorNode.props.params) {
+                            const paramNode = snapshot.nodeMap.get(paramRef.irNodeId);
+                            if (paramNode) {
+                                const paramClone = cloneExpression(paramNode);
+                                factoryParamsChildren.push(paramClone);
+                                paramsRefs.push({
+                                    type: 'ref',
+                                    irNodeId: paramClone.irNodeId
+                                });
+                            }
+                        }
+                    } // =========================================================================================
+                    const isSimpleDTO = () => {
+                        if (!constructorNode) return true;
+                        const blockRef = constructorNode.props.body;
+                        if (!blockRef) return true;
+                        const blockNode = snapshot.nodeMap.get(blockRef.irNodeId);
+                        if (!blockNode || blockNode.type !== 'BlockStatement') return false;
+                        const stmtRefs = blockNode.props.body || [];
+                        for (const stmtRef of stmtRefs) {
+                            const stmtNode = snapshot.nodeMap.get(stmtRef.irNodeId);
+                            if (!stmtNode) return false;
+                            if (stmtNode.type !== 'ExpressionStatement') return false;
+                            const exprRef = stmtNode.props.expression;
+                            const exprNode = exprRef ? snapshot.nodeMap.get(exprRef.irNodeId) : null;
+                            if (!exprNode || exprNode.type !== 'AssignmentExpression' || exprNode.props.operator !== '=') return false;
+                            const leftRef = exprNode.props.left;
+                            const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                            if (!leftNode || leftNode.type !== 'MemberExpression' || leftNode.props.computed) return false;
+                            const objRef = leftNode.props.object;
+                            const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                            if (!objNode || objNode.type !== 'ThisExpression') return false;
+                            const propRef = leftNode.props.property;
+                            const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                            if (!propNode || propNode.type !== 'Identifier') return false;
+                        }
+                        return true;
+                    };
+                    let factoryFuncNode;
+                    if (isSimpleDTO()) {
+                        const elementsRefs = [];
+                        const arrayChildren = [];
+                        const numProps = propToIndex.size;
+                        const exprForIndex = new Array(numProps).fill(null);
+                        if (constructorNode) {
+                            const blockRef = constructorNode.props.body;
+                            const blockNode = blockRef ? snapshot.nodeMap.get(blockRef.irNodeId) : null;
+                            if (blockNode && blockNode.type === 'BlockStatement') {
+                                const stmtRefs = blockNode.props.body || [];
+                                for (const stmtRef of stmtRefs) {
+                                    const stmtNode = snapshot.nodeMap.get(stmtRef.irNodeId);
+                                    if (stmtNode && stmtNode.type === 'ExpressionStatement') {
+                                        const exprRef = stmtNode.props.expression;
+                                        const exprNode = exprRef ? snapshot.nodeMap.get(exprRef.irNodeId) : null;
+                                        if (exprNode && exprNode.type === 'AssignmentExpression') {
+                                            const leftRef = exprNode.props.left;
+                                            const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                                            if (leftNode && leftNode.type === 'MemberExpression') {
+                                                const propRef = leftNode.props.property;
+                                                const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                                                if (propNode && propNode.type === 'Identifier') {
+                                                    const propName = propNode.props.name;
+                                                    const idx = propToIndex.get(propName);
+                                                    if (idx !== undefined) {
+                                                        const rightRef = exprNode.props.right;
+                                                        const rightNode = rightRef ? snapshot.nodeMap.get(rightRef.irNodeId) : null;
+                                                        if (rightNode) {
+                                                            exprForIndex[idx] = rightNode;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        for (let i = 0; i < numProps; i++) {
+                            const origExpr = exprForIndex[i];
+                            if (origExpr) {
+                                const clonedExpr = cloneExpression(origExpr);
+                                arrayChildren.push(clonedExpr);
+                                elementsRefs.push({
+                                    type: 'ref',
+                                    irNodeId: clonedExpr.irNodeId
+                                });
+                            } else {
+                                const undefNode = {
+                                    type: 'Identifier',
+                                    irNodeId: generateIrId_12(),
+                                    props: {
+                                        name: 'undefined'
+                                    },
+                                    children: []
+                                };
+                                arrayChildren.push(undefNode);
+                                elementsRefs.push({
+                                    type: 'ref',
+                                    irNodeId: undefNode.irNodeId
+                                });
+                            }
+                        }
+                        const arrayNode = {
+                            type: 'ArrayExpression',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                elements: elementsRefs
+                            },
+                            children: arrayChildren
+                        };
+                        const arrowFuncNode = {
+                            type: 'ArrowFunctionExpression',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                params: paramsRefs,
+                                body: {
+                                    type: 'ref',
+                                    irNodeId: arrayNode.irNodeId
+                                },
+                                async: false,
+                                generator: false
+                            },
+                            children: [...factoryParamsChildren, arrayNode]
+                        };
+                        const factoryIdNode = {
+                            type: 'Identifier',
+                            irNodeId: factoryFuncDeclId,
+                            props: {
+                                name: factoryFuncName
+                            },
+                            children: []
+                        };
+                        const declaratorNode = {
+                            type: 'VariableDeclarator',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                id: {
+                                    type: 'ref',
+                                    irNodeId: factoryIdNode.irNodeId
+                                },
+                                init: {
+                                    type: 'ref',
+                                    irNodeId: arrowFuncNode.irNodeId
+                                }
+                            },
+                            children: [factoryIdNode, arrowFuncNode]
+                        };
+                        factoryFuncNode = {
+                            type: 'VariableDeclaration',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                kind: 'const',
+                                declarations: [{
+                                    type: 'ref',
+                                    irNodeId: declaratorNode.irNodeId
+                                }]
+                            },
+                            children: [declaratorNode]
+                        };
+                    } else {
+                        const arrayIdNode = {
+                            type: 'Identifier',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                name: '_t'
+                            },
+                            children: []
+                        };
+                        const initArrayNode = {
+                            type: 'ArrayExpression',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                elements: []
+                            },
+                            children: []
+                        };
+                        const arrayDeclaratorNode = {
+                            type: 'VariableDeclarator',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                id: {
+                                    type: 'ref',
+                                    irNodeId: arrayIdNode.irNodeId
+                                },
+                                init: {
+                                    type: 'ref',
+                                    irNodeId: initArrayNode.irNodeId
+                                }
+                            },
+                            children: [arrayIdNode, initArrayNode]
+                        };
+                        const arrayDeclNode = {
+                            type: 'VariableDeclaration',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                kind: 'const',
+                                declarations: [{
+                                    type: 'ref',
+                                    irNodeId: arrayDeclaratorNode.irNodeId
+                                }]
+                            },
+                            children: [arrayDeclaratorNode]
+                        };
+                        const cloneConstructorBody = n => {
+                            const newChildren = [];
+                            for (const child of n.children) {
+                                newChildren.push(cloneConstructorBody(child));
+                            }
+                            let newProps = {
+                                ...n.props
+                            };
+                            if (n.type === 'Identifier') {
+                                const declId = snapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
+                                const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId) : declId;
+                                return {
+                                    type: 'Identifier',
+                                    irNodeId: generateIrId_12(),
+                                    props: {
+                                        ...n.props,
+                                        _declId: finalDeclId
+                                    },
+                                    children: []
+                                };
+                            }
+                            if (n.type === 'MemberExpression' && !n.props.computed) {
+                                const objRef = n.props.object;
+                                const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
+                                if (objNode && objNode.type === 'ThisExpression') {
+                                    const propRef = n.props.property;
+                                    const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                                    if (propNode && propNode.type === 'Identifier') {
+                                        const propName = propNode.props.name;
+                                        if (propToIndex.has(propName)) {
+                                            const idx = propToIndex.get(propName);
+                                            const tIdNode = {
+                                                type: 'Identifier',
+                                                irNodeId: generateIrId_12(),
+                                                props: {
+                                                    name: '_t'
+                                                },
+                                                children: []
+                                            };
+                                            const numLiteralNode = {
+                                                type: 'NumericLiteral',
+                                                irNodeId: generateIrId_12(),
+                                                props: {
+                                                    value: idx
+                                                },
+                                                children: []
+                                            };
+                                            return {
+                                                type: 'MemberExpression',
+                                                irNodeId: generateIrId_12(),
+                                                props: {
+                                                    ...newProps,
+                                                    object: {
+                                                        type: 'ref',
+                                                        irNodeId: tIdNode.irNodeId
+                                                    },
+                                                    property: {
+                                                        type: 'ref',
+                                                        irNodeId: numLiteralNode.irNodeId
+                                                    },
+                                                    computed: true
+                                                },
+                                                children: [tIdNode, numLiteralNode]
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                            const childIdMap = new Map();
+                            for (let i = 0; i < n.children.length; i++) {
+                                childIdMap.set(n.children[i].irNodeId, newChildren[i].irNodeId);
+                            }
+                            for (const [key, val] of Object.entries(newProps)) {
+                                if (Array.isArray(val)) {
+                                    newProps[key] = val.map(ref => {
+                                        if (ref && ref.type === 'ref') {
+                                            if (childIdMap.has(ref.irNodeId)) {
+                                                return {
+                                                    type: 'ref',
+                                                    irNodeId: childIdMap.get(ref.irNodeId)
+                                                };
+                                            }
+                                        }
+                                        return ref;
+                                    });
+                                } else if (val && typeof val === 'object' && val.type === 'ref') {
+                                    const refNodeId = val.irNodeId;
+                                    if (childIdMap.has(refNodeId)) {
+                                        newProps[key] = {
+                                            type: 'ref',
+                                            irNodeId: childIdMap.get(refNodeId)
+                                        };
+                                    }
+                                }
+                            }
+                            return {
+                                type: n.type,
+                                irNodeId: generateIrId_12(),
+                                props: newProps,
+                                children: newChildren
+                            };
+                        };
+                        let factoryBodyNode;
+                        if (constructorNode && constructorNode.props.body) {
+                            const constrBodyNode = snapshot.nodeMap.get(constructorNode.props.body.irNodeId);
+                            factoryBodyNode = cloneConstructorBody(constrBodyNode);
+                        } else {
+                            factoryBodyNode = {
+                                type: 'BlockStatement',
+                                irNodeId: generateIrId_12(),
+                                props: {
+                                    body: []
+                                },
+                                children: []
+                            };
+                        }
+                        const tReturnIdNode = {
+                            type: 'Identifier',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                name: '_t'
+                            },
+                            children: []
+                        };
+                        const returnNode = {
+                            type: 'ReturnStatement',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                argument: {
+                                    type: 'ref',
+                                    irNodeId: tReturnIdNode.irNodeId
+                                }
+                            },
+                            children: [tReturnIdNode]
+                        };
+                        const bodyRefs = [{
+                            type: 'ref',
+                            irNodeId: arrayDeclNode.irNodeId
+                        }];
+                        factoryBodyNode.children.push(arrayDeclNode);
+                        const origBodyRefs = factoryBodyNode.props.body || [];
+                        for (const ref of origBodyRefs) {
+                            bodyRefs.push(ref);
+                        }
+                        bodyRefs.push({
+                            type: 'ref',
+                            irNodeId: returnNode.irNodeId
+                        });
+                        factoryBodyNode.children.push(returnNode);
+                        factoryBodyNode.props.body = bodyRefs;
+                        const factoryFuncNameNode = {
+                            type: 'Identifier',
+                            irNodeId: factoryFuncDeclId,
+                            props: {
+                                name: factoryFuncName
+                            },
+                            children: []
+                        };
+                        factoryFuncNode = {
+                            type: 'FunctionDeclaration',
+                            irNodeId: generateIrId_12(),
+                            props: {
+                                id: {
+                                    type: 'ref',
+                                    irNodeId: factoryFuncNameNode.irNodeId
+                                },
+                                params: paramsRefs,
+                                body: {
+                                    type: 'ref',
+                                    irNodeId: factoryBodyNode.irNodeId
+                                }
+                            },
+                            children: [factoryFuncNameNode, ...factoryParamsChildren, factoryBodyNode]
+                        };
+                    }
+                    newProgBase.children.unshift(factoryFuncNode);
+                    newProgBase.props.body.unshift({
+                        type: 'ref',
+                        irNodeId: factoryFuncNode.irNodeId
+                    });
+                    currentProg = newProgBase;
+                }
+                console.debug(`[TransformRule] ${ClassToTupleRule.id} rewritten successfully.`);
+                return [currentProg];
+            }
+        };
+        function generateIrId_13() {
+            return `ir_cloned_${Math.random().toString(36).substring(2, 9)}`;
+        }
+        function generateVarName(originalName) {
+            return `${originalName}_${Math.random().toString(36).substring(2, 6)}`;
+        }
+        class IRNodeCloner {
+            static clone(rootNode, snapshot, substituteMap) {
+                const localDecls = new Set();
+                const collectDecls = node => {
+                    if (node.type === 'VariableDeclarator' || node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression') {
+                        const idRef = node.props.id;
+                        if (idRef && idRef.type === 'ref') localDecls.add(idRef.irNodeId);
+                    }
+                    if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type)) {
+                        if (Array.isArray(node.props.params)) {
+                            for (const param of node.props.params) {
+                                if (param && param.type === 'ref') localDecls.add(param.irNodeId);
+                            }
+                        }
+                    }
+                    for (const child of node.children) collectDecls(child);
+                };
+                collectDecls(rootNode);
+                const declToNewName = new Map();
+                for (const declId of localDecls) {
+                    const declNode = snapshot.nodeMap.get(declId);
+                    if (declNode && declNode.props.name) {
+                        declToNewName.set(declId, generateVarName(declNode.props.name));
+                    }
+                }
+                const oldToNewId = new Map();
+                const cloneNode = node => {
+                    if (substituteMap && node.type === 'Identifier') {
+                        const declId = snapshot.refToDeclMap.get(node.irNodeId) || node.props._declId || node.irNodeId;
+                        if (substituteMap.has(declId)) {
+                            const argNode = substituteMap.get(declId);
+                            const clonedArg = IRNodeCloner.clone(argNode, snapshot); // 親ノードからの参照（ref）を更新するため、元のIdentifierのIDと新しいIDの対応を記録
+                            oldToNewId.set(node.irNodeId, clonedArg.irNodeId);
+                            return clonedArg;
+                        }
+                    }
+                    const newId = generateIrId_13();
+                    oldToNewId.set(node.irNodeId, newId);
+                    const newChildren = [];
+                    for (const child of node.children) {
+                        newChildren.push(cloneNode(child));
+                    }
+                    let newName = node.props.name;
+                    if (node.type === 'Identifier') {
+                        if (localDecls.has(node.irNodeId)) {
+                            newName = declToNewName.get(node.irNodeId) || newName;
+                        } else {
+                            const resolvedDeclId = snapshot.refToDeclMap.get(node.irNodeId);
+                            if (resolvedDeclId && declToNewName.has(resolvedDeclId)) {
+                                newName = declToNewName.get(resolvedDeclId);
+                            }
+                        }
+                    }
+                    return {
+                        type: node.type,
+                        irNodeId: newId,
+                        props: {
+                            ...node.props,
+                            name: newName
+                        },
+                        children: newChildren
+                    };
+                };
+                const clonedRoot = cloneNode(rootNode);
+                const updateRefs = node => {
+                    for (const [key, val] of Object.entries(node.props)) {
+                        if (Array.isArray(val)) {
+                            node.props[key] = val.map(item => {
+                                const itemAny = item;
+                                if (itemAny && itemAny.type === 'ref' && oldToNewId.has(itemAny.irNodeId)) {
+                                    return {
+                                        type: 'ref',
+                                        irNodeId: oldToNewId.get(itemAny.irNodeId)
+                                    };
+                                }
+                                return item;
+                            });
+                        } else if (val && val.type === 'ref' && oldToNewId.has(val.irNodeId)) {
+                            node.props[key] = {
+                                type: 'ref',
+                                irNodeId: oldToNewId.get(val.irNodeId)
+                            };
+                        }
+                    }
+                    for (const child of node.children) updateRefs(child);
+                };
+                updateRefs(clonedRoot);
+                return clonedRoot;
+            }
+        }
+        function generateIrId_14() {
+            return `ir_inlined_${Math.random().toString(36).substring(2, 9)}`;
+        } // 複製が安全なノードの判定
+        const isAlwaysSafeToDuplicate = node => node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral' || node.type === 'NullLiteral'; // 副作用を持たない式かどうか判定する（配列アクセスなどは安全）
+        function hasSideEffects(node, state) {
+            if (isAlwaysSafeToDuplicate(node)) return false;
+            if (node.type === 'MemberExpression') {
+                const objRef = node.props.object;
+                const objNode = objRef ? node.children.find(c => c.irNodeId === objRef.irNodeId) : null;
+                if (objNode && hasSideEffects(objNode, state)) return true;
+                if (node.props.computed) {
+                    const propRef = node.props.property;
+                    const propNode = propRef ? node.children.find(c => c.irNodeId === propRef.irNodeId) : null;
+                    if (propNode && hasSideEffects(propNode, state)) return true;
+                }
+                return false;
+            }
+            if (node.type === 'ArrayExpression') {
+                return node.children.some(c => hasSideEffects(c, state));
+            }
+            if (node.type === 'BinaryExpression' || node.type === 'LogicalExpression') {
+                return node.children.some(c => hasSideEffects(c, state));
+            }
+            if (node.type === 'UnaryExpression') {
+                // delete は副作用あり
+                if (node.props.operator === 'delete') return true;
+                return node.children.some(c => hasSideEffects(c, state));
+            } // CallExpression, AssignmentExpression, NewExpression, UpdateExpression(++, --) 等は副作用ありとみなす
+            return true;
+        } // getFunctionNodeはAnalysisSnapshotのresolveFunctionDefinitionに移行されました
+        function isRecursive(funcNode, declId, state) {
+            let recursive = false;
+            const walk = n => {
+                if (recursive) return;
+                if (n.type === 'Identifier' && state.analysisSnapshot.refToDeclMap.get(n.irNodeId) === declId) {
+                    recursive = true;
+                    return;
+                }
+                if (n.children) n.children.forEach(walk);
+            };
+            walk(funcNode);
+            return recursive;
+        }
+        function getLocalNames(node) {
+            const names = new Set();
+            const walk = n => {
+                if (n.type === 'VariableDeclarator') {
+                    const idRef = n.props.id;
+                    const idNode = idRef ? n.children.find(c => c.irNodeId === idRef.irNodeId) : null;
+                    if (idNode && idNode.type === 'Identifier') names.add(idNode.props.name);
+                }
+                if (n.children) n.children.forEach(walk);
+            };
+            walk(node);
+            return names;
+        }
+        function countParamUsage(paramDeclId, bodyNode, state) {
+            let count = 0;
+            const walk = n => {
+                if (n.type === 'Identifier') {
+                    const declId = state.analysisSnapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
+                    if (declId === paramDeclId) {
+                        const parentId = state.analysisSnapshot.parentMap.get(n.irNodeId);
+                        let isKey = false;
+                        if (parentId) {
+                            const parent = state.analysisSnapshot.nodeMap.get(parentId);
+                            if (parent && parent.type === 'MemberExpression' && !parent.props.computed && parent.props.property?.irNodeId === n.irNodeId) isKey = true;
+                            if (parent && parent.type === 'ObjectProperty' && parent.props.key?.irNodeId === n.irNodeId) isKey = true;
+                        }
+                        if (!isKey) count++;
+                    }
+                }
+                if (n.children) n.children.forEach(walk);
+            };
+            walk(bodyNode);
+            return count;
+        }
+        const FunctionInliningRule = {
+            id: 'macro:function-inlining',
+            type: 'macro',
+            name: '完全関数インライン展開 (Full Inlining)',
+            description: '関数の呼び出し先を解析し、安全な引数を内部に直接埋め込んで展開します。',
+            defaultEnabled: true,
+            match: (node, state) => {
+                if (node.type !== 'CallExpression') return false;
+                const callNode = node;
+                if (!callNode.props.callee) return false;
+                const calleeNode = callNode.children.find(c => c.irNodeId === callNode.props.callee.irNodeId);
+                if (!calleeNode) return false;
+                const fnNode = state.analysisSnapshot.resolveFunctionDefinition(calleeNode.irNodeId);
+                if (!fnNode) return false;
+                if (fnNode.props.async || fnNode.props.generator) return false;
+                let usesThisOrArguments = false;
+                const walkForThis = n => {
+                    if (n.type === 'ThisExpression' || n.type === 'Identifier' && n.props.name === 'arguments') {
+                        usesThisOrArguments = true;
+                    }
+                    if (n.children) n.children.forEach(walkForThis);
+                };
+                walkForThis(fnNode);
+                if (usesThisOrArguments) return false;
+                if (calleeNode.type === 'Identifier') {
+                    const declId = state.analysisSnapshot.refToDeclMap.get(calleeNode.irNodeId);
+                    if (declId && isRecursive(fnNode, declId, state)) return false;
+                }
+                let refCount = 1;
+                if (calleeNode.type === 'Identifier') {
+                    const declId = state.analysisSnapshot.refToDeclMap.get(calleeNode.irNodeId);
+                    if (declId) refCount = state.analysisSnapshot.referenceCounts.get(declId) || 1;
+                }
+                if (refCount > 1) {
+                    const cost = CostEstimator.estimate(fnNode, false);
+                    if (cost > 60) return false;
+                }
+                return true;
+            },
+            candidates: (node, state) => {
+                const callNode = node;
+                const calleeNode = callNode.children.find(c => c.irNodeId === callNode.props.callee.irNodeId);
+                const fnNode = state.analysisSnapshot.resolveFunctionDefinition(calleeNode.irNodeId);
+                const localNames = getLocalNames(fnNode);
+                const bodyRef = fnNode.props.body;
+                if (!bodyRef) return [];
+                const bodyNode = fnNode.children.find(c => c.irNodeId === bodyRef.irNodeId);
+                if (!bodyNode) return [];
+                const paramToArgNodeMap = new Map();
+                const remainingParams = [];
+                const remainingArgs = [];
+                const remainingParamsChildren = [];
+                const remainingArgsChildren = [];
+                const params = fnNode.props.params || [];
+                const args = callNode.props.arguments || [];
+                for (let i = 0; i < params.length; i++) {
+                    const paramRef = params[i];
+                    const paramNode = fnNode.children.find(c => c.irNodeId === paramRef.irNodeId);
+                    if (!paramNode) continue;
+                    let actualArgNode = args[i] ? callNode.children.find(c => c.irNodeId === args[i].irNodeId) : null;
+                    let targetDeclId = paramNode.irNodeId;
+                    if (paramNode.type === 'AssignmentPattern') {
+                        const leftRef = paramNode.props.left;
+                        if (leftRef) targetDeclId = leftRef.irNodeId;
+                        if (!actualArgNode) {
+                            const rightRef = paramNode.props.right;
+                            if (rightRef) actualArgNode = paramNode.children.find(c => c.irNodeId === rightRef.irNodeId) || null;
+                        }
+                    }
+                    if (actualArgNode) {
+                        let isSafeToSub = false;
+                        const usageCount = countParamUsage(targetDeclId, bodyNode, state);
+                        if (usageCount <= 1 && !hasSideEffects(actualArgNode, state)) {
+                            isSafeToSub = true;
+                            if (actualArgNode.type === 'Identifier') {
+                                if (localNames.has(actualArgNode.props.name)) isSafeToSub = false;
+                            }
+                        } else if (isAlwaysSafeToDuplicate(actualArgNode)) {
+                            if (actualArgNode.type === 'Identifier') {
+                                if (!localNames.has(actualArgNode.props.name)) isSafeToSub = true;
+                            } else {
+                                isSafeToSub = true;
+                            }
+                        }
+                        if (isSafeToSub) {
+                            paramToArgNodeMap.set(targetDeclId, actualArgNode);
+                        } else {
+                            remainingParams.push(paramRef);
+                            remainingParamsChildren.push(paramNode);
+                            if (args[i]) {
+                                // 引数が実際に渡されていた場合のみIIFEの引数に追加
+                                remainingArgs.push(args[i]);
+                                remainingArgsChildren.push(actualArgNode);
+                            }
+                        }
+                    } else {
+                        remainingParams.push(paramRef);
+                        remainingParamsChildren.push(paramNode);
+                    }
+                }
+                for (let i = params.length; i < args.length; i++) {
+                    const argRef = args[i];
+                    const argNode = callNode.children.find(c => c.irNodeId === argRef.irNodeId);
+                    if (argNode) {
+                        remainingArgs.push(argRef);
+                        remainingArgsChildren.push(argNode);
+                    }
+                }
+                let isSingleReturn = false;
+                let singleReturnValue = null;
+                if (bodyNode.type === 'BlockStatement') {
+                    const stmts = bodyNode.props.body || [];
+                    if (stmts.length === 1) {
+                        const stmtNode = bodyNode.children.find(c => c.irNodeId === stmts[0].irNodeId);
+                        if (stmtNode && stmtNode.type === 'ReturnStatement') {
+                            isSingleReturn = true;
+                            const argRef = stmtNode.props.argument;
+                            if (argRef) singleReturnValue = stmtNode.children.find(c => c.irNodeId === argRef.irNodeId) || null;
+                        }
+                    }
+                } else {
+                    isSingleReturn = true;
+                    singleReturnValue = bodyNode;
+                }
+                const clonedBody = IRNodeCloner.clone(bodyNode, state.analysisSnapshot, paramToArgNodeMap); // 引数がすべて完全に埋め込み（置換）完了したかを判定
+                if (isSingleReturn && remainingArgs.length === 0 && remainingParams.length === 0) {
+                    if (!singleReturnValue) {
+                        return [{
+                            type: 'Identifier',
+                            irNodeId: generateIrId_14(),
+                            props: {
+                                name: 'undefined'
+                            },
+                            children: []
+                        }];
+                    }
+                    const extractExpr = bNode => {
+                        if (bNode.type === 'BlockStatement') {
+                            const rStmtRef = bNode.props.body[0];
+                            const rNode = bNode.children.find(c => c.irNodeId === rStmtRef.irNodeId);
+                            const rArgRef = rNode.props.argument;
+                            return rNode.children.find(c => c.irNodeId === rArgRef.irNodeId);
+                        }
+                        return bNode;
+                    };
+                    console.debug(`[TransformRule] ${FunctionInliningRule.id}: Inlined directly as Expression.`);
+                    return [extractExpr(clonedBody)];
+                }
+                const iifeFnType = fnNode.type === 'FunctionDeclaration' || fnNode.type === 'FunctionExpression' ? 'FunctionExpression' : 'ArrowFunctionExpression';
+                const arrowId = generateIrId_14();
+                const arrowNode = {
+                    type: iifeFnType,
+                    irNodeId: arrowId,
+                    props: {
+                        id: null,
+                        params: remainingParams,
+                        body: {
+                            type: 'ref',
+                            irNodeId: clonedBody.irNodeId
+                        },
+                        async: false,
+                        generator: false
+                    },
+                    children: [...remainingParamsChildren, clonedBody]
+                };
+                const iifeNode = {
+                    type: 'CallExpression',
+                    irNodeId: generateIrId_14(),
+                    props: {
+                        callee: {
+                            type: 'ref',
+                            irNodeId: arrowId
+                        },
+                        arguments: remainingArgs
+                    },
+                    children: [arrowNode, ...remainingArgsChildren]
+                };
+                console.debug(`[TransformRule] ${FunctionInliningRule.id}: Inlined as IIFE (${iifeFnType}).`);
+                return [iifeNode];
+            }
+        };
         class TransformRegistry {
             /**
                * Get all registered micro rules.
                */
             static getMicroRules() {
-                return [ConstantFoldingRule, IfToTernaryRule, DeadStoreEliminationRule, CopyPropagationRule, ConstantPropagationRule, ObjectPropertyPropagationRule, LogicalSimplificationRule, PureFunctionEvaluationRule, UnreachableCodeEliminationRule, FunctionInliningRule];
+                return [ConstantFoldingRule, IfToTernaryRule, DeadStoreEliminationRule, CopyPropagationRule, ConstantPropagationRule, ObjectPropertyPropagationRule, LogicalSimplificationRule, PureFunctionEvaluationRule, UnreachableCodeEliminationRule];
             }
             /**
                * Get all registered macro rules.
                */
             static getMacroRules() {
-                return [DeadCodeEliminationRule, GlobalAliasingRule, TailDuplicationRule];
+                return [DeadCodeEliminationRule, GlobalAliasingRule, TailDuplicationRule, ClassToTupleRule, FunctionInliningRule];
             }
             /**
                * Get all registered rules (micro and macro).
@@ -6323,10 +7570,10 @@
                 const maxIterations = config.maxIterations !== undefined ? config.maxIterations : 5;
                 const isTerserEnabled = !!config.terserCompress;
                 let currentRoot = initialRoot;
-                let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot), isTerserEnabled);
+                let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot, {}, null, config.services || {}), isTerserEnabled);
                 for (let iter = 0; iter < maxIterations; iter++) {
                     console.debug(`[IROptimizer] Iteration ${iter + 1}/${maxIterations} starting with Cost: ${lastBestCost}`);
-                    let currentStates = [new CompilationState(currentRoot)];
+                    let currentStates = [new CompilationState(currentRoot, {}, null, config.services || {})];
                     let bestOverallState = currentStates[0];
                     let bestOverallCost = lastBestCost; // PhaseScheduler から「探索リソースの配分計画」を受け取る
                     const schedules = PhaseScheduler.getSchedules(baseBeamWidth, config, config.enabledRuleIds);
@@ -6611,8 +7858,31 @@
                     this.logger({
                         type: 'info',
                         msg: `Optimizing AST (Golf) for ${cacheKey}`
-                    });
-                    optimizedIR = IROptimizer.optimize(linkedIR, this.config);
+                    }); // 評価ロジックを定義し、オプティマイザに注入する
+                    const evaluatePureFunction = (funcNode, args) => {
+                        const Babel = window.Babel;
+                        if (!Babel) throw new Error("Babel not available");
+                        const ast = IRtoASTConverter.convert(funcNode);
+                        const {
+                            code: funcCode
+                        } = Babel.transformFromAst({
+                            type: 'Program',
+                            body: [ast]
+                        }, '', {
+                            presets: [],
+                            ast: false
+                        });
+                        const argStrings = args.map(arg => typeof arg === 'string' ? JSON.stringify(arg) : String(arg));
+                        const iifeCode = `return (${funcCode})(${argStrings.join(', ')});`;
+                        return new Function(iifeCode)();
+                    };
+                    const optimizerConfig = {
+                        ...this.config,
+                        services: {
+                            evaluatePureFunction
+                        }
+                    };
+                    optimizedIR = IROptimizer.optimize(linkedIR, optimizerConfig);
                 }
                 this.extractExternalImports(optimizedIR); // 5. Generate JS code
                 let jsCode = SourceAnalyzerFacade.generateFromIR(optimizedIR); // 6. Recursively compile nested workers
