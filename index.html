@@ -261,7 +261,7 @@
 
 <body class="flex flex-col antialiased bg-[#2b2f35] font-sans min-h-screen text-[#e0e6ed]">
     <div id="root" class="flex flex-col flex-1"></div>
-    <script type="module" id="bundle_jm1k414">
+    <script type="module" id="bundle_main">
         "use strict";
         (function () {
             if (typeof window !== 'undefined') {
@@ -285,7 +285,7 @@
                             }
                         }
                         if (chunkId) {
-                            var script = document.getElementById("bundle_jm1k414") || document.scripts[document.scripts.length - 1];
+                            var script = document.getElementById("bundle_main") || document.scripts[document.scripts.length - 1];
                             if (script) {
                                 if (isShared) {
                                     return 'data:application/javascript,' + encodeURIComponent(script.textContent) + '#__chunkId=' + chunkId;
@@ -540,9 +540,9 @@
                 }
             }
         }
-        function __getChunkUrl_aq1nals(chunkId, isShared) {
+        function __getChunkUrl_2(chunkId, isShared) {
             if (typeof document !== 'undefined') {
-                var script = document.getElementById("bundle_jm1k414") || document.scripts[document.scripts.length - 1];
+                var script = document.getElementById("bundle_main") || document.scripts[document.scripts.length - 1];
                 if (isShared) {
                     return 'data:application/javascript,' + encodeURIComponent(script.textContent) + '#__chunkId=' + chunkId;
                 }
@@ -555,12 +555,12 @@
                 return baseUrl + '#__chunkId=' + chunkId;
             }
         }
-        function __spawn_2dg1sk3(workerId, workerType, options) {
+        function __spawn_1(workerId, workerType, options) {
             var opts = Object.assign({
                 type: 'module'
             }, options);
             var isShared = workerType === 'SharedWorker';
-            var url = __getChunkUrl_aq1nals(workerId, isShared);
+            var url = __getChunkUrl_2(workerId, isShared);
             return isShared ? new SharedWorker(url, opts) : new Worker(url, opts);
         }
         var _chunkId = typeof __chunkId !== 'undefined' ? __chunkId : typeof location !== 'undefined' && location.hash && location.hash.indexOf('__chunkId=') !== -1 ? location.hash.split('__chunkId=')[1].split('&')[0] : typeof location !== 'undefined' && location.search && location.search.indexOf('__chunkId=') !== -1 ? new URLSearchParams(location.search).get('__chunkId') : null;
@@ -1000,8 +1000,8 @@
                                     }
                                     resultHtml = HtmlMinifier.minify(resultHtml);
                                     if (config.htmlOptJs !== false && jsCode.trim() !== '') {
-                                        const lt = String.fromCharCode(60); // config から一貫した bundleId を取得
-                                        const bundleId = config.bundleId || `bundle_${Math.random().toString(36).substring(2, 9)}`;
+                                        const lt = String.fromCharCode(60); // 一貫した bundleId を取得
+                                        const bundleId = config.bundleId || 'bundle_default';
                                         const safeJsCode = jsCode.replace(/<\/script>/gi, lt + '\\/script>'); // id="${bundleId}" を付与
                                         const scriptTag = `${lt}script type="module" id="${bundleId}">\n${safeJsCode}\n${lt}/script>`;
                                         const bodyMatch = resultHtml.match(/<\/body>/i);
@@ -1079,7 +1079,7 @@
                                     modifiedHtml = HtmlMinifier.minify(modifiedHtml);
                                     if (config.htmlOptJs !== false && jsCode.trim() !== '') {
                                         const lt = String.fromCharCode(60);
-                                        const bundleId = config.bundleId || `bundle_${Math.random().toString(36).substring(2, 9)}`;
+                                        const bundleId = config.bundleId || 'bundle_default';
                                         const scriptStart = lt + `script type="module" id="${bundleId}">\n"use strict";\n`;
                                         const scriptEnd = '\n' + lt + "/script>";
                                         const bodyEndRegex = /<\/body>/i;
@@ -1108,11 +1108,12 @@
                         class CompilerPipelineFacade {
                             // 1. スレッド間で使い回すシングルトンWorker
                             static workerInstance = null; // 2. 現在実行中の最新の要求を追跡するID
-                            static currentRequestId = null;
+                            static currentRequestId = null; // 3. メッセージ通信用のシーケンシャルカウンター
+                            static messageCounter = 0;
                             static getOrCreateWorker() {
                                 if (!this.workerInstance) {
                                     // Viteの module type worker 生成機能を利用する
-                                    this.workerInstance = __spawn_2dg1sk3("chunk_proj_src_pipeline_compiler_worker_0", "Worker", {
+                                    this.workerInstance = __spawn_1("chunk_proj_src_pipeline_compiler_worker_0", "Worker", {
                                         type: 'module'
                                     });
                                 }
@@ -1123,15 +1124,15 @@
                                     try {
                                         logger({
                                             type: 'info',
-                                            msg: '=== 🚀 Initializing New Compiler Pipeline ==='
-                                        }); // --- 🔍 デバッグ: 渡ってきたConfigの状態を確認 ---
+                                            msg: 'Initializing Compiler Pipeline'
+                                        }); // 設定情報の整合性確認
                                         logger({
                                             type: 'info',
                                             msg: `[Config Debug] golfEnabled: ${state.config.golfEnabled}, enableMangle: ${state.config.enableMangle}, terserCompress: ${state.config.terserCompress}`
                                         });
-                                        const requestId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-                                        CompilerPipelineFacade.currentRequestId = requestId; // sessionBundleId を一貫して使用するために決定する
-                                        const sessionBundleId = `bundle_${Math.random().toString(36).substring(2, 9)}`;
+                                        const requestId = `req_${++CompilerPipelineFacade.messageCounter}`;
+                                        CompilerPipelineFacade.currentRequestId = requestId;
+                                        const sessionBundleId = 'bundle_main';
                                         logger({
                                             type: 'info',
                                             msg: 'Demultiplexing HTML assets...'
@@ -1173,7 +1174,7 @@
                                             }
                                         } else {
                                             mainEntryPaths.push('input.js');
-                                        } // --- 🔍 デバッグ: 抽出されたエントリーポイントを確認 ---
+                                        } // エントリーポイントの確認
                                         logger({
                                             type: 'info',
                                             msg: `[Entry Debug] Detected Main Entries: ${mainEntryPaths.join(', ')}`
@@ -1222,7 +1223,7 @@
                                                 const finalSize = new Blob([outputCode]).size;
                                                 logger({
                                                     type: 'success',
-                                                    msg: '=== 🎉 Compilation complete ==='
+                                                    msg: 'Compilation complete'
                                                 });
                                                 resolve({
                                                     code: outputCode,
@@ -1241,7 +1242,7 @@
                                             }
                                         };
                                         worker.onerror = err => {
-                                            // 変更: message が空の場合にオブジェクト全体を文字列化して原因を炙り出す
+                                            // messageが空の場合にオブジェクト全体をシリアライズして原因を特定する
                                             const errMsg = err.message || err.error && err.error.message || JSON.stringify(err, ['message', 'filename', 'lineno', 'colno', 'type']);
                                             logger({
                                                 type: 'error',
@@ -4446,10 +4447,10 @@
                         scopes: new Map(),
                         escapedVars: new Set(),
                         errors: []
-                    }; // 名前衝突を避けるためのユニークなボイラープレート関数名とフラグ
-                    const spawnFuncName = `__spawn_${Math.random().toString(36).substring(2, 9)}`;
+                    }; // 関数名衝突を回避するための識別子
+                    const spawnFuncName = getDeterministicId('__spawn');
                     let needsSpawnBoilerplate = false;
-                    const chunkUrlFuncName = `__getChunkUrl_${Math.random().toString(36).substring(2, 9)}`;
+                    const chunkUrlFuncName = getDeterministicId('__getChunkUrl');
                     let needsChunkUrlBoilerplate = false;
                     const linkedRoot = {
                         type: 'IRRoot',
@@ -4966,7 +4967,7 @@
                                 return false;
                             };
                             const splitAndGuardVariableDeclaration = stmt => {
-                                const genId = () => `ir_split_var_${Math.random().toString(36).substring(2, 9)}`;
+                                const genId = () => getDeterministicId('ir_split_var');
                                 const declNode = {
                                     type: 'VariableDeclaration',
                                     irNodeId: genId(),
@@ -4978,7 +4979,7 @@
                                 };
                                 const assignmentStmts = [];
                                 const cloneNode = n => {
-                                    const newId = `ir_clone_${Math.random().toString(36).substring(2, 9)}`;
+                                    const newId = getDeterministicId('ir_clone');
                                     const newChildren = n.children ? n.children.map(cloneNode) : [];
                                     const newProps = n.props ? {
                                         ...n.props
@@ -5167,7 +5168,7 @@
                                                 commonStatements.push(s);
                                             }
                                         } else {
-                                            const genId = () => `ir_side_effect_guard_${Math.random().toString(36).substring(2, 9)}`;
+                                            const genId = () => getDeterministicId('ir_side_effect_guard');
                                             const typeOfWinNode = {
                                                 type: 'UnaryExpression',
                                                 irNodeId: genId(),
@@ -11704,6 +11705,7 @@
                 logger;
                 compiledWorlds = new Map();
                 externalImports = new Set();
+                _blobIrCounter = 0;
                 parsedIRCache = null;
                 constructor(vfs, config, filterOptions, logger) {
                     this.vfs = vfs;
@@ -11761,7 +11763,7 @@
                     });
                 }
                 createWorkerBlobIR(workerCode) {
-                    const genId = () => `ir_wblob_${Math.random().toString(36).substring(2, 9)}`;
+                    const genId = () => `ir_wblob_${(++this._blobIrCounter).toString(36)}`;
                     const escapedRaw = workerCode.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
                     const tmplElement = {
                         type: 'TemplateElement',
@@ -12310,4 +12312,3 @@
 </body>
 
 </html>
-	
