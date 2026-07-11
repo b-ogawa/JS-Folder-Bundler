@@ -296,6 +296,30 @@ export class WorldCompiler {
             try {
                 const ir = SourceAnalyzerFacade.analyzeToIR(templateCode, '_boilerplate_template.js', this.vfs);
                 const programNode = ir.children[0]?.children?.find(c => c.type === 'Program');
+                
+                if (programNode) {
+                    // スコープ解析結果から Identifier の参照関係（_declId）を AST ノードに直接焼き付ける
+                    const refToDeclMap = new Map<string, string>();
+                    for (const [declId, binding] of ir.scopeInfo.bindings.entries()) {
+                        refToDeclMap.set(declId, declId);
+                        if (binding.references) {
+                            for (const refId of binding.references) {
+                                refToDeclMap.set(refId, declId);
+                            }
+                        }
+                    }
+                    const walk = (node: IRNode) => {
+                        if (node.type === 'Identifier') {
+                            const declId = refToDeclMap.get(node.irNodeId);
+                            if (declId) {
+                                node.props['_declId'] = declId;
+                            }
+                        }
+                        if (node.children) node.children.forEach(walk);
+                    };
+                    programNode.children.forEach(walk);
+                }
+                
                 return programNode?.children || [];
             } catch (err: any) {
                 this.logger({ type: 'error', msg: `[TemplateParser] Failed to parse AST template: ${err.message}` });

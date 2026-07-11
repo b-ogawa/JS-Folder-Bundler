@@ -5,6 +5,22 @@ import { MergeContext } from '../MergeContext';
 export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
     public readonly name = 'AssembleFinalBundleStage';
 
+    // ボイラープレート（ランタイムポリフィル）内の識別子をDCEの削除対象から保護する
+    private protectFromDCE(nodes: IRNode[], context: MergeContext) {
+        const walk = (node: IRNode) => {
+            if (node.type === 'Identifier') {
+                context.mergedScopeInfo.escapedVars.add(node.irNodeId);
+                if (node.props['_declId']) {
+                    context.mergedScopeInfo.escapedVars.add(node.props['_declId']);
+                }
+            }
+            if (node.children) {
+                node.children.forEach(walk);
+            }
+        };
+        nodes.forEach(walk);
+    }
+
     execute(context: MergeContext): void {
         const programNode = context.linkedRoot.children[0].children[0];
         programNode.children = [];
@@ -18,13 +34,14 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
             }
             const workerPolyfillCode = `
                 (function() {
-                    if (typeof window !== 'undefined') {
+                    var _g = typeof globalThis !== 'undefined' ? globalThis : self;
+                    if (_g.window) {
                         var chunkMap = { ${mapEntries} };
                         
                         function getInterceptedUrl(url, isShared) {
                             var urlStr = (typeof url === 'string') ? url : (url && url.href ? url.href : String(url));
-                            if (urlStr.indexOf(window.location.origin) === 0) {
-                                urlStr = urlStr.substring(window.location.origin.length);
+                            if (urlStr.indexOf(_g.location.origin) === 0) {
+                                urlStr = urlStr.substring(_g.location.origin.length);
                             }
                             if (!urlStr.startsWith('blob:') && !urlStr.startsWith('http:') && !urlStr.startsWith('https:') && !urlStr.startsWith('data:')) {
                                 var cleanUrl = urlStr.split('?')[0].replace(/^\\.?\\//, '').replace(/\\.js$/, '');
@@ -38,42 +55,44 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                                     }
                                 }
                                 if (chunkId) {
-                                    var script = document.getElementById("${context.bundleId || 'bundle_default'}") || document.scripts[document.scripts.length - 1];
+                                    var script = _g.document.getElementById("${context.bundleId || 'bundle_default'}") || _g.document.scripts[_g.document.scripts.length - 1];
                                     if (script) {
                                         var code = "var __chunkId = '" + chunkId + "';\\n" + script.textContent;
                                         if (isShared) {
                                             return 'data:application/javascript,' + encodeURIComponent(code);
                                         }
                                         var blob = new Blob([code], { type: 'application/javascript' });
-                                        return URL.createObjectURL(blob);
+                                        return _g.URL.createObjectURL(blob);
                                     }
                                 }
                             }
                             return null;
                         }
 
-                        if (window.Worker) {
-                            var OriginalWorker = window.Worker;
-                            window.Worker = function(url, options) {
+                        if (_g.Worker) {
+                            var OriginalWorker = _g.Worker;
+                            _g.Worker = function(url, options) {
                                 var intercepted = getInterceptedUrl(url, false);
                                 return new OriginalWorker(intercepted || url, options);
                             };
-                            window.Worker.prototype = OriginalWorker.prototype;
+                            _g.Worker.prototype = OriginalWorker.prototype;
                         }
 
-                        if (window.SharedWorker) {
-                            var OriginalSharedWorker = window.SharedWorker;
-                            window.SharedWorker = function(url, options) {
+                        if (_g.SharedWorker) {
+                            var OriginalSharedWorker = _g.SharedWorker;
+                            _g.SharedWorker = function(url, options) {
                                 var intercepted = getInterceptedUrl(url, true);
                                 return new OriginalSharedWorker(intercepted || url, options);
                             };
-                            window.SharedWorker.prototype = OriginalSharedWorker.prototype;
+                            _g.SharedWorker.prototype = OriginalSharedWorker.prototype;
                         }
                     }
                 })();
             `;
             const polyfillAst = context.parseTemplate(workerPolyfillCode);
             if (polyfillAst && polyfillAst.length > 0) {
+                // ★DCEからの保護を適用
+                this.protectFromDCE(polyfillAst, context);
                 for (const pNode of polyfillAst.reverse()) {
                     context.commonStatements.unshift(pNode);
                 }
@@ -93,6 +112,8 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                 context.bundleId || 'bundle_default',
                 context.parseTemplate
             );
+            // ★DCEからの保護を適用
+            this.protectFromDCE(boilerplates, context);
             for (const bNode of boilerplates) {
                 programNode.children.push(bNode);
                 programNode.props['body'].push({ type: 'ref', irNodeId: bNode.irNodeId });
@@ -105,6 +126,8 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                 context.chunkUrlFuncName,
                 context.parseTemplate
             );
+            // ★DCEからの保護を適用
+            this.protectFromDCE(boilerplates, context);
             for (const bNode of boilerplates) {
                 programNode.children.push(bNode);
                 programNode.props['body'].push({ type: 'ref', irNodeId: bNode.irNodeId });
@@ -133,7 +156,8 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                 context.mainStatements,
                 context.workerStatementsMap,
                 context.chunkIdMap,
-                context.parseTemplate
+                context.parseTemplate,
+                context // ★引数に追加
             );
             for (const bNode of branchNodes) {
                 programNode.children.push(bNode);
@@ -170,16 +194,17 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
     ): IRNode[] {
         const code = `
             function ${funcName}(chunkId, isShared) {
-                if (typeof document !== 'undefined') {
-                    var script = document.getElementById("${bundleId}") || document.scripts[document.scripts.length - 1];
+                var _g = typeof globalThis !== 'undefined' ? globalThis : self;
+                if (_g.document) {
+                    var script = _g.document.getElementById("${bundleId}") || _g.document.scripts[_g.document.scripts.length - 1];
                     var code = "var __chunkId = '" + chunkId + "';\\n" + script.textContent;
                     if (isShared) {
                         return 'data:application/javascript,' + encodeURIComponent(code);
                     }
                     var blob = new Blob([code], { type: 'application/javascript' });
-                    return URL.createObjectURL(blob);
+                    return _g.URL.createObjectURL(blob);
                 } else {
-                    var baseUrl = self.location.href.split('#')[0].split('?')[0];
+                    var baseUrl = _g.location.href.split('#')[0].split('?')[0];
                     return baseUrl + '#__chunkId=' + chunkId;
                 }
             }
@@ -191,7 +216,8 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
         mainStatements: IRNode[],
         workerStatementsMap: Map<string, IRNode[]>,
         chunkIdMap: Map<string, string>,
-        parseTemplate: (code: string) => IRNode[]
+        parseTemplate: (code: string) => IRNode[],
+        context: MergeContext // ★引数を追加
     ): IRNode[] {
         let workerBranchesCode = '';
         const workerKeys = Array.from(workerStatementsMap.keys()).reverse();
@@ -206,29 +232,35 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
         }
 
         const code = `
+            var _g = typeof globalThis !== 'undefined' ? globalThis : self;
             var _chunkId = typeof __chunkId !== 'undefined' ? __chunkId : (
-                (typeof location !== 'undefined' && location.hash && location.hash.indexOf('__chunkId=') !== -1) ? location.hash.split('__chunkId=')[1].split('&')[0] : 
-                ((typeof location !== 'undefined' && location.search && location.search.indexOf('__chunkId=') !== -1) ? new URLSearchParams(location.search).get('__chunkId') : null)
+                (_g.location && _g.location.hash && _g.location.hash.indexOf('__chunkId=') !== -1) ? _g.location.hash.split('__chunkId=')[1].split('&')[0] : 
+                ((_g.location && _g.location.search && _g.location.search.indexOf('__chunkId=') !== -1) ? new URLSearchParams(_g.location.search).get('__chunkId') : null)
             );
-            var __isWorker = typeof window === 'undefined';
+            var __isWorker = !_g.document;
             
             if (__isWorker) {
                 var __mq = [];
                 var __mo = null;
                 var __hl = [];
-                Object.defineProperty(self, 'onmessage', {
+                var __ns = Object.getOwnPropertyDescriptor(_g, 'onmessage');
+                var __nsSet = __ns ? __ns.set : null;
+                Object.defineProperty(_g, 'onmessage', {
                     configurable: true,
                     get: function() { return __mo; },
                     set: function(v) {
                         __mo = v;
+                        if (__nsSet) {
+                            try { __nsSet.call(_g, v); } catch(e) {}
+                        }
                         if (v && __mq.length > 0) {
                             var q = __mq; __mq = [];
-                            q.forEach(function(e) { v.call(self, e); });
+                            q.forEach(function(e) { v.call(_g, e); });
                         }
                     }
                 });
-                var __oal = self.addEventListener;
-                self.addEventListener = function(type, listener, options) {
+                var __oal = _g.addEventListener;
+                _g.addEventListener = function(type, listener, options) {
                     if (type === 'message') {
                         __hl.push(listener);
                         if (__mq.length > 0) {
@@ -239,11 +271,11 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                             });
                         }
                     }
-                    return __oal.call(self, type, listener, options);
+                    return __oal.call(_g, type, listener, options);
                 };
-                __oal.call(self, 'message', function(e) {
+                __oal.call(_g, 'message', function(e) {
                     if (__mo) {
-                        __mo.call(self, e);
+                        __mo.call(_g, e);
                     } else if (__hl.length === 0) {
                         __mq.push(e);
                     }
@@ -252,21 +284,28 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
             
             if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 var __boot = function() {
-                    requestAnimationFrame(function() {
-                        setTimeout(async function() {
-                            __INJECT_MAIN__();
-                        }, 0);
-                    });
+                    var __run = function() { setTimeout(async function() { __INJECT_MAIN__(); }, 0); };
+                    if (_g.requestAnimationFrame) {
+                        _g.requestAnimationFrame(__run);
+                    } else {
+                        __run();
+                    }
                 };
-                if (document.readyState === 'complete') {
+                if (_g.document && _g.document.readyState === 'complete') {
                     __boot();
+                } else if (_g.window) {
+                    _g.window.addEventListener('load', __boot);
                 } else {
-                    window.addEventListener('load', __boot);
+                    __boot();
                 }
             } ${workerBranchesCode}
         `;
 
         const astNodes = parseTemplate(code);
+
+        // ★ユーザーのコードが注入（プレースホルダー置換）される前に、ボイラープレート部分だけをDCEから保護する
+        this.protectFromDCE(astNodes, context);
+
         const branchAst = [...astNodes].reverse().find(node => node.type === 'IfStatement');
 
         if (branchAst) {

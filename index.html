@@ -15,14 +15,15 @@
 }</script> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width,initial-scale=1"> <title>Web Asset &amp; JS Bundler</title> <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script> <script src="https://unpkg.com/terser/dist/bundle.min.js"></script> <script src="https://cdn.tailwindcss.com"></script><style>:root{--bg-main:#2b2f35;--text-main:#e0e6ed;--text-muted:#8b9bb4;--u-shadow-light:-6px -6px 12px rgba(255,255,255,0.08);--u-shadow-dark:6px 6px 12px rgba(0,0,0,0.4);--u-inset-light:inset -4px -4px 8px rgba(255,255,255,0.05);--u-inset-dark:inset 4px 4px 8px rgba(0,0,0,0.5);--accent:#4da6ff;--danger:#ff5c5c;--success:#5cff85;--r-md:14px;--r-sm:8px}::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-track{background:rgba(0,0,0,0.15)}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:4px}::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.15)}.nop-panel{background:rgba(43,47,53,0.75);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,0.04);border-radius:var(--r-md);box-shadow:0 10px 30px rgba(0,0,0,0.25),var(--u-shadow-light),var(--u-shadow-dark)}.nop-panel-inset{background:#1e2125;border-radius:var(--r-sm);box-shadow:var(--u-inset-light),var(--u-inset-dark);border:1px solid rgba(0,0,0,0.15)}.nop-btn{background:var(--bg-main);border:1px solid rgba(255,255,255,0.03);border-radius:var(--r-sm);box-shadow:var(--u-shadow-light),var(--u-shadow-dark);color:var(--text-muted);font-weight:600;cursor:pointer;transition:all 0.2s ease;display:inline-flex;align-items:center;justify-content:center;user-select:none;outline:none}.nop-btn:focus-visible{box-shadow:0 0 0 2px var(--accent)}.nop-btn:hover:not(:disabled){color:var(--accent);transform:translateY(-1px)}.nop-btn:active:not(:disabled),.nop-btn.active:not(:disabled){box-shadow:var(--u-inset-light),var(--u-inset-dark);color:var(--accent);transform:translateY(1px)}.nop-btn:disabled{opacity:0.25;cursor:not-allowed;box-shadow:none;border:1px solid rgba(255,255,255,0.02)}.nop-input,.nop-select{background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:var(--r-sm);color:var(--text-main);outline:none;transition:all 0.2s}.nop-input:focus,.nop-select:focus{box-shadow:0 0 0 2px rgba(77,166,255,0.25);color:var(--text-main);border-color:var(--accent)}.segmented-switch{display:flex;background:rgba(0,0,0,0.2);padding:4px;border-radius:var(--r-sm);border:1px solid rgba(255,255,255,0.04);gap:4px}.segmented-switch button{flex:1;border:none;background:none;color:var(--text-muted);font-size:11px;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer;transition:all 0.2s;outline:none}.segmented-switch button.active{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.05);color:var(--accent)}.nop-slider{-webkit-appearance:none;appearance:none;width:100%;background:transparent;margin:8px 0}.nop-slider::-webkit-slider-runnable-track{width:100%;height:6px;background:rgba(0,0,0,0.25);border-radius:10px;cursor:pointer}.nop-slider::-webkit-slider-thumb{-webkit-appearance:none;height:16px;width:16px;border-radius:50%;background:var(--accent);margin-top:-5px;box-shadow:0 2px 5px rgba(0,0,0,0.4);cursor:pointer;transition:transform 0.1s}.nop-slider::-webkit-slider-thumb:hover{transform:scale(1.1)}.nop-checkbox-container{display:flex;align-items:center;position:relative;padding-left:26px;cursor:pointer;font-size:12px;user-select:none;margin-bottom:2px}.nop-checkbox-container input{position:absolute;opacity:0;cursor:pointer;height:0;width:0}.checkmark{position:absolute;top:50%;left:0;transform:translateY(-50%);height:16px;width:16px;background-color:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);border-radius:4px}.nop-checkbox-container input:checked ~ .checkmark{background-color:var(--accent);box-shadow:none}.checkmark:after{content:"";position:absolute;display:none}.nop-checkbox-container input:checked ~ .checkmark:after{display:block}.nop-checkbox-container .checkmark:after{left:5px;top:2px;width:5px;height:9px;border:solid #1e2125;border-width:0 2px 2px 0;transform:rotate(45deg)}.setting-desc{font-size:10px;color:var(--text-muted);opacity:0.65;margin-top:1px;margin-bottom:6px;line-height:1.4;font-style:italic}</style></head> <body class="flex flex-col antialiased bg-[#2b2f35] font-sans min-h-screen text-[#e0e6ed]"> <div id="root" class="flex flex-col flex-1"></div> <script type="module" id="bundle_main">
 "use strict";
 (function () {
-  if (typeof window !== 'undefined') {
+  var _g = typeof globalThis !== 'undefined' ? globalThis : self;
+  if (_g.window) {
     var chunkMap = {
       "proj/src/pipeline/compiler.worker": "chunk_proj_src_pipeline_compiler_worker_0"
     };
     function getInterceptedUrl(url, isShared) {
       var urlStr = typeof url === 'string' ? url : url && url.href ? url.href : String(url);
-      if (urlStr.indexOf(window.location.origin) === 0) {
-        urlStr = urlStr.substring(window.location.origin.length);
+      if (urlStr.indexOf(_g.location.origin) === 0) {
+        urlStr = urlStr.substring(_g.location.origin.length);
       }
       if (!urlStr.startsWith('blob:') && !urlStr.startsWith('http:') && !urlStr.startsWith('https:') && !urlStr.startsWith('data:')) {
         var cleanUrl = urlStr.split('?')[0].replace(/^\.?\//, '').replace(/\.js$/, '');
@@ -36,7 +37,7 @@
           }
         }
         if (chunkId) {
-          var script = document.getElementById("bundle_main") || document.scripts[document.scripts.length - 1];
+          var script = _g.document.getElementById("bundle_main") || _g.document.scripts[_g.document.scripts.length - 1];
           if (script) {
             var code = "var __chunkId = '" + chunkId + "';\n" + script.textContent;
             if (isShared) {
@@ -45,27 +46,27 @@
             var blob = new Blob([code], {
               type: 'application/javascript'
             });
-            return URL.createObjectURL(blob);
+            return _g.URL.createObjectURL(blob);
           }
         }
       }
       return null;
     }
-    if (window.Worker) {
-      var OriginalWorker = window.Worker;
-      window.Worker = function (url, options) {
+    if (_g.Worker) {
+      var OriginalWorker = _g.Worker;
+      _g.Worker = function (url, options) {
         var intercepted = getInterceptedUrl(url, false);
         return new OriginalWorker(intercepted || url, options);
       };
-      window.Worker.prototype = OriginalWorker.prototype;
+      _g.Worker.prototype = OriginalWorker.prototype;
     }
-    if (window.SharedWorker) {
-      var OriginalSharedWorker = window.SharedWorker;
-      window.SharedWorker = function (url, options) {
+    if (_g.SharedWorker) {
+      var OriginalSharedWorker = _g.SharedWorker;
+      _g.SharedWorker = function (url, options) {
         var intercepted = getInterceptedUrl(url, true);
         return new OriginalSharedWorker(intercepted || url, options);
       };
-      window.SharedWorker.prototype = OriginalSharedWorker.prototype;
+      _g.SharedWorker.prototype = OriginalSharedWorker.prototype;
     }
   }
 })();
@@ -293,8 +294,9 @@ class BabelPatcher {
   }
 }
 function __getChunkUrl_2(chunkId, isShared) {
-  if (typeof document !== 'undefined') {
-    var script = document.getElementById("bundle_main") || document.scripts[document.scripts.length - 1];
+  var _g = typeof globalThis !== 'undefined' ? globalThis : self;
+  if (_g.document) {
+    var script = _g.document.getElementById("bundle_main") || _g.document.scripts[_g.document.scripts.length - 1];
     var code = "var __chunkId = '" + chunkId + "';\n" + script.textContent;
     if (isShared) {
       return 'data:application/javascript,' + encodeURIComponent(code);
@@ -302,9 +304,9 @@ function __getChunkUrl_2(chunkId, isShared) {
     var blob = new Blob([code], {
       type: 'application/javascript'
     });
-    return URL.createObjectURL(blob);
+    return _g.URL.createObjectURL(blob);
   } else {
-    var baseUrl = self.location.href.split('#')[0].split('?')[0];
+    var baseUrl = _g.location.href.split('#')[0].split('?')[0];
     return baseUrl + '#__chunkId=' + chunkId;
   }
 }
@@ -316,30 +318,38 @@ function __spawn_1(workerId, workerType, options) {
   var url = __getChunkUrl_2(workerId, isShared);
   return isShared ? new SharedWorker(url, opts) : new Worker(url, opts);
 }
-var _chunkId = typeof __chunkId !== 'undefined' ? __chunkId : typeof location !== 'undefined' && location.hash && location.hash.indexOf('__chunkId=') !== -1 ? location.hash.split('__chunkId=')[1].split('&')[0] : typeof location !== 'undefined' && location.search && location.search.indexOf('__chunkId=') !== -1 ? new URLSearchParams(location.search).get('__chunkId') : null;
-var __isWorker = typeof window === 'undefined';
+var _g = typeof globalThis !== 'undefined' ? globalThis : self;
+var _chunkId = typeof __chunkId !== 'undefined' ? __chunkId : _g.location && _g.location.hash && _g.location.hash.indexOf('__chunkId=') !== -1 ? _g.location.hash.split('__chunkId=')[1].split('&')[0] : _g.location && _g.location.search && _g.location.search.indexOf('__chunkId=') !== -1 ? new URLSearchParams(_g.location.search).get('__chunkId') : null;
+var __isWorker = !_g.document;
 if (__isWorker) {
   var __mq = [];
   var __mo = null;
   var __hl = [];
-  Object.defineProperty(self, 'onmessage', {
+  var __ns = Object.getOwnPropertyDescriptor(_g, 'onmessage');
+  var __nsSet = __ns ? __ns.set : null;
+  Object.defineProperty(_g, 'onmessage', {
     configurable: true,
     get: function () {
       return __mo;
     },
     set: function (v) {
       __mo = v;
+      if (__nsSet) {
+        try {
+          __nsSet.call(_g, v);
+        } catch (e) {}
+      }
       if (v && __mq.length > 0) {
         var q = __mq;
         __mq = [];
         q.forEach(function (e) {
-          v.call(self, e);
+          v.call(_g, e);
         });
       }
     }
   });
-  var __oal = self.addEventListener;
-  self.addEventListener = function (type, listener, options) {
+  var __oal = _g.addEventListener;
+  _g.addEventListener = function (type, listener, options) {
     if (type === 'message') {
       __hl.push(listener);
       if (__mq.length > 0) {
@@ -350,11 +360,11 @@ if (__isWorker) {
         });
       }
     }
-    return __oal.call(self, type, listener, options);
+    return __oal.call(_g, type, listener, options);
   };
-  __oal.call(self, 'message', function (e) {
+  __oal.call(_g, 'message', function (e) {
     if (__mo) {
-      __mo.call(self, e);
+      __mo.call(_g, e);
     } else if (__hl.length === 0) {
       __mq.push(e);
     }
@@ -362,7 +372,7 @@ if (__isWorker) {
 }
 if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
   var __boot = function () {
-    requestAnimationFrame(function () {
+    var __run = function () {
       setTimeout(async function () {
         const {
           default: React,
@@ -2230,12 +2240,19 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         BabelPatcher.applyPatch();
         createRoot(document.getElementById('root')).render(React.createElement(StrictMode, null, React.createElement(App, null)));
       }, 0);
-    });
+    };
+    if (_g.requestAnimationFrame) {
+      _g.requestAnimationFrame(__run);
+    } else {
+      __run();
+    }
   };
-  if (document.readyState === 'complete') {
+  if (_g.document && _g.document.readyState === 'complete') {
     __boot();
+  } else if (_g.window) {
+    _g.window.addEventListener('load', __boot);
   } else {
-    window.addEventListener('load', __boot);
+    __boot();
   }
 } else if (_chunkId === 'chunk_proj_src_pipeline_compiler_worker_0') {
   const __ns_Babel_interop = await import("https://esm.sh/@babel/standalone");
@@ -6007,7 +6024,21 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     }
   }
   class AssembleFinalBundleStage {
-    name = 'AssembleFinalBundleStage';
+    name = 'AssembleFinalBundleStage'; // ボイラープレート（ランタイムポリフィル）内の識別子をDCEの削除対象から保護する
+    protectFromDCE(nodes, context) {
+      const walk = node => {
+        if (node.type === 'Identifier') {
+          context.mergedScopeInfo.escapedVars.add(node.irNodeId);
+          if (node.props['_declId']) {
+            context.mergedScopeInfo.escapedVars.add(node.props['_declId']);
+          }
+        }
+        if (node.children) {
+          node.children.forEach(walk);
+        }
+      };
+      nodes.forEach(walk);
+    }
     execute(context) {
       const programNode = context.linkedRoot.children[0].children[0];
       programNode.children = [];
@@ -6019,13 +6050,14 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         }
         const workerPolyfillCode = `
                 (function() {
-                    if (typeof window !== 'undefined') {
+                    var _g = typeof globalThis !== 'undefined' ? globalThis : self;
+                    if (_g.window) {
                         var chunkMap = { ${mapEntries} };
                         
                         function getInterceptedUrl(url, isShared) {
                             var urlStr = (typeof url === 'string') ? url : (url && url.href ? url.href : String(url));
-                            if (urlStr.indexOf(window.location.origin) === 0) {
-                                urlStr = urlStr.substring(window.location.origin.length);
+                            if (urlStr.indexOf(_g.location.origin) === 0) {
+                                urlStr = urlStr.substring(_g.location.origin.length);
                             }
                             if (!urlStr.startsWith('blob:') && !urlStr.startsWith('http:') && !urlStr.startsWith('https:') && !urlStr.startsWith('data:')) {
                                 var cleanUrl = urlStr.split('?')[0].replace(/^\\.?\\//, '').replace(/\\.js$/, '');
@@ -6039,42 +6071,44 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                                     }
                                 }
                                 if (chunkId) {
-                                    var script = document.getElementById("${context.bundleId || 'bundle_default'}") || document.scripts[document.scripts.length - 1];
+                                    var script = _g.document.getElementById("${context.bundleId || 'bundle_default'}") || _g.document.scripts[_g.document.scripts.length - 1];
                                     if (script) {
                                         var code = "var __chunkId = '" + chunkId + "';\\n" + script.textContent;
                                         if (isShared) {
                                             return 'data:application/javascript,' + encodeURIComponent(code);
                                         }
                                         var blob = new Blob([code], { type: 'application/javascript' });
-                                        return URL.createObjectURL(blob);
+                                        return _g.URL.createObjectURL(blob);
                                     }
                                 }
                             }
                             return null;
                         }
 
-                        if (window.Worker) {
-                            var OriginalWorker = window.Worker;
-                            window.Worker = function(url, options) {
+                        if (_g.Worker) {
+                            var OriginalWorker = _g.Worker;
+                            _g.Worker = function(url, options) {
                                 var intercepted = getInterceptedUrl(url, false);
                                 return new OriginalWorker(intercepted || url, options);
                             };
-                            window.Worker.prototype = OriginalWorker.prototype;
+                            _g.Worker.prototype = OriginalWorker.prototype;
                         }
 
-                        if (window.SharedWorker) {
-                            var OriginalSharedWorker = window.SharedWorker;
-                            window.SharedWorker = function(url, options) {
+                        if (_g.SharedWorker) {
+                            var OriginalSharedWorker = _g.SharedWorker;
+                            _g.SharedWorker = function(url, options) {
                                 var intercepted = getInterceptedUrl(url, true);
                                 return new OriginalSharedWorker(intercepted || url, options);
                             };
-                            window.SharedWorker.prototype = OriginalSharedWorker.prototype;
+                            _g.SharedWorker.prototype = OriginalSharedWorker.prototype;
                         }
                     }
                 })();
             `;
         const polyfillAst = context.parseTemplate(workerPolyfillCode);
         if (polyfillAst && polyfillAst.length > 0) {
+          // ★DCEからの保護を適用
+          this.protectFromDCE(polyfillAst, context);
           for (const pNode of polyfillAst.reverse()) {
             context.commonStatements.unshift(pNode);
           }
@@ -6089,6 +6123,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       } // 3. ボイラープレート関数の生成と配置
       if (context.needsChunkUrlBoilerplate) {
         const boilerplates = this.createChunkUrlBoilerplate(context.chunkUrlFuncName, context.bundleId || 'bundle_default', context.parseTemplate);
+        this.protectFromDCE(boilerplates, context);
         for (const bNode of boilerplates) {
           programNode.children.push(bNode);
           programNode.props['body'].push({
@@ -6099,6 +6134,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       }
       if (context.needsSpawnBoilerplate) {
         const boilerplates = this.createSelfSpawningBoilerplate(context.spawnFuncName, context.chunkUrlFuncName, context.parseTemplate);
+        this.protectFromDCE(boilerplates, context);
         for (const bNode of boilerplates) {
           programNode.children.push(bNode);
           programNode.props['body'].push({
@@ -6122,7 +6158,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         }
       } // 5. 分岐構造 (Main / Worker 実行パス) の生成と AST 連結
       if (hasWorkers) {
-        const branchNodes = this.createMainAndWorkerBranches(context.mainStatements, context.workerStatementsMap, context.chunkIdMap, context.parseTemplate);
+        const branchNodes = this.createMainAndWorkerBranches(context.mainStatements, context.workerStatementsMap, context.chunkIdMap, context.parseTemplate, context // ★引数に追加
+        );
         for (const bNode of branchNodes) {
           programNode.children.push(bNode);
           programNode.props['body'].push({
@@ -6154,23 +6191,24 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     createChunkUrlBoilerplate(funcName, bundleId, parseTemplate) {
       const code = `
             function ${funcName}(chunkId, isShared) {
-                if (typeof document !== 'undefined') {
-                    var script = document.getElementById("${bundleId}") || document.scripts[document.scripts.length - 1];
+                var _g = typeof globalThis !== 'undefined' ? globalThis : self;
+                if (_g.document) {
+                    var script = _g.document.getElementById("${bundleId}") || _g.document.scripts[_g.document.scripts.length - 1];
                     var code = "var __chunkId = '" + chunkId + "';\\n" + script.textContent;
                     if (isShared) {
                         return 'data:application/javascript,' + encodeURIComponent(code);
                     }
                     var blob = new Blob([code], { type: 'application/javascript' });
-                    return URL.createObjectURL(blob);
+                    return _g.URL.createObjectURL(blob);
                 } else {
-                    var baseUrl = self.location.href.split('#')[0].split('?')[0];
+                    var baseUrl = _g.location.href.split('#')[0].split('?')[0];
                     return baseUrl + '#__chunkId=' + chunkId;
                 }
             }
         `;
       return parseTemplate(code);
     }
-    createMainAndWorkerBranches(mainStatements, workerStatementsMap, chunkIdMap, parseTemplate) {
+    createMainAndWorkerBranches(mainStatements, workerStatementsMap, chunkIdMap, parseTemplate, context) {
       let workerBranchesCode = '';
       const workerKeys = Array.from(workerStatementsMap.keys()).reverse();
       for (const workerId of workerKeys) {
@@ -6182,29 +6220,35 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             `;
       }
       const code = `
+            var _g = typeof globalThis !== 'undefined' ? globalThis : self;
             var _chunkId = typeof __chunkId !== 'undefined' ? __chunkId : (
-                (typeof location !== 'undefined' && location.hash && location.hash.indexOf('__chunkId=') !== -1) ? location.hash.split('__chunkId=')[1].split('&')[0] : 
-                ((typeof location !== 'undefined' && location.search && location.search.indexOf('__chunkId=') !== -1) ? new URLSearchParams(location.search).get('__chunkId') : null)
+                (_g.location && _g.location.hash && _g.location.hash.indexOf('__chunkId=') !== -1) ? _g.location.hash.split('__chunkId=')[1].split('&')[0] : 
+                ((_g.location && _g.location.search && _g.location.search.indexOf('__chunkId=') !== -1) ? new URLSearchParams(_g.location.search).get('__chunkId') : null)
             );
-            var __isWorker = typeof window === 'undefined';
+            var __isWorker = !_g.document;
             
             if (__isWorker) {
                 var __mq = [];
                 var __mo = null;
                 var __hl = [];
-                Object.defineProperty(self, 'onmessage', {
+                var __ns = Object.getOwnPropertyDescriptor(_g, 'onmessage');
+                var __nsSet = __ns ? __ns.set : null;
+                Object.defineProperty(_g, 'onmessage', {
                     configurable: true,
                     get: function() { return __mo; },
                     set: function(v) {
                         __mo = v;
+                        if (__nsSet) {
+                            try { __nsSet.call(_g, v); } catch(e) {}
+                        }
                         if (v && __mq.length > 0) {
                             var q = __mq; __mq = [];
-                            q.forEach(function(e) { v.call(self, e); });
+                            q.forEach(function(e) { v.call(_g, e); });
                         }
                     }
                 });
-                var __oal = self.addEventListener;
-                self.addEventListener = function(type, listener, options) {
+                var __oal = _g.addEventListener;
+                _g.addEventListener = function(type, listener, options) {
                     if (type === 'message') {
                         __hl.push(listener);
                         if (__mq.length > 0) {
@@ -6215,11 +6259,11 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                             });
                         }
                     }
-                    return __oal.call(self, type, listener, options);
+                    return __oal.call(_g, type, listener, options);
                 };
-                __oal.call(self, 'message', function(e) {
+                __oal.call(_g, 'message', function(e) {
                     if (__mo) {
-                        __mo.call(self, e);
+                        __mo.call(_g, e);
                     } else if (__hl.length === 0) {
                         __mq.push(e);
                     }
@@ -6228,20 +6272,24 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             
             if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 var __boot = function() {
-                    requestAnimationFrame(function() {
-                        setTimeout(async function() {
-                            __INJECT_MAIN__();
-                        }, 0);
-                    });
+                    var __run = function() { setTimeout(async function() { __INJECT_MAIN__(); }, 0); };
+                    if (_g.requestAnimationFrame) {
+                        _g.requestAnimationFrame(__run);
+                    } else {
+                        __run();
+                    }
                 };
-                if (document.readyState === 'complete') {
+                if (_g.document && _g.document.readyState === 'complete') {
                     __boot();
+                } else if (_g.window) {
+                    _g.window.addEventListener('load', __boot);
                 } else {
-                    window.addEventListener('load', __boot);
+                    __boot();
                 }
             } ${workerBranchesCode}
         `;
-      const astNodes = parseTemplate(code);
+      const astNodes = parseTemplate(code); // ★ユーザーのコードが注入（プレースホルダー置換）される前に、ボイラープレート部分だけをDCEから保護する
+      this.protectFromDCE(astNodes, context);
       const branchAst = [...astNodes].reverse().find(node => node.type === 'IfStatement');
       if (branchAst) {
         this.replacePlaceholderWithStatements(branchAst, '__INJECT_MAIN__', mainStatements);
@@ -6877,8 +6925,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             ...newState.metadata,
             lastAction: `Applied rule: ${ruleId}`,
             appliedActions: newlyApplied
-          };
-          nextStates.push(new CompilationState(newState.irRoot, newMetadata, newState.analysisSnapshot));
+          }; // 第4引数に newState.services を渡し、IDジェネレータ等のサービス群を後続の探索状態へ引き継ぐ
+          nextStates.push(new CompilationState(newState.irRoot, newMetadata, newState.analysisSnapshot, newState.services));
         }
       } // 「何もしない(No-Op)」状態（ベース状態）も候補として必ず追加する。
       // 全てのルール適用によるコストが改悪だった場合、元の状態が最善として選択可能になる。
@@ -11093,6 +11141,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               irNodeId: oldToNewId.get(val.irNodeId)
             };
           }
+        } // スコープリンク(_declId)の追従更新
+        if (node.type === 'Identifier' && node.props['_declId']) {
+          const oldDeclId = node.props['_declId'];
+          if (oldToNewId.has(oldDeclId)) {
+            node.props['_declId'] = oldToNewId.get(oldDeclId);
+          }
         }
         for (const child of node.children) updateRefs(child);
       };
@@ -12078,6 +12132,28 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         try {
           const ir = SourceAnalyzerFacade.analyzeToIR(templateCode, '_boilerplate_template.js', this.vfs);
           const programNode = ir.children[0]?.children?.find(c => c.type === 'Program');
+          if (programNode) {
+            // スコープ解析結果から Identifier の参照関係（_declId）を AST ノードに直接焼き付ける
+            const refToDeclMap = new Map();
+            for (const [declId, binding] of ir.scopeInfo.bindings.entries()) {
+              refToDeclMap.set(declId, declId);
+              if (binding.references) {
+                for (const refId of binding.references) {
+                  refToDeclMap.set(refId, declId);
+                }
+              }
+            }
+            const walk = node => {
+              if (node.type === 'Identifier') {
+                const declId = refToDeclMap.get(node.irNodeId);
+                if (declId) {
+                  node.props['_declId'] = declId;
+                }
+              }
+              if (node.children) node.children.forEach(walk);
+            };
+            programNode.children.forEach(walk);
+          }
           return programNode?.children || [];
         } catch (err) {
           this.logger({

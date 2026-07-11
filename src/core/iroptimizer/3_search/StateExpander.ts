@@ -76,7 +76,8 @@ export class StateExpander {
                     lastAction: `Applied rule: ${ruleId}`,
                     appliedActions: newlyApplied
                 };
-                nextStates.push(new CompilationState(newState.irRoot, newMetadata, newState.analysisSnapshot));
+                // 第4引数に newState.services を渡し、IDジェネレータ等のサービス群を後続の探索状態へ引き継ぐ
+                nextStates.push(new CompilationState(newState.irRoot, newMetadata, newState.analysisSnapshot, newState.services));
             }
         }
 

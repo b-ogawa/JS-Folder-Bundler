@@ -95,6 +95,15 @@ export class IRNodeCloner {
                     node.props[key] = { type: 'ref', irNodeId: oldToNewId.get((val as any).irNodeId)! };
                 }
             }
+
+            // スコープリンク(_declId)の追従更新
+            if (node.type === 'Identifier' && node.props['_declId']) {
+                const oldDeclId = node.props['_declId'] as string;
+                if (oldToNewId.has(oldDeclId)) {
+                    node.props['_declId'] = oldToNewId.get(oldDeclId)!;
+                }
+            }
+
             for (const child of node.children) updateRefs(child);
         };
 
