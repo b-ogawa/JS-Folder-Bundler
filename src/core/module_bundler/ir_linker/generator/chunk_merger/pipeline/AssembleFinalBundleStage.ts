@@ -40,11 +40,12 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                                 if (chunkId) {
                                     var script = document.getElementById("${context.bundleId || 'bundle_default'}") || document.scripts[document.scripts.length - 1];
                                     if (script) {
+                                        var code = "var __chunkId = '" + chunkId + "';\\n" + script.textContent;
                                         if (isShared) {
-                                            return 'data:application/javascript,' + encodeURIComponent(script.textContent) + '#__chunkId=' + chunkId;
+                                            return 'data:application/javascript,' + encodeURIComponent(code);
                                         }
-                                        var blob = new Blob([script.textContent], { type: 'application/javascript' });
-                                        return URL.createObjectURL(blob) + '#__chunkId=' + chunkId;
+                                        var blob = new Blob([code], { type: 'application/javascript' });
+                                        return URL.createObjectURL(blob);
                                     }
                                 }
                             }
@@ -171,13 +172,14 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
             function ${funcName}(chunkId, isShared) {
                 if (typeof document !== 'undefined') {
                     var script = document.getElementById("${bundleId}") || document.scripts[document.scripts.length - 1];
+                    var code = "var __chunkId = '" + chunkId + "';\\n" + script.textContent;
                     if (isShared) {
-                        return 'data:application/javascript,' + encodeURIComponent(script.textContent) + '#__chunkId=' + chunkId;
+                        return 'data:application/javascript,' + encodeURIComponent(code);
                     }
-                    var blob = new Blob([script.textContent], { type: 'application/javascript' });
-                    return URL.createObjectURL(blob) + '#__chunkId=' + chunkId;
+                    var blob = new Blob([code], { type: 'application/javascript' });
+                    return URL.createObjectURL(blob);
                 } else {
-                    var baseUrl = self.location.href.split('#')[0];
+                    var baseUrl = self.location.href.split('#')[0].split('?')[0];
                     return baseUrl + '#__chunkId=' + chunkId;
                 }
             }
@@ -221,7 +223,7 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                         __mo = v;
                         if (v && __mq.length > 0) {
                             var q = __mq; __mq = [];
-                            q.forEach(function(e) { v(e); });
+                            q.forEach(function(e) { v.call(self, e); });
                         }
                     }
                 });
@@ -240,7 +242,11 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                     return __oal.call(self, type, listener, options);
                 };
                 __oal.call(self, 'message', function(e) {
-                    if (!__mo && __hl.length === 0) __mq.push(e);
+                    if (__mo) {
+                        __mo.call(self, e);
+                    } else if (__hl.length === 0) {
+                        __mq.push(e);
+                    }
                 });
             }
             
