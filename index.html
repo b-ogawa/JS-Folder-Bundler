@@ -324,9 +324,7 @@ var __isWorker = !_g.document;
 if (__isWorker) {
   var __mq = [];
   var __mo = null;
-  var __hl = [];
-  var __ns = Object.getOwnPropertyDescriptor(_g, 'onmessage');
-  var __nsSet = __ns ? __ns.set : null;
+  var __hl = []; // ネイティブセッターへの横流しを削除し、二重発火を防止
   Object.defineProperty(_g, 'onmessage', {
     configurable: true,
     get: function () {
@@ -334,11 +332,6 @@ if (__isWorker) {
     },
     set: function (v) {
       __mo = v;
-      if (__nsSet) {
-        try {
-          __nsSet.call(_g, v);
-        } catch (e) {}
-      }
       if (v && __mq.length > 0) {
         var q = __mq;
         __mq = [];
@@ -6231,16 +6224,13 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 var __mq = [];
                 var __mo = null;
                 var __hl = [];
-                var __ns = Object.getOwnPropertyDescriptor(_g, 'onmessage');
-                var __nsSet = __ns ? __ns.set : null;
+                
+                // ネイティブセッターへの横流しを削除し、二重発火を防止
                 Object.defineProperty(_g, 'onmessage', {
                     configurable: true,
                     get: function() { return __mo; },
                     set: function(v) {
                         __mo = v;
-                        if (__nsSet) {
-                            try { __nsSet.call(_g, v); } catch(e) {}
-                        }
                         if (v && __mq.length > 0) {
                             var q = __mq; __mq = [];
                             q.forEach(function(e) { v.call(_g, e); });
@@ -8371,7 +8361,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       if (alternateNode) {
         const alternateExpr = extractSingleExpression(alternateNode);
         if (alternateExpr) {
-          // 三項演算子への変換
+          // 三項演算子への変換 (安全)
           const conditionalExpr = {
             type: 'ConditionalExpression',
             irNodeId: genId(),
@@ -8402,51 +8392,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             },
             children: [conditionalExpr]
           };
-          candidates.push(exprStmt1); // 論理積・論理和への変換 (test && consequent || alternate)
-          const logicalAndExpr = {
-            type: 'LogicalExpression',
-            irNodeId: genId(),
-            props: {
-              operator: '&&',
-              left: {
-                type: 'ref',
-                irNodeId: testNode.irNodeId
-              },
-              right: {
-                type: 'ref',
-                irNodeId: consequentExpr.irNodeId
-              }
-            },
-            children: [testNode, consequentExpr]
-          };
-          const logicalOrExpr = {
-            type: 'LogicalExpression',
-            irNodeId: genId(),
-            props: {
-              operator: '||',
-              left: {
-                type: 'ref',
-                irNodeId: logicalAndExpr.irNodeId
-              },
-              right: {
-                type: 'ref',
-                irNodeId: alternateExpr.irNodeId
-              }
-            },
-            children: [logicalAndExpr, alternateExpr]
-          };
-          const exprStmt2 = {
-            type: 'ExpressionStatement',
-            irNodeId: genId(),
-            props: {
-              expression: {
-                type: 'ref',
-                irNodeId: logicalOrExpr.irNodeId
-              }
-            },
-            children: [logicalOrExpr]
-          };
-          candidates.push(exprStmt2);
+          candidates.push(exprStmt1);
         }
       } else {
         // elseがない場合は AND (&&) への変換
@@ -8924,10 +8870,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         const bin = node;
         const left = bin.children.find(c => c.irNodeId === bin.props.left?.irNodeId);
         const right = bin.children.find(c => c.irNodeId === bin.props.right?.irNodeId);
-        if (!left || !right) return false; // typeof a === 'undefined'
-        if ((bin.props.operator === '===' || bin.props.operator === '==') && left.type === 'UnaryExpression' && left.props.operator === 'typeof' && right.type === 'StringLiteral' && right.props.value === 'undefined') {
-          return true;
-        } // a == true -> a
+        if (!left || !right) return false; // a == true -> a
         if ((bin.props.operator === '==' || bin.props.operator === '===') && right.type === 'BooleanLiteral' && right.props.value === true) {
           return true;
         }
@@ -8951,52 +8894,6 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         const bin = node;
         const left = bin.children.find(c => c.irNodeId === bin.props.left?.irNodeId);
         const right = bin.children.find(c => c.irNodeId === bin.props.right?.irNodeId);
-        if (left.type === 'UnaryExpression' && left.props.operator === 'typeof') {
-          // typeof a === 'undefined' -> a === void 0
-          const typeofArg = left.children.find(c => c.irNodeId === left.props.argument?.irNodeId);
-          if (typeofArg) {
-            const voidNode = {
-              type: 'UnaryExpression',
-              irNodeId: genId(),
-              props: {
-                operator: 'void',
-                prefix: true,
-                argument: {
-                  type: 'ref',
-                  irNodeId: genId()
-                }
-              },
-              children: [{
-                type: 'NumericLiteral',
-                irNodeId: 'tmp',
-                // will be replaced
-                props: {
-                  value: 0
-                },
-                children: []
-              }]
-            };
-            voidNode.children[0].irNodeId = voidNode.props.argument.irNodeId;
-            const newBin = {
-              type: 'BinaryExpression',
-              irNodeId: genId(),
-              props: {
-                operator: '===',
-                left: {
-                  type: 'ref',
-                  irNodeId: typeofArg.irNodeId
-                },
-                right: {
-                  type: 'ref',
-                  irNodeId: voidNode.irNodeId
-                }
-              },
-              children: [typeofArg, voidNode]
-            };
-            console.debug(`[TransformRule] ${LogicalSimplificationRule.id} matched: typeof x === 'undefined' -> x === void 0`);
-            return [newBin];
-          }
-        }
         if (right.type === 'BooleanLiteral' && right.props.value === true) {
           console.debug(`[TransformRule] ${LogicalSimplificationRule.id} matched: a == true -> a`);
           return [left]; // just return left node

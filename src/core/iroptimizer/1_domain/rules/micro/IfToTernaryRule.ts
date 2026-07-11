@@ -76,7 +76,7 @@ export const IfToTernaryRule: TransformRule = {
         if (alternateNode) {
             const alternateExpr = extractSingleExpression(alternateNode);
             if (alternateExpr) {
-                // 三項演算子への変換
+                // 三項演算子への変換 (安全)
                 const conditionalExpr: ConditionalExpressionIR = {
                     type: 'ConditionalExpression',
                     irNodeId: genId(),
@@ -97,39 +97,6 @@ export const IfToTernaryRule: TransformRule = {
                     children: [conditionalExpr]
                 };
                 candidates.push(exprStmt1);
-
-                // 論理積・論理和への変換 (test && consequent || alternate)
-                const logicalAndExpr: LogicalExpressionIR = {
-                    type: 'LogicalExpression',
-                    irNodeId: genId(),
-                    props: {
-                        operator: '&&',
-                        left: { type: 'ref', irNodeId: testNode.irNodeId },
-                        right: { type: 'ref', irNodeId: consequentExpr.irNodeId }
-                    },
-                    children: [testNode, consequentExpr]
-                };
-
-                const logicalOrExpr: LogicalExpressionIR = {
-                    type: 'LogicalExpression',
-                    irNodeId: genId(),
-                    props: {
-                        operator: '||',
-                        left: { type: 'ref', irNodeId: logicalAndExpr.irNodeId },
-                        right: { type: 'ref', irNodeId: alternateExpr.irNodeId }
-                    },
-                    children: [logicalAndExpr, alternateExpr]
-                };
-
-                const exprStmt2: ExpressionStatementIR = {
-                    type: 'ExpressionStatement',
-                    irNodeId: genId(),
-                    props: {
-                        expression: { type: 'ref', irNodeId: logicalOrExpr.irNodeId }
-                    },
-                    children: [logicalOrExpr]
-                };
-                candidates.push(exprStmt2);
             }
         } else {
             // elseがない場合は AND (&&) への変換

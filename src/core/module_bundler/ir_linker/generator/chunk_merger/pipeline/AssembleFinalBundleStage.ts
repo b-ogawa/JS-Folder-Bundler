@@ -243,16 +243,13 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                 var __mq = [];
                 var __mo = null;
                 var __hl = [];
-                var __ns = Object.getOwnPropertyDescriptor(_g, 'onmessage');
-                var __nsSet = __ns ? __ns.set : null;
+                
+                // ネイティブセッターへの横流しを削除し、二重発火を防止
                 Object.defineProperty(_g, 'onmessage', {
                     configurable: true,
                     get: function() { return __mo; },
                     set: function(v) {
                         __mo = v;
-                        if (__nsSet) {
-                            try { __nsSet.call(_g, v); } catch(e) {}
-                        }
                         if (v && __mq.length > 0) {
                             var q = __mq; __mq = [];
                             q.forEach(function(e) { v.call(_g, e); });
