@@ -25,6 +25,20 @@ export const RULE_DEFINITIONS: Record<string, RuleMetadata> = {
         description: 'シンプルなif/else代入やif/else式を、より短い三項演算子に変換します。',
         defaultEnabled: false
     },
+    'micro:statement-merge': {
+        id: 'micro:statement-merge',
+        type: 'micro',
+        name: '連続式文のカンマ結合 (Statement Merge)',
+        description: '連続する式文をカンマ演算子で1つに結合し、IfToTernaryRuleの連鎖発動を誘発します。',
+        defaultEnabled: true
+    },
+    'micro:var-decl-merge': {
+        id: 'micro:var-decl-merge',
+        type: 'micro',
+        name: '変数宣言の結合 (Variable Declaration Merge)',
+        description: '連続する同じ種類(let/const)の変数宣言をカンマで結合します。',
+        defaultEnabled: true
+    },
     'micro:dead-store-elimination': {
         id: 'micro:dead-store-elimination',
         type: 'micro',

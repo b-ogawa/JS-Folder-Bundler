@@ -15,11 +15,13 @@ export interface OptimizerConfig {
     maxIterations?: number;
     enabledRuleIds?: Record<string, boolean>;
     terserCompress?: boolean;
-    services?: CompilerServices; // 追加
+    services?: CompilerServices; // 外部サービス定義
+    logger?: (log: { type: 'info' | 'success' | 'error'; msg: string }) => void;
 }
 
 export class IROptimizer {
     static optimize(initialRoot: IRRoot, config: OptimizerConfig): IRRoot {
+        const logger = config.logger || (() => {});
         const baseBeamWidth = config.enableBeamSearch ? (config.beamWidth || 3) : 1;
         const maxIterations = config.maxIterations !== undefined ? config.maxIterations : 5;
         const isTerserEnabled = !!config.terserCompress;
@@ -36,7 +38,7 @@ export class IROptimizer {
         let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot, {}, null, services), isTerserEnabled);
 
         for (let iter = 0; iter < maxIterations; iter++) {
-            console.debug(`[IROptimizer] Iteration ${iter + 1}/${maxIterations} starting with Cost: ${lastBestCost}`);
+            logger({ type: 'info', msg: `[IROptimizer] Iteration ${iter + 1}/${maxIterations} starting with Cost: ${lastBestCost} bytes` });
             
             let currentStates = [new CompilationState(currentRoot, {}, null, services)];
             let bestOverallState = currentStates[0];
@@ -46,7 +48,7 @@ export class IROptimizer {
             const schedules = PhaseScheduler.getSchedules(baseBeamWidth, config, config.enabledRuleIds);
 
             for (const schedule of schedules) {
-                console.debug(`[IROptimizer] Entering ${schedule.id} (Depth: ${schedule.maxDepth}, Beam: ${schedule.beamWidth})`);
+                logger({ type: 'info', msg: `[IROptimizer] Entering Phase: ${schedule.id} (Depth: ${schedule.maxDepth}, Beam: ${schedule.beamWidth})` });
 
                 let noImprovementCount = 0;
                 let scheduleBestCost = bestOverallCost;
@@ -79,7 +81,7 @@ export class IROptimizer {
                     }
 
                     if (!hasNewActions) {
-                        console.debug(`[IROptimizer] Search space exhausted (0 new valid actions). Breaking ${schedule.id} early at depth ${depth + 1}.`);
+                        logger({ type: 'info', msg: `[IROptimizer] Search space exhausted. Breaking early at depth ${depth + 1}.` });
                         break;
                     }
 
@@ -87,8 +89,12 @@ export class IROptimizer {
                     currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth, isTerserEnabled);
                     const currentBestCost = DecisionEngine.getInitialCost(currentStates[0], isTerserEnabled);
 
-                    // 最小コストを更新した場合は状態を保存する
+                    // 最小コスト更新時の処理
                     if (currentBestCost < bestOverallCost) {
+                        const actionTaken = currentStates[0].metadata.lastAction || 'Unknown Action';
+                        const savedBytes = bestOverallCost - currentBestCost;
+                        logger({ type: 'success', msg: `[IROptimizer] Cost Reduced: ${bestOverallCost} -> ${currentBestCost} bytes (-${savedBytes} bytes) by [${actionTaken}]` });
+                        
                         bestOverallState = currentStates[0];
                         bestOverallCost = currentBestCost;
                     }
@@ -105,7 +111,7 @@ export class IROptimizer {
 
                     const patienceLimit = config.patience !== undefined ? config.patience : 3;
                     if (noImprovementCount >= patienceLimit) {
-                        console.debug(`[IROptimizer] Cost stagnation detected (${noImprovementCount} steps without improvement). Breaking ${schedule.id} early at depth ${depth + 1}.`);
+                        logger({ type: 'info', msg: `[IROptimizer] Cost stagnation detected (${noImprovementCount} steps without improvement). Breaking early.` });
                         break;
                     }
                 }
@@ -113,7 +119,7 @@ export class IROptimizer {
 
             // 以前のイテレーションと比較してコストが改善しなかった場合は早期に終了する
             if (bestOverallCost >= lastBestCost) {
-                console.debug(`[IROptimizer] Optimization converged or no cost reduction at iteration ${iter + 1}`);
+                logger({ type: 'success', msg: `[IROptimizer] Optimization converged at iteration ${iter + 1}` });
                 break;
             }
 

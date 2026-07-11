@@ -10,7 +10,7 @@ export interface StateMetadata {
 // 外部から注入されるサービスのインターフェース
 export interface CompilerServices {
     evaluatePureFunction?: (funcNode: IRNode, args: any[]) => any;
-    generateId?: (prefix?: string) => string; // 追加
+    generateId?: (prefix?: string) => string;
 }
 
 export class CompilationState {

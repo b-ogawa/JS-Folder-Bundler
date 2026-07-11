@@ -24,6 +24,16 @@ const HTML_OPTIONS: HtmlOptionDef[] = [
 
 export function ConfigPanel({ state, dispatch, onCompile, isLoading }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const setAllRulesOfType = (type: 'micro' | 'macro', enabled: boolean) => {
+    const newRules = { ...state.config.enabledRuleIds };
+    ALL_RULES_METADATA.forEach(rule => {
+      if (rule.type === type) {
+        newRules[rule.id] = enabled;
+      }
+    });
+    dispatch({ type: 'SET_CONFIG', key: 'enabledRuleIds', value: newRules });
+  };
   
   // スライダーUIをレンダリングするヘルパー関数
   const renderSlider = (key: keyof AppState['config'], label: string, desc: string, min: number, max: number, colorClass: string) => {
@@ -199,6 +209,44 @@ export function ConfigPanel({ state, dispatch, onCompile, isLoading }: Props) {
                         <div className="flex flex-col border border-white/5 rounded-lg bg-slate-950/20 p-3 shadow-inner mt-4 mb-1">
                           <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-300 mb-3 uppercase tracking-wider border-b border-white/5 pb-1.5">
                             <Layers className="w-3.5 h-3.5 text-amber-500" />最適化ルールの個別制御 (Auto Discovered)
+                          </div>
+
+                          {/* 一括有効・無効制御ボタン */}
+                          <div className="flex flex-wrap items-center gap-y-2 gap-x-4 mb-3 pb-3 border-b border-white/5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">ミクロ:</span>
+                              <button
+                                type="button"
+                                onClick={() => setAllRulesOfType('micro', true)}
+                                className="px-2 py-1 rounded text-[10px] bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 font-medium cursor-pointer transition-colors"
+                              >
+                                すべて有効
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setAllRulesOfType('micro', false)}
+                                className="px-2 py-1 rounded text-[10px] bg-slate-800 hover:bg-slate-700 border border-white/10 text-slate-300 font-medium cursor-pointer transition-colors"
+                              >
+                                すべて無効
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">マクロ:</span>
+                              <button
+                                type="button"
+                                onClick={() => setAllRulesOfType('macro', true)}
+                                className="px-2 py-1 rounded text-[10px] bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 font-medium cursor-pointer transition-colors"
+                              >
+                                すべて有効
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setAllRulesOfType('macro', false)}
+                                className="px-2 py-1 rounded text-[10px] bg-slate-800 hover:bg-slate-700 border border-white/10 text-slate-300 font-medium cursor-pointer transition-colors"
+                              >
+                                すべて無効
+                              </button>
+                            </div>
                           </div>
                           
                           <div className="flex flex-col gap-3">

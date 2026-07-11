@@ -7,7 +7,9 @@ function isSimple(node: IRNode): boolean {
     return node.type === 'Identifier' || 
            node.type === 'NumericLiteral' || 
            node.type === 'StringLiteral' || 
-           node.type === 'BooleanLiteral';
+           node.type === 'BooleanLiteral' ||
+           node.type === 'ArrowFunctionExpression' ||
+           node.type === 'FunctionExpression';
 }
 
 export const DeadCodeEliminationRule: TransformRule = {

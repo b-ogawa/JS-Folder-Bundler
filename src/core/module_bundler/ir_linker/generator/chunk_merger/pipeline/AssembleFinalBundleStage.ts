@@ -91,7 +91,6 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
             `;
             const polyfillAst = context.parseTemplate(workerPolyfillCode);
             if (polyfillAst && polyfillAst.length > 0) {
-                // ★DCEからの保護を適用
                 this.protectFromDCE(polyfillAst, context);
                 for (const pNode of polyfillAst.reverse()) {
                     context.commonStatements.unshift(pNode);
@@ -112,7 +111,6 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                 context.bundleId || 'bundle_default',
                 context.parseTemplate
             );
-            // ★DCEからの保護を適用
             this.protectFromDCE(boilerplates, context);
             for (const bNode of boilerplates) {
                 programNode.children.push(bNode);
@@ -126,7 +124,6 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                 context.chunkUrlFuncName,
                 context.parseTemplate
             );
-            // ★DCEからの保護を適用
             this.protectFromDCE(boilerplates, context);
             for (const bNode of boilerplates) {
                 programNode.children.push(bNode);
@@ -157,7 +154,7 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                 context.workerStatementsMap,
                 context.chunkIdMap,
                 context.parseTemplate,
-                context // ★引数に追加
+                context 
             );
             for (const bNode of branchNodes) {
                 programNode.children.push(bNode);
@@ -217,7 +214,7 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
         workerStatementsMap: Map<string, IRNode[]>,
         chunkIdMap: Map<string, string>,
         parseTemplate: (code: string) => IRNode[],
-        context: MergeContext // ★引数を追加
+        context: MergeContext 
     ): IRNode[] {
         let workerBranchesCode = '';
         const workerKeys = Array.from(workerStatementsMap.keys()).reverse();
@@ -300,7 +297,7 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
 
         const astNodes = parseTemplate(code);
 
-        // ★ユーザーのコードが注入（プレースホルダー置換）される前に、ボイラープレート部分だけをDCEから保護する
+        // ユーザーのコードが注入（プレースホルダー置換）される前に、ボイラープレート部分だけをDCEから保護する
         this.protectFromDCE(astNodes, context);
 
         const branchAst = [...astNodes].reverse().find(node => node.type === 'IfStatement');

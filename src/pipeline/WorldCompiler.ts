@@ -385,7 +385,8 @@ export class WorldCompiler {
 
             const optimizerConfig = {
                 ...this.config,
-                services: { evaluatePureFunction }
+                services: { evaluatePureFunction },
+                logger: this.logger
             };
 
             optimizedIR = IROptimizer.optimize(linkedIR, optimizerConfig);

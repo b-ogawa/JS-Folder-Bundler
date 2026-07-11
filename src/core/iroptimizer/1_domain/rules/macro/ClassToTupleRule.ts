@@ -844,7 +844,7 @@ export const ClassToTupleRule: TransformRule = {
                 const factoryIdNode: IdentifierIR = {
                     type: 'Identifier',
                     irNodeId: factoryFuncDeclId,
-                    props: { name: factoryFuncName },
+                    props: { name: factoryFuncName, _declId: factoryFuncDeclId },
                     children: []
                 };
 
@@ -1043,7 +1043,7 @@ export const ClassToTupleRule: TransformRule = {
                 const factoryFuncNameNode: IdentifierIR = {
                     type: 'Identifier',
                     irNodeId: factoryFuncDeclId,
-                    props: { name: factoryFuncName },
+                    props: { name: factoryFuncName, _declId: factoryFuncDeclId },
                     children: []
                 };
 

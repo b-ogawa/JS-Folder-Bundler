@@ -56,6 +56,15 @@ export class CostEstimator {
                     return 4;
                 
                 // --- 式・演算 ---
+                case 'SequenceExpression': {
+                    const exprs = n.props['expressions'] || [];
+                    let seqCost = 0;
+                    if (Array.isArray(exprs) && exprs.length > 0) {
+                        seqCost = exprs.reduce((acc: number, e: any) => acc + calcChild(e, nodeMap, calc), 0);
+                        seqCost += exprs.length - 1; // 要素間のカンマ(,)の数
+                    }
+                    return seqCost;
+                }
                 case 'BinaryExpression':
                 case 'LogicalExpression':
                     const opLen = n.props['operator'] ? String(n.props['operator']).length : 0;

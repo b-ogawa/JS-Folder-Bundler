@@ -32,8 +32,25 @@ export class CompilerPipelineFacade {
         return new Promise(async (resolve, reject) => {
             try {
                 logger({ type: 'info', msg: 'Initializing Compiler Pipeline' });
-                // 設定情報の整合性確認
-                logger({ type: 'info', msg: `[Config Debug] golfEnabled: ${state.config.golfEnabled}, enableMangle: ${state.config.enableMangle}, terserCompress: ${state.config.terserCompress}` });
+                
+                // コンパイラ設定の記録
+                const enabledRules = Object.entries(state.config.enabledRuleIds)
+                    .filter(([_, enabled]) => enabled)
+                    .map(([id]) => id);
+
+                const configSummary = [
+                    `Mode: ${state.mode}`,
+                    `HTML Options: CSS=${state.config.htmlOptCss}, JS=${state.config.htmlOptJs}, IMG=${state.config.htmlOptImg}`,
+                    `Golf (AST Optimization): ${state.config.golfEnabled}`,
+                    `Terser (Mangle): ${state.config.enableMangle}, Compress: ${state.config.terserCompress}`,
+                    `Beam Search: ${state.config.enableBeamSearch} (Width: ${state.config.beamWidth})`,
+                    `Iterations: ${state.config.maxIterations}, Patience: ${state.config.patience}`,
+                    `Depth: Stage1=${state.config.stage1Depth}, Stage2=${state.config.stage2Depth}`,
+                    `Active Rules (${enabledRules.length}): ${enabledRules.join(', ')}`
+                ].join('\n    ');
+
+                logger({ type: 'info', msg: `[Compiler Config]\n    ${configSummary}` });
+
                 const requestId = `req_${++CompilerPipelineFacade.messageCounter}`;
                 CompilerPipelineFacade.currentRequestId = requestId;
 
