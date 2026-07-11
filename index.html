@@ -269,7 +269,7 @@
                     "proj/src/pipeline/compiler.worker": "chunk_proj_src_pipeline_compiler_worker_0"
                 };
                 function getInterceptedUrl(url, isShared) {
-                    var urlStr = typeof url === 'string' ? url : url && url.href ? url.href : String(url); // 同一オリジンの絶対URLなら相対化
+                    var urlStr = typeof url === 'string' ? url : url && url.href ? url.href : String(url);
                     if (urlStr.indexOf(window.location.origin) === 0) {
                         urlStr = urlStr.substring(window.location.origin.length);
                     }
@@ -605,7 +605,6 @@
         }
         if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             var __boot = function () {
-                // スタイル適用完了を待つため、requestAnimationFrame と setTimeout で実行タイミングを遅延させる
                 requestAnimationFrame(function () {
                     setTimeout(async function () {
                         const {
@@ -2475,7 +2474,7 @@
                         createRoot(document.getElementById('root')).render(React.createElement(StrictMode, null, React.createElement(App, null)));
                     }, 0);
                 });
-            }; // ブラウザが全てのスタイルとリソースの適用完了を保証する状態まで待機
+            };
             if (document.readyState === 'complete') {
                 __boot();
             } else {
@@ -4160,6 +4159,594 @@
                     }
                 }
             }
+            class MergeContext {
+                // 1. 静的なインプット
+                irTrees;
+                modules;
+                entryBasePaths;
+                isExternalModule;
+                getBase;
+                refToDeclMaps;
+                resolvePath;
+                isAsset;
+                fileExists;
+                parseTemplate;
+                reachabilityMap;
+                workerEntryBases;
+                bundleId;
+                logger; // 2. パイプライン中に蓄積される状態
+                currentFilePath = '';
+                deterministicCounter = 0;
+                allTopLevelDecls = new Map();
+                dynamicImportedBases = new Set();
+                chunkIdMap = new Map();
+                extImportAdoptedDecls = new Map();
+                extImportRedirects = new Map();
+                renameJobs = new Map();
+                globalVariables = new Set();
+                thunkDeclIdMap = new Map();
+                nodeReplacements = new Map(); // 3. ボイラープレート生成用の制御情報
+                spawnFuncName = '';
+                chunkUrlFuncName = '';
+                needsSpawnBoilerplate = false;
+                needsChunkUrlBoilerplate = false; // 4. 仕分け済みステートメントの格納バッファ
+                globalExternalImports = [];
+                commonStatements = [];
+                mainStatements = [];
+                workerStatementsMap = new Map(); // 5. 最終的な出力結果
+                linkedRoot;
+                mergedScopeInfo;
+                constructor(irTrees, modules, entryBasePaths, isExternalModule, getBase, refToDeclMaps, resolvePath, isAsset, fileExists, parseTemplate, reachabilityMap, workerEntryBases, bundleId, logger) {
+                    this.irTrees = irTrees;
+                    this.modules = modules;
+                    this.entryBasePaths = entryBasePaths;
+                    this.isExternalModule = isExternalModule;
+                    this.getBase = getBase;
+                    this.refToDeclMaps = refToDeclMaps;
+                    this.resolvePath = resolvePath;
+                    this.isAsset = isAsset;
+                    this.fileExists = fileExists;
+                    this.parseTemplate = parseTemplate;
+                    this.reachabilityMap = reachabilityMap;
+                    this.workerEntryBases = workerEntryBases;
+                    this.bundleId = bundleId;
+                    this.logger = logger; // workerEntryBasesが存在する場合、初期化処理を行う
+                    if (this.workerEntryBases) {
+                        for (const wBase of this.workerEntryBases) {
+                            this.getSafeChunkId(wBase);
+                        }
+                    }
+                }
+                getDeterministicId(prefix = 'ir_id') {
+                    return `${prefix}_${(++this.deterministicCounter).toString(36)}`;
+                }
+                getSafeChunkId(base) {
+                    if (!this.chunkIdMap.has(base)) {
+                        this.chunkIdMap.set(base, `chunk_${base.replace(/[^a-zA-Z0-9]/g, '_')}_${this.chunkIdMap.size}`);
+                    }
+                    return this.chunkIdMap.get(base);
+                }
+            }
+            class Pipeline {
+                stages = [];
+                constructor(context) {
+                    this.context = context;
+                }
+                add(stage) {
+                    this.stages.push(stage);
+                    return this;
+                }
+                run() {
+                    for (const stage of this.stages) {
+                        stage.execute(this.context);
+                    }
+                }
+            }
+            class ExtractTopLevelDeclarationsStage {
+                name = 'ExtractTopLevelDeclarationsStage';
+                execute(context) {
+                    for (const mod of context.modules.values()) {
+                        const fileProgram = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
+                        if (!fileProgram) continue;
+                        const bodyRefs = fileProgram.props['body'];
+                        if (!Array.isArray(bodyRefs)) continue;
+                        const extractFromDecl = declNode => {
+                            if (declNode.type === 'VariableDeclaration') {
+                                for (const decltorRef of declNode.props.declarations || []) {
+                                    if (decltorRef && decltorRef.type === 'ref') {
+                                        const decltorNode = declNode.children.find(c => c.irNodeId === decltorRef.irNodeId);
+                                        if (decltorNode && decltorNode.props.id && decltorNode.props.id.type === 'ref') {
+                                            const idNode = decltorNode.children.find(c => c.irNodeId === decltorNode.props.id.irNodeId);
+                                            if (idNode && idNode.type === 'Identifier') {
+                                                context.allTopLevelDecls.set(idNode.irNodeId, {
+                                                    varName: idNode.props.name,
+                                                    declId: idNode.irNodeId,
+                                                    filePath: mod.filePath
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            } else if (declNode.type === 'FunctionDeclaration' || declNode.type === 'ClassDeclaration') {
+                                if (declNode.props.id && declNode.props.id.type === 'ref') {
+                                    const idNode = declNode.children.find(c => c.irNodeId === declNode.props.id.irNodeId);
+                                    if (idNode && idNode.type === 'Identifier') {
+                                        context.allTopLevelDecls.set(idNode.irNodeId, {
+                                            varName: idNode.props.name,
+                                            declId: idNode.irNodeId,
+                                            filePath: mod.filePath
+                                        });
+                                    }
+                                }
+                            }
+                        };
+                        for (const ref of bodyRefs) {
+                            if (!ref || ref.type !== 'ref') continue;
+                            const child = fileProgram.children.find(c => c.irNodeId === ref.irNodeId);
+                            if (!child) continue;
+                            extractFromDecl(child);
+                            if (child.type === 'ExportNamedDeclaration' || child.type === 'ExportDefaultDeclaration') {
+                                const declRef = child.props['declaration'];
+                                if (declRef && declRef.type === 'ref') {
+                                    const declNode = child.children.find(c => c.irNodeId === declRef.irNodeId);
+                                    if (declNode) extractFromDecl(declNode);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            class ResolveExternalImportsStage {
+                name = 'ResolveExternalImportsStage';
+                execute(context) {
+                    for (const mod of context.modules.values()) {
+                        const fileProgram = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
+                        if (!fileProgram) continue;
+                        const bodyRefs = fileProgram.props['body'];
+                        if (!Array.isArray(bodyRefs)) continue;
+                        for (const ref of bodyRefs) {
+                            if (!ref || ref.type !== 'ref') continue;
+                            const child = fileProgram.children.find(c => c.irNodeId === ref.irNodeId);
+                            if (!child || child.type !== 'ImportDeclaration') continue;
+                            const sourceRef = child.props['source'];
+                            if (sourceRef && sourceRef.type === 'ref') {
+                                const sourceNode = child.children.find(c => c.irNodeId === sourceRef.irNodeId);
+                                if (sourceNode && context.isExternalModule(sourceNode.props['value'], mod.filePath)) {
+                                    const sourceVal = sourceNode.props['value'];
+                                    const resolvedPath = context.resolvePath(mod.filePath, sourceVal);
+                                    const isAssetFlag = context.isAsset(resolvedPath);
+                                    if (!isAssetFlag) {
+                                        if (!context.extImportAdoptedDecls.has(sourceVal)) {
+                                            context.extImportAdoptedDecls.set(sourceVal, {
+                                                namedDeclIds: new Map()
+                                            });
+                                        }
+                                        const adopted = context.extImportAdoptedDecls.get(sourceVal);
+                                        const specifiers = child.props['specifiers'] || [];
+                                        for (const specRef of specifiers) {
+                                            if (specRef && specRef.type === 'ref') {
+                                                const specNode = child.children.find(c => c.irNodeId === specRef.irNodeId);
+                                                if (specNode && specNode.props['local'] && specNode.props['local'].type === 'ref') {
+                                                    const localNode = specNode.children.find(c => c.irNodeId === specNode.props['local'].irNodeId);
+                                                    if (localNode && localNode.type === 'Identifier') {
+                                                        const localDeclId = localNode.irNodeId;
+                                                        const localName = localNode.props.name;
+                                                        if (specNode.type === 'ImportDefaultSpecifier') {
+                                                            if (adopted.defaultDeclId) {
+                                                                context.extImportRedirects.set(localDeclId, adopted.defaultDeclId);
+                                                            } else {
+                                                                adopted.defaultDeclId = localDeclId;
+                                                                context.allTopLevelDecls.set(localDeclId, {
+                                                                    varName: localName,
+                                                                    declId: localDeclId,
+                                                                    filePath: mod.filePath
+                                                                });
+                                                            }
+                                                        } else if (specNode.type === 'ImportNamespaceSpecifier') {
+                                                            if (adopted.namespaceDeclId) {
+                                                                context.extImportRedirects.set(localDeclId, adopted.namespaceDeclId);
+                                                            } else {
+                                                                adopted.namespaceDeclId = localDeclId;
+                                                                context.allTopLevelDecls.set(localDeclId, {
+                                                                    varName: localName,
+                                                                    declId: localDeclId,
+                                                                    filePath: mod.filePath
+                                                                });
+                                                            }
+                                                        } else if (specNode.type === 'ImportSpecifier') {
+                                                            const importedRef = specNode.props['imported'];
+                                                            let importedName = localName;
+                                                            if (importedRef && importedRef.type === 'ref') {
+                                                                const importedNode = specNode.children.find(c => c.irNodeId === importedRef.irNodeId);
+                                                                if (importedNode) importedName = importedNode.props['name'];
+                                                            }
+                                                            if (adopted.namedDeclIds.has(importedName)) {
+                                                                context.extImportRedirects.set(localDeclId, adopted.namedDeclIds.get(importedName));
+                                                            } else {
+                                                                adopted.namedDeclIds.set(importedName, localDeclId);
+                                                                context.allTopLevelDecls.set(localDeclId, {
+                                                                    varName: localName,
+                                                                    declId: localDeclId,
+                                                                    filePath: mod.filePath
+                                                                });
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            class BindImportResolutionsStage {
+                name = 'BindImportResolutionsStage';
+                execute(context) {
+                    for (const mod of context.modules.values()) {
+                        const refToDeclMap = context.refToDeclMaps.get(mod.filePath);
+                        if (!refToDeclMap) continue;
+                        const fileProgram = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
+                        if (!fileProgram) continue;
+                        const bodyRefs = fileProgram.props['body'];
+                        if (!Array.isArray(bodyRefs)) continue;
+                        for (const ref of bodyRefs) {
+                            if (!ref || ref.type !== 'ref') continue;
+                            const child = fileProgram.children.find(c => c.irNodeId === ref.irNodeId);
+                            if (!child || child.type !== 'ImportDeclaration') continue;
+                            const sourceRef = child.props['source'];
+                            if (sourceRef && sourceRef.type === 'ref') {
+                                const sourceNode = child.children.find(c => c.irNodeId === sourceRef.irNodeId);
+                                if (sourceNode && !context.isExternalModule(sourceNode.props['value'], mod.filePath)) {
+                                    const fromBase = context.getBase(context.resolvePath(mod.filePath, sourceNode.props['value']));
+                                    const fromExports = context.modules.get(fromBase)?.exports || context.modules.get(fromBase + '/index')?.exports;
+                                    if (fromExports) {
+                                        const specifiers = child.props['specifiers'] || [];
+                                        for (const specRef of specifiers) {
+                                            if (specRef && specRef.type === 'ref') {
+                                                const specNode = child.children.find(c => c.irNodeId === specRef.irNodeId);
+                                                if (specNode) {
+                                                    let importedName = 'default';
+                                                    let localNode;
+                                                    if (specNode.type === 'ImportSpecifier') {
+                                                        const importedRef = specNode.props['imported'];
+                                                        if (importedRef && importedRef.type === 'ref') {
+                                                            const importedNode = specNode.children.find(c => c.irNodeId === importedRef.irNodeId);
+                                                            if (importedNode) importedName = importedNode.props['name'];
+                                                        }
+                                                        const localRef = specNode.props['local'] || specNode.props['imported'];
+                                                        if (localRef && localRef.type === 'ref') {
+                                                            localNode = specNode.children.find(c => c.irNodeId === localRef.irNodeId);
+                                                        }
+                                                    } else if (specNode.type === 'ImportDefaultSpecifier') {
+                                                        importedName = 'default';
+                                                        const localRef = specNode.props['local'];
+                                                        if (localRef && localRef.type === 'ref') {
+                                                            localNode = specNode.children.find(c => c.irNodeId === localRef.irNodeId);
+                                                        }
+                                                    }
+                                                    if (localNode && localNode.type === 'Identifier') {
+                                                        const targetDeclId = fromExports.get(importedName);
+                                                        if (targetDeclId) {
+                                                            for (const [rId, dId] of refToDeclMap.entries()) {
+                                                                if (dId === localNode.irNodeId) refToDeclMap.set(rId, targetDeclId);
+                                                            }
+                                                        } else {
+                                                            const sourceVal = sourceNode.props['value'];
+                                                            const msg = `[Linker Error] "${importedName}" is not exported by "${sourceVal}" (imported from "${mod.filePath}").`;
+                                                            if (context.logger) context.logger({
+                                                                type: 'error',
+                                                                msg
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            class ResolveNameConflictsStage {
+                name = 'ResolveNameConflictsStage';
+                execute(context) {
+                    for (const [declId, declInfo] of context.allTopLevelDecls.entries()) {
+                        const varName = declInfo.varName;
+                        if (context.globalVariables.has(varName)) {
+                            let counter = 1;
+                            let newName = `${varName}_${counter}`;
+                            while (context.globalVariables.has(newName)) {
+                                counter++;
+                                newName = `${varName}_${counter}`;
+                            }
+                            context.renameJobs.set(declId, newName);
+                            context.globalVariables.add(newName);
+                        } else {
+                            context.globalVariables.add(varName);
+                        }
+                    }
+                }
+            }
+            class ReplaceDynamicImportsStage {
+                name = 'ReplaceDynamicImportsStage';
+                execute(context) {
+                    for (const mod of context.modules.values()) {
+                        const refToDeclMap = context.refToDeclMaps.get(mod.filePath) || new Map();
+                        const state = {
+                            counter: 0
+                        };
+                        this.replaceDynamicImports(mod.tree, refToDeclMap, mod.filePath, context, state);
+                    }
+                }
+                replaceDynamicImports(node, refToDeclMap, currentFilePath, context, state) {
+                    if (!node.children) return;
+                    for (let i = 0; i < node.children.length; i++) {
+                        const child = node.children[i];
+                        const argNode = this.getDynamicImportArg(child);
+                        if (argNode) {
+                            const modulePath = argNode.props['value'];
+                            if (modulePath && !context.isExternalModule(modulePath, currentFilePath)) {
+                                const resolvedPath = context.resolvePath(currentFilePath, modulePath);
+                                const targetBase = context.getBase(resolvedPath);
+                                context.dynamicImportedBases.add(targetBase);
+                                const thunkName = `__dynamic_import_${targetBase.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+                                let thunkDeclId = context.thunkDeclIdMap.get(thunkName);
+                                if (!thunkDeclId) {
+                                    thunkDeclId = `thunk_decl_id_${targetBase.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+                                    context.thunkDeclIdMap.set(thunkName, thunkDeclId);
+                                }
+                                const replacementNode = this.createPromiseThenDynamicImport(thunkName, state.counter++, thunkDeclId, context.parseTemplate);
+                                node.children[i] = replacementNode; // 親のpropsの参照も置き換える
+                                for (const key of Object.keys(node.props)) {
+                                    const prop = node.props[key];
+                                    if (prop && prop.type === 'ref' && prop.irNodeId === child.irNodeId) {
+                                        node.props[key] = {
+                                            type: 'ref',
+                                            irNodeId: replacementNode.irNodeId
+                                        };
+                                    } else if (Array.isArray(prop)) {
+                                        for (let pIdx = 0; pIdx < prop.length; pIdx++) {
+                                            if (prop[pIdx] && prop[pIdx].type === 'ref' && prop[pIdx].irNodeId === child.irNodeId) {
+                                                prop[pIdx] = {
+                                                    type: 'ref',
+                                                    irNodeId: replacementNode.irNodeId
+                                                };
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        const targetNode = node.children[i];
+                        this.replaceDynamicImports(targetNode, refToDeclMap, currentFilePath, context, state);
+                    }
+                }
+                getDynamicImportArg(child) {
+                    // 1. Babelの新しい ImportExpression 仕様への対応
+                    if (child.type === 'ImportExpression') {
+                        const sourceRef = child.props['source'];
+                        if (sourceRef && sourceRef.type === 'ref') {
+                            const arg = child.children.find(c => c.irNodeId === sourceRef.irNodeId);
+                            if (arg && (arg.type === 'StringLiteral' || arg.type === 'Literal')) {
+                                return arg;
+                            }
+                        }
+                    } // 2. 従来の CallExpression (callee: Import) 仕様への対応
+                    else if (child.type === 'CallExpression') {
+                        const calleeRef = child.props['callee'];
+                        if (calleeRef && calleeRef.type === 'ref') {
+                            const calleeNode = child.children.find(c => c.irNodeId === calleeRef.irNodeId);
+                            if (calleeNode && calleeNode.type === 'Import') {
+                                const args = child.props['arguments'] || [];
+                                if (args.length > 0 && args[0].type === 'ref') {
+                                    const arg = child.children.find(c => c.irNodeId === args[0].irNodeId);
+                                    if (arg && (arg.type === 'StringLiteral' || arg.type === 'Literal')) {
+                                        return arg;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return undefined;
+                }
+                createPromiseThenDynamicImport(thunkName, counter, thunkDeclId, parseTemplate) {
+                    const code = `Promise.resolve().then(() => ${thunkName}());`;
+                    const astList = parseTemplate(code);
+                    const exprStmt = astList[0]; // ExpressionStatement
+                    const walk = node => {
+                        if (node.type === 'Identifier' && node.props['name'] === thunkName) {
+                            node.props['_declId'] = thunkDeclId;
+                        }
+                        if (node.children) node.children.forEach(walk);
+                    };
+                    walk(exprStmt);
+                    const exprRef = exprStmt.props['expression'];
+                    return exprStmt.children.find(c => c.irNodeId === exprRef.irNodeId);
+                }
+            }
+            class PrepareMergedScopeStage {
+                name = 'PrepareMergedScopeStage';
+                execute(context) {
+                    // 1. スコープ情報コンテナの初期化
+                    context.mergedScopeInfo = {
+                        bindings: new Map(),
+                        scopes: new Map(),
+                        escapedVars: new Set(),
+                        errors: []
+                    }; // 2. 衝突防止用の一意な名前生成
+                    context.spawnFuncName = context.getDeterministicId('__spawn');
+                    context.chunkUrlFuncName = context.getDeterministicId('__getChunkUrl'); // 3. 結合用 IRRoot の作成
+                    context.linkedRoot = {
+                        type: 'IRRoot',
+                        irNodeId: 'ir_root_linked',
+                        filePath: 'bundle.js',
+                        props: {},
+                        children: [{
+                            type: 'File',
+                            irNodeId: 'ir_file_linked',
+                            props: {
+                                program: {
+                                    type: 'ref',
+                                    irNodeId: 'ir_program_linked'
+                                },
+                                comments: [],
+                                tokens: []
+                            },
+                            children: [{
+                                type: 'Program',
+                                irNodeId: 'ir_program_linked',
+                                props: {
+                                    sourceType: 'module',
+                                    body: [],
+                                    directives: []
+                                },
+                                children: []
+                            }]
+                        }],
+                        scopeInfo: context.mergedScopeInfo
+                    }; // 4. 各ファイルのスコープ情報のマージとリネームの適用
+                    for (const tree of context.irTrees) {
+                        const basePath = context.getBase(tree.filePath);
+                        const mod = context.modules.get(basePath) || context.modules.get(basePath + '/index');
+                        if (!mod) continue;
+                        const isEntryFile = context.entryBasePaths.has(basePath) || context.entryBasePaths.has(basePath + '/index');
+                        if (tree.scopeInfo) {
+                            // bindings マージ & renameJobsの適用
+                            for (const [id, binding] of tree.scopeInfo.bindings.entries()) {
+                                const finalName = context.renameJobs.get(id) || binding.name;
+                                context.mergedScopeInfo.bindings.set(id, {
+                                    ...binding,
+                                    name: finalName
+                                });
+                            } // scopes マージ
+                            for (const [id, scope] of tree.scopeInfo.scopes.entries()) {
+                                context.mergedScopeInfo.scopes.set(id, {
+                                    ...scope
+                                });
+                            } // escapedVars マージ
+                            for (const id of tree.scopeInfo.escapedVars) {
+                                context.mergedScopeInfo.escapedVars.add(id);
+                            } // errors マージ
+                            context.mergedScopeInfo.errors.push(...tree.scopeInfo.errors);
+                        } // エントリーポイントからのエクスポートされた定義を escapedVars に追加する
+                        if (isEntryFile) {
+                            for (const declId of mod.exports.values()) {
+                                const actualDeclId = context.extImportRedirects.get(declId) || declId;
+                                context.mergedScopeInfo.escapedVars.add(actualDeclId);
+                            }
+                        }
+                    }
+                }
+            }
+            class ASTTransformer {
+                constructor(rules, options) {
+                    this.rules = rules;
+                    this.options = options;
+                }
+                transform(rootNode, context) {
+                    const walk = (node, parent) => {
+                        // 1. ルールがマッチした場合は早期に適用し、自動での子ノード走査はスキップする（ショートサーキット）
+                        for (const rule of this.rules) {
+                            if (rule.match(node, context)) {
+                                return rule.transform(node, context, walk, parent);
+                            }
+                        } // 2. ルールが適用されなかった場合のみ、デフォルトで子ノードを再帰走査する
+                        let hasChanges = false;
+                        const newChildren = [];
+                        if (node.children) {
+                            for (const child of node.children) {
+                                const newChild = walk(child, node);
+                                newChildren.push(newChild);
+                                if (newChild !== child) {
+                                    hasChanges = true;
+                                }
+                            }
+                        } // nodeProps 内の参照を更新（ID変更に伴う props['body'] 等の参照の同期）
+                        const newProps = {};
+                        for (const [key, val] of Object.entries(node.props)) {
+                            if (Array.isArray(val)) {
+                                const newArray = [];
+                                for (const item of val) {
+                                    if (item && item.type === 'ref') {
+                                        // 1. オプションで明示的に指定された置換ID
+                                        const replacedId = this.options?.replaceId?.(item.irNodeId);
+                                        if (replacedId) {
+                                            newArray.push({
+                                                type: 'ref',
+                                                irNodeId: replacedId
+                                            });
+                                            hasChanges = true;
+                                            continue;
+                                        } // 2. 子ノード走査によるIDの変化を追従
+                                        const tChild = newChildren.find(c => c.irNodeId === item.irNodeId || c.props._originalId === item.irNodeId);
+                                        if (tChild && tChild.irNodeId !== item.irNodeId) {
+                                            newArray.push({
+                                                type: 'ref',
+                                                irNodeId: tChild.irNodeId
+                                            });
+                                            hasChanges = true;
+                                            continue;
+                                        }
+                                    }
+                                    newArray.push(item);
+                                }
+                                newProps[key] = newArray;
+                            } else {
+                                if (val && val.type === 'ref') {
+                                    const refItem = val;
+                                    const replacedId = this.options?.replaceId?.(refItem.irNodeId);
+                                    if (replacedId) {
+                                        newProps[key] = {
+                                            type: 'ref',
+                                            irNodeId: replacedId
+                                        };
+                                        hasChanges = true;
+                                    } else {
+                                        const tChild = newChildren.find(c => c.irNodeId === refItem.irNodeId || c.props._originalId === refItem.irNodeId);
+                                        if (tChild && tChild.irNodeId !== refItem.irNodeId) {
+                                            newProps[key] = {
+                                                type: 'ref',
+                                                irNodeId: tChild.irNodeId
+                                            };
+                                            hasChanges = true;
+                                        } else {
+                                            newProps[key] = val;
+                                        }
+                                    }
+                                } else {
+                                    newProps[key] = val;
+                                }
+                            }
+                        }
+                        let resultNode = node;
+                        if (hasChanges) {
+                            resultNode = {
+                                ...node,
+                                children: newChildren,
+                                props: newProps
+                            };
+                        } // 元のIDを保持（親がPropsを再構築する際のマッチング用）
+                        if (resultNode.irNodeId !== node.irNodeId && !resultNode.props._originalId) {
+                            resultNode.props._originalId = node.irNodeId;
+                        }
+                        return resultNode;
+                    };
+                    return walk(rootNode);
+                }
+            }
+            class IdentifierRenameRule {
+                match(node, context) {
+                    return node.type === 'Identifier' && context.nodeReplacements.has(node.irNodeId);
+                }
+                transform(node, context, walk, parent) {
+                    return context.nodeReplacements.get(node.irNodeId);
+                }
+            }
             class ConstantResolver {
                 declToInitMap = new Map();
                 refToDeclMap;
@@ -4203,340 +4790,340 @@
                     return node;
                 }
             }
-            let _deterministicCounter = 0;
-            function getDeterministicId(prefix = 'ir_id') {
-                return `${prefix}_${(++_deterministicCounter).toString(36)}`;
-            }
-            class ChunkMerger {
-                static merge(irTrees, modules, entryBasePaths, isExternalModule, getBase, refToDeclMaps, resolvePath, isAsset, fileExists, parseTemplate, reachabilityMap, workerEntryBases, bundleId, logger) {
-                    _deterministicCounter = 0; // ビルドごとにカウンターを初期化
-                    const allTopLevelDecls = new Map();
-                    const dynamicImportedBases = new Set(); // Workerパスから一意で安全なチャンクIDマップを作成
-                    const chunkIdMap = new Map();
-                    const getSafeChunkId = base => {
-                        if (!chunkIdMap.has(base)) {
-                            chunkIdMap.set(base, `chunk_${base.replace(/[^a-zA-Z0-9]/g, '_')}_${chunkIdMap.size}`);
-                        }
-                        return chunkIdMap.get(base);
+            class UrlConstructorRule {
+                match(node, context) {
+                    if (node.type !== 'NewExpression') return false;
+                    const calleeRef = node.props['callee'];
+                    if (!calleeRef || calleeRef.type !== 'ref') return false;
+                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
+                    if (!calleeNode || calleeNode.type !== 'Identifier' || calleeNode.props['name'] !== 'URL') return false;
+                    const args = node.props['arguments'] || [];
+                    if (args.length === 0 || args[0].type !== 'ref') return false;
+                    const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
+                    if (!firstArgNode) return false;
+                    const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath);
+                    if (!currentTree) return false;
+                    const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map();
+                    const resolver = new ConstantResolver(currentTree, refToDeclMap);
+                    const resolvedUrlArg = resolver.resolve(firstArgNode);
+                    if (!resolvedUrlArg || resolvedUrlArg.type !== 'StringLiteral' && resolvedUrlArg.type !== 'Literal') return false;
+                    const val = resolvedUrlArg.props['value'];
+                    if (!val || typeof val !== 'string' || val.length <= 2 || /^(https?:)?\/\//i.test(val)) return false;
+                    const resolved = context.resolvePath(context.currentFilePath, val);
+                    const base = context.getBase(resolved);
+                    return !!context.workerEntryBases && context.workerEntryBases.has(base);
+                }
+                transform(node, context, walk, parent) {
+                    const calleeRef = node.props['callee'];
+                    const args = node.props['arguments'] || [];
+                    const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
+                    const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath);
+                    const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map();
+                    const resolver = new ConstantResolver(currentTree, refToDeclMap);
+                    const resolvedUrlArg = resolver.resolve(firstArgNode);
+                    const val = resolvedUrlArg.props['value'];
+                    const resolved = context.resolvePath(context.currentFilePath, val);
+                    const base = context.getBase(resolved);
+                    const safeChunkId = context.getSafeChunkId(base);
+                    if (context.logger) {
+                        context.logger({
+                            type: 'info',
+                            msg: `[ChunkMerger] Successfully inlined URL constructor call to "${val}" -> replaced with ${context.chunkUrlFuncName}("${safeChunkId}")`
+                        });
+                    }
+                    context.needsChunkUrlBoilerplate = true;
+                    const genId = () => context.getDeterministicId('ir_chunk_url');
+                    const calleeIdent = {
+                        type: 'Identifier',
+                        irNodeId: genId(),
+                        props: {
+                            name: context.chunkUrlFuncName
+                        },
+                        children: []
                     };
-                    if (workerEntryBases) {
-                        for (const wBase of workerEntryBases) {
-                            getSafeChunkId(wBase);
-                        }
-                    } // 1. トップレベルの宣言を集約
-                    for (const mod of modules.values()) {
-                        const fileProgram = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
-                        if (!fileProgram) continue;
-                        const bodyRefs = fileProgram.props['body'];
-                        if (!Array.isArray(bodyRefs)) continue;
-                        const extractFromDecl = declNode => {
-                            if (declNode.type === 'VariableDeclaration') {
-                                for (const decltorRef of declNode.props.declarations || []) {
-                                    if (decltorRef && decltorRef.type === 'ref') {
-                                        const decltorNode = declNode.children.find(c => c.irNodeId === decltorRef.irNodeId);
-                                        if (decltorNode && decltorNode.props.id && decltorNode.props.id.type === 'ref') {
-                                            const idNode = decltorNode.children.find(c => c.irNodeId === decltorNode.props.id.irNodeId);
-                                            if (idNode && idNode.type === 'Identifier') {
-                                                allTopLevelDecls.set(idNode.irNodeId, {
-                                                    varName: idNode.props.name,
-                                                    declId: idNode.irNodeId,
-                                                    filePath: mod.filePath
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            } else if (declNode.type === 'FunctionDeclaration' || declNode.type === 'ClassDeclaration') {
-                                if (declNode.props.id && declNode.props.id.type === 'ref') {
-                                    const idNode = declNode.children.find(c => c.irNodeId === declNode.props.id.irNodeId);
-                                    if (idNode && idNode.type === 'Identifier') {
-                                        allTopLevelDecls.set(idNode.irNodeId, {
-                                            varName: idNode.props.name,
-                                            declId: idNode.irNodeId,
-                                            filePath: mod.filePath
-                                        });
-                                    }
-                                }
-                            }
-                        };
-                        for (const ref of bodyRefs) {
-                            if (!ref || ref.type !== 'ref') continue;
-                            const child = fileProgram.children.find(c => c.irNodeId === ref.irNodeId);
-                            if (!child) continue;
-                            extractFromDecl(child);
-                            if (child.type === 'ExportNamedDeclaration' || child.type === 'ExportDefaultDeclaration') {
-                                const declRef = child.props['declaration'];
-                                if (declRef && declRef.type === 'ref') {
-                                    const declNode = child.children.find(c => c.irNodeId === declRef.irNodeId);
-                                    if (declNode) extractFromDecl(declNode);
-                                }
-                            }
-                        }
-                    } // 2. 外部インポートの代表定義とリダイレクト解決
-                    const extImportAdoptedDecls = new Map();
-                    const extImportRedirects = new Map();
-                    for (const mod of modules.values()) {
-                        const fileProgram = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
-                        if (!fileProgram) continue;
-                        const bodyRefs = fileProgram.props['body'];
-                        if (!Array.isArray(bodyRefs)) continue;
-                        for (const ref of bodyRefs) {
-                            if (!ref || ref.type !== 'ref') continue;
-                            const child = fileProgram.children.find(c => c.irNodeId === ref.irNodeId);
-                            if (!child || child.type !== 'ImportDeclaration') continue;
-                            const sourceRef = child.props['source'];
-                            if (sourceRef && sourceRef.type === 'ref') {
-                                const sourceNode = child.children.find(c => c.irNodeId === sourceRef.irNodeId);
-                                if (sourceNode && isExternalModule(sourceNode.props['value'], mod.filePath)) {
-                                    const sourceVal = sourceNode.props['value'];
-                                    const resolvedPath = resolvePath(mod.filePath, sourceVal);
-                                    const isAssetFlag = isAsset(resolvedPath);
-                                    if (!isAssetFlag) {
-                                        if (!extImportAdoptedDecls.has(sourceVal)) {
-                                            extImportAdoptedDecls.set(sourceVal, {
-                                                namedDeclIds: new Map()
-                                            });
-                                        }
-                                        const adopted = extImportAdoptedDecls.get(sourceVal);
-                                        const specifiers = child.props['specifiers'] || [];
-                                        for (const specRef of specifiers) {
-                                            if (specRef && specRef.type === 'ref') {
-                                                const specNode = child.children.find(c => c.irNodeId === specRef.irNodeId);
-                                                if (specNode && specNode.props['local'] && specNode.props['local'].type === 'ref') {
-                                                    const localNode = specNode.children.find(c => c.irNodeId === specNode.props['local'].irNodeId);
-                                                    if (localNode && localNode.type === 'Identifier') {
-                                                        const localDeclId = localNode.irNodeId;
-                                                        const localName = localNode.props.name;
-                                                        if (specNode.type === 'ImportDefaultSpecifier') {
-                                                            if (adopted.defaultDeclId) {
-                                                                extImportRedirects.set(localDeclId, adopted.defaultDeclId);
-                                                            } else {
-                                                                adopted.defaultDeclId = localDeclId;
-                                                                allTopLevelDecls.set(localDeclId, {
-                                                                    varName: localName,
-                                                                    declId: localDeclId,
-                                                                    filePath: mod.filePath
-                                                                });
-                                                            }
-                                                        } else if (specNode.type === 'ImportNamespaceSpecifier') {
-                                                            if (adopted.namespaceDeclId) {
-                                                                extImportRedirects.set(localDeclId, adopted.namespaceDeclId);
-                                                            } else {
-                                                                adopted.namespaceDeclId = localDeclId;
-                                                                allTopLevelDecls.set(localDeclId, {
-                                                                    varName: localName,
-                                                                    declId: localDeclId,
-                                                                    filePath: mod.filePath
-                                                                });
-                                                            }
-                                                        } else if (specNode.type === 'ImportSpecifier') {
-                                                            const importedRef = specNode.props['imported'];
-                                                            let importedName = localName;
-                                                            if (importedRef && importedRef.type === 'ref') {
-                                                                const importedNode = specNode.children.find(c => c.irNodeId === importedRef.irNodeId);
-                                                                if (importedNode) importedName = importedNode.props['name'];
-                                                            }
-                                                            if (adopted.namedDeclIds.has(importedName)) {
-                                                                extImportRedirects.set(localDeclId, adopted.namedDeclIds.get(importedName));
-                                                            } else {
-                                                                adopted.namedDeclIds.set(importedName, localDeclId);
-                                                                allTopLevelDecls.set(localDeclId, {
-                                                                    varName: localName,
-                                                                    declId: localDeclId,
-                                                                    filePath: mod.filePath
-                                                                });
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } // 3. インポート解決の整合性（重複バインドの解消）
-                    for (const mod of modules.values()) {
-                        const refToDeclMap = refToDeclMaps.get(mod.filePath);
-                        if (!refToDeclMap) continue;
-                        const fileProgram = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
-                        if (!fileProgram) continue;
-                        const bodyRefs = fileProgram.props['body'];
-                        if (!Array.isArray(bodyRefs)) continue;
-                        for (const ref of bodyRefs) {
-                            if (!ref || ref.type !== 'ref') continue;
-                            const child = fileProgram.children.find(c => c.irNodeId === ref.irNodeId);
-                            if (!child || child.type !== 'ImportDeclaration') continue;
-                            const sourceRef = child.props['source'];
-                            if (sourceRef && sourceRef.type === 'ref') {
-                                const sourceNode = child.children.find(c => c.irNodeId === sourceRef.irNodeId);
-                                if (sourceNode && !isExternalModule(sourceNode.props['value'], mod.filePath)) {
-                                    const fromBase = getBase(resolvePath(mod.filePath, sourceNode.props['value']));
-                                    const fromExports = modules.get(fromBase)?.exports || modules.get(fromBase + '/index')?.exports;
-                                    if (fromExports) {
-                                        const specifiers = child.props['specifiers'] || [];
-                                        for (const specRef of specifiers) {
-                                            if (specRef && specRef.type === 'ref') {
-                                                const specNode = child.children.find(c => c.irNodeId === specRef.irNodeId);
-                                                if (specNode) {
-                                                    let importedName = 'default';
-                                                    let localNode;
-                                                    if (specNode.type === 'ImportSpecifier') {
-                                                        const importedRef = specNode.props['imported'];
-                                                        if (importedRef && importedRef.type === 'ref') {
-                                                            const importedNode = specNode.children.find(c => c.irNodeId === importedRef.irNodeId);
-                                                            if (importedNode) importedName = importedNode.props['name'];
-                                                        }
-                                                        const localRef = specNode.props['local'] || specNode.props['imported'];
-                                                        if (localRef && localRef.type === 'ref') localNode = specNode.children.find(c => c.irNodeId === localRef.irNodeId);
-                                                    } else if (specNode.type === 'ImportDefaultSpecifier') {
-                                                        importedName = 'default';
-                                                        const localRef = specNode.props['local'];
-                                                        if (localRef && localRef.type === 'ref') localNode = specNode.children.find(c => c.irNodeId === localRef.irNodeId);
-                                                    }
-                                                    if (localNode && localNode.type === 'Identifier') {
-                                                        const targetDeclId = fromExports.get(importedName);
-                                                        if (targetDeclId) {
-                                                            for (const [rId, dId] of refToDeclMap.entries()) {
-                                                                if (dId === localNode.irNodeId) refToDeclMap.set(rId, targetDeclId);
-                                                            }
-                                                        } else {
-                                                            const sourceVal = sourceNode.props['value'];
-                                                            const msg = `[Linker Error] "${importedName}" is not exported by "${sourceVal}" (imported from "${mod.filePath}").`;
-                                                            if (logger) logger({
-                                                                type: 'error',
-                                                                msg
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } // 4. 変数名の競合解決 (Name Mangling)
-                    const renameJobs = new Map();
-                    const globalVariables = new Set();
-                    for (const [declId, declInfo] of allTopLevelDecls.entries()) {
-                        const varName = declInfo.varName;
-                        if (globalVariables.has(varName)) {
-                            let counter = 1;
-                            let newName = `${varName}_${counter}`;
-                            while (globalVariables.has(newName)) {
-                                counter++;
-                                newName = `${varName}_${counter}`;
-                            }
-                            renameJobs.set(declId, newName);
-                            globalVariables.add(newName);
-                        } else {
-                            globalVariables.add(varName);
-                        }
-                    } // 5. 動的インポート（import()）の置換
-                    const thunkDeclIdMap = new Map();
-                    for (const mod of modules.values()) {
-                        const refToDeclMap = refToDeclMaps.get(mod.filePath) || new Map();
-                        const state = {
-                            counter: 0
-                        };
-                        this.replaceDynamicImports(mod.tree, refToDeclMap, mod.filePath, resolvePath, modules, isExternalModule, getBase, dynamicImportedBases, thunkDeclIdMap, state, parseTemplate);
-                    } // 6. 統合後の AST (IRRoot) の初期化
-                    const mergedScopeInfo = {
-                        bindings: new Map(),
-                        scopes: new Map(),
-                        escapedVars: new Set(),
-                        errors: []
-                    }; // 関数名衝突を回避するための識別子
-                    const spawnFuncName = getDeterministicId('__spawn');
-                    let needsSpawnBoilerplate = false;
-                    const chunkUrlFuncName = getDeterministicId('__getChunkUrl');
-                    let needsChunkUrlBoilerplate = false;
-                    const linkedRoot = {
-                        type: 'IRRoot',
-                        irNodeId: 'ir_root_linked',
-                        filePath: 'bundle.js',
-                        props: {},
-                        children: [{
-                            type: 'File',
-                            irNodeId: 'ir_file_linked',
-                            props: {
-                                program: {
-                                    type: 'ref',
-                                    irNodeId: 'ir_program_linked'
-                                },
-                                comments: [],
-                                tokens: []
+                    const argNode = {
+                        type: 'StringLiteral',
+                        irNodeId: genId(),
+                        props: {
+                            value: safeChunkId
+                        },
+                        children: []
+                    };
+                    return {
+                        type: 'CallExpression',
+                        irNodeId: node.irNodeId,
+                        props: {
+                            callee: {
+                                type: 'ref',
+                                irNodeId: calleeIdent.irNodeId
                             },
-                            children: [{
-                                type: 'Program',
-                                irNodeId: 'ir_program_linked',
-                                props: {
-                                    sourceType: 'module',
-                                    body: [],
-                                    directives: []
-                                },
-                                children: []
+                            arguments: [{
+                                type: 'ref',
+                                irNodeId: argNode.irNodeId
                             }]
-                        }],
-                        scopeInfo: mergedScopeInfo
+                        },
+                        children: [calleeIdent, argNode]
                     };
-                    const programNode = linkedRoot.children[0].children[0];
-                    const globalExternalImports = []; // 仕分け用 Statement 集合
-                    const commonStatements = [];
-                    const mainStatements = [];
-                    const workerStatementsMap = new Map();
-                    for (const wBase of workerEntryBases || []) {
-                        workerStatementsMap.set(wBase, []);
-                    } // 7. 各ファイルのスコープ情報のマージ、名前置換、および AST の結合
-                    for (const tree of irTrees) {
-                        const basePath = getBase(tree.filePath);
-                        const mod = modules.get(basePath) || modules.get(basePath + '/index');
-                        if (!mod) continue;
-                        const isEntryFile = entryBasePaths.has(basePath) || entryBasePaths.has(basePath + '/index');
-                        const isWorkerEntryFile = workerEntryBases && (workerEntryBases.has(basePath) || workerEntryBases.has(basePath + '/index')) && !isEntryFile;
-                        if (tree.scopeInfo) {
-                            for (const [id, binding] of tree.scopeInfo.bindings.entries()) {
-                                let finalName = binding.name;
-                                if (renameJobs.has(id)) {
-                                    finalName = renameJobs.get(id);
-                                }
-                                mergedScopeInfo.bindings.set(id, {
-                                    ...binding,
-                                    name: finalName
-                                });
-                            }
-                            for (const [id, scope] of tree.scopeInfo.scopes.entries()) mergedScopeInfo.scopes.set(id, {
-                                ...scope
+                }
+            }
+            class WorkerConstructorRule {
+                match(node, context) {
+                    if (node.type !== 'NewExpression') return false;
+                    const calleeRef = node.props['callee'];
+                    if (!calleeRef || calleeRef.type !== 'ref') return false;
+                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
+                    if (!calleeNode || calleeNode.type !== 'Identifier') return false;
+                    const name = calleeNode.props['name'];
+                    if (name !== 'Worker' && name !== 'SharedWorker') return false;
+                    const args = node.props['arguments'] || [];
+                    if (args.length === 0 || args[0].type !== 'ref') return false;
+                    const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
+                    if (!firstArgNode) return false;
+                    const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath);
+                    if (!currentTree) return false;
+                    const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map();
+                    const resolver = new ConstantResolver(currentTree, refToDeclMap);
+                    const {
+                        relativePath
+                    } = this.resolveWorkerPath(firstArgNode, resolver);
+                    if (!relativePath || /^(https?:)?\/\//i.test(relativePath)) return false;
+                    const resolved = context.resolvePath(context.currentFilePath, relativePath);
+                    const base = context.getBase(resolved);
+                    const isExisting = context.modules.has(base) || context.modules.has(base + '/index') || context.fileExists(resolved);
+                    if (!isExisting) return false;
+                    return !!context.workerEntryBases && context.workerEntryBases.has(base);
+                }
+                transform(node, context, walk, parent) {
+                    const calleeRef = node.props['callee'];
+                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
+                    const name = calleeNode.props['name'];
+                    const args = node.props['arguments'] || [];
+                    const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
+                    const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath);
+                    const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map();
+                    const resolver = new ConstantResolver(currentTree, refToDeclMap);
+                    const {
+                        relativePath
+                    } = this.resolveWorkerPath(firstArgNode, resolver);
+                    const resolved = context.resolvePath(context.currentFilePath, relativePath);
+                    const workerId = context.getBase(resolved);
+                    const safeChunkId = context.getSafeChunkId(workerId);
+                    if (context.logger) {
+                        context.logger({
+                            type: 'info',
+                            msg: `[ChunkMerger] Successfully inlined ${name} constructor call to "${relativePath}" -> replaced with ${context.spawnFuncName}("${safeChunkId}")`
+                        });
+                    }
+                    context.needsSpawnBoilerplate = true;
+                    context.needsChunkUrlBoilerplate = true;
+                    const genId = () => context.getDeterministicId('ir_spawn_call');
+                    const spawnIdent = {
+                        type: 'Identifier',
+                        irNodeId: genId(),
+                        props: {
+                            name: context.spawnFuncName
+                        },
+                        children: []
+                    };
+                    const argStrNode = {
+                        type: 'StringLiteral',
+                        irNodeId: genId(),
+                        props: {
+                            value: safeChunkId
+                        },
+                        children: []
+                    };
+                    const typeStrNode = {
+                        type: 'StringLiteral',
+                        irNodeId: genId(),
+                        props: {
+                            value: name
+                        },
+                        children: []
+                    };
+                    const callArgs = [{
+                        type: 'ref',
+                        irNodeId: argStrNode.irNodeId
+                    }, {
+                        type: 'ref',
+                        irNodeId: typeStrNode.irNodeId
+                    }];
+                    const callChildren = [spawnIdent, argStrNode, typeStrNode];
+                    if (args.length > 1) {
+                        const optNode = node.children.find(c => c.irNodeId === args[1].irNodeId);
+                        if (optNode) {
+                            // オプショナルな引数（optionsなど）があれば再帰走査したうえで追加
+                            const walkedOpt = walk(optNode, node);
+                            callArgs.push({
+                                type: 'ref',
+                                irNodeId: walkedOpt.irNodeId
                             });
-                            for (const id of tree.scopeInfo.escapedVars) mergedScopeInfo.escapedVars.add(id);
-                            mergedScopeInfo.errors.push(...tree.scopeInfo.errors);
+                            callChildren.push(walkedOpt);
+                        } else {
+                            callArgs.push(args[1]);
                         }
-                        if (isEntryFile) {
-                            for (const declId of mod.exports.values()) {
-                                const actualDeclId = extImportRedirects.has(declId) ? extImportRedirects.get(declId) : declId;
-                                mergedScopeInfo.escapedVars.add(actualDeclId);
+                    }
+                    return {
+                        type: 'CallExpression',
+                        irNodeId: node.irNodeId,
+                        props: {
+                            callee: {
+                                type: 'ref',
+                                irNodeId: spawnIdent.irNodeId
+                            },
+                            arguments: callArgs
+                        },
+                        children: callChildren
+                    };
+                }
+                resolveWorkerPath(firstArgNode, resolver) {
+                    const resolvedArg = resolver.resolve(firstArgNode);
+                    if (!resolvedArg) {
+                        return {
+                            relativePath: null,
+                            unresolvedReason: 'Unable to resolve first argument'
+                        };
+                    }
+                    if (resolvedArg.type === 'NewExpression') {
+                        const calleeRef2 = resolvedArg.props['callee'];
+                        if (calleeRef2 && calleeRef2.type === 'ref') {
+                            const calleeNode2 = resolvedArg.children.find(c => c.irNodeId === calleeRef2.irNodeId);
+                            if (calleeNode2 && calleeNode2.type === 'Identifier' && calleeNode2.props['name'] === 'URL') {
+                                const urlArgs = resolvedArg.props['arguments'] || [];
+                                if (urlArgs.length > 0 && urlArgs[0].type === 'ref') {
+                                    const urlFirstArgNode = resolvedArg.children.find(c => c.irNodeId === urlArgs[0].irNodeId);
+                                    if (urlFirstArgNode) {
+                                        const resolvedUrlArg = resolver.resolve(urlFirstArgNode);
+                                        if (resolvedUrlArg && (resolvedUrlArg.type === 'StringLiteral' || resolvedUrlArg.type === 'Literal')) {
+                                            return {
+                                                relativePath: resolvedUrlArg.props['value'],
+                                                unresolvedReason: null
+                                            };
+                                        }
+                                        return {
+                                            relativePath: null,
+                                            unresolvedReason: `URL constructor first argument resolved to non-string: "${resolvedUrlArg?.type || 'unknown'}"`
+                                        };
+                                    }
+                                }
+                                return {
+                                    relativePath: null,
+                                    unresolvedReason: 'URL constructor has no arguments'
+                                };
+                            }
+                            return {
+                                relativePath: null,
+                                unresolvedReason: `Instantiation of class other than URL: "${calleeNode2?.props['name'] || 'unknown'}"`
+                            };
+                        }
+                    } else if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
+                        return {
+                            relativePath: resolvedArg.props['value'],
+                            unresolvedReason: null
+                        };
+                    }
+                    return {
+                        relativePath: null,
+                        unresolvedReason: `Argument resolved to non-string/non-URL type: "${resolvedArg.type}"`
+                    };
+                }
+            }
+            class ImportScriptsRule {
+                match(node, context) {
+                    if (node.type !== 'CallExpression') return false;
+                    const calleeRef = node.props['callee'];
+                    if (!calleeRef || calleeRef.type !== 'ref') return false;
+                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
+                    return !!calleeNode && calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'importScripts';
+                }
+                transform(node, context, walk, parent) {
+                    const calleeRef = node.props['callee'];
+                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
+                    const argsRef = node.props['arguments'] || [];
+                    const remainingArgsRefs = [];
+                    const remainingChildren = [];
+                    const replacedCallee = walk(calleeNode, node);
+                    remainingChildren.push(replacedCallee);
+                    for (const argRef of argsRef) {
+                        if (argRef && argRef.type === 'ref') {
+                            const argNode = node.children.find(c => c.irNodeId === argRef.irNodeId);
+                            if (argNode) {
+                                if (argNode.type === 'StringLiteral') {
+                                    const pathVal = argNode.props['value'];
+                                    if (context.isExternalModule(pathVal, context.currentFilePath)) {
+                                        const replacedArg = walk(argNode, node);
+                                        remainingArgsRefs.push({
+                                            type: 'ref',
+                                            irNodeId: replacedArg.irNodeId
+                                        });
+                                        remainingChildren.push(replacedArg);
+                                    }
+                                } else {
+                                    const replacedArg = walk(argNode, node);
+                                    remainingArgsRefs.push({
+                                        type: 'ref',
+                                        irNodeId: replacedArg.irNodeId
+                                    });
+                                    remainingChildren.push(replacedArg);
+                                }
                             }
                         }
+                    }
+                    if (remainingArgsRefs.length === 0) {
+                        return {
+                            type: 'Identifier',
+                            irNodeId: node.irNodeId,
+                            props: {
+                                name: 'undefined'
+                            },
+                            children: []
+                        };
+                    }
+                    return {
+                        ...node,
+                        props: {
+                            ...node.props,
+                            callee: {
+                                type: 'ref',
+                                irNodeId: replacedCallee.irNodeId
+                            },
+                            arguments: remainingArgsRefs
+                        },
+                        children: remainingChildren
+                    };
+                }
+            }
+            class TransformASTNodesStage {
+                name = 'TransformASTNodesStage';
+                execute(context) {
+                    const transformer = new ASTTransformer([new IdentifierRenameRule(), new UrlConstructorRule(), new WorkerConstructorRule(), new ImportScriptsRule()], {
+                        replaceId: id => context.nodeReplacements.get(id)?.irNodeId
+                    });
+                    for (const tree of context.irTrees) {
+                        const basePath = context.getBase(tree.filePath);
+                        const mod = context.modules.get(basePath) || context.modules.get(basePath + '/index');
+                        if (!mod) continue;
+                        const isEntryFile = context.entryBasePaths.has(basePath) || context.entryBasePaths.has(basePath + '/index');
+                        const isWorkerEntryFile = context.workerEntryBases && (context.workerEntryBases.has(basePath) || context.workerEntryBases.has(basePath + '/index')) && !isEntryFile;
                         const fileProgram = tree.children[0]?.children?.find(c => c.type === 'Program');
-                        if (!fileProgram) continue;
+                        if (!fileProgram) continue; // 1. 各ファイル処理時のコンテキスト初期化
+                        context.currentFilePath = tree.filePath;
+                        context.nodeReplacements.clear(); // 2. このファイルの識別子リネーム用マッピングを構築
+                        const refToDeclMap = context.refToDeclMaps.get(tree.filePath) || new Map();
                         const irNodeMap = new Map();
                         const buildMaps = n => {
                             irNodeMap.set(n.irNodeId, n);
                             if (n.children) n.children.forEach(buildMaps);
                         };
                         buildMaps(fileProgram);
-                        const refToDeclMap = refToDeclMaps.get(tree.filePath) || new Map();
-                        const replacements = new Map();
-                        const resolver = new ConstantResolver(tree, refToDeclMap);
                         for (const [refId, resolvedDeclId] of refToDeclMap.entries()) {
-                            const actualDeclId = extImportRedirects.has(resolvedDeclId) ? extImportRedirects.get(resolvedDeclId) : resolvedDeclId;
-                            const targetInfo = allTopLevelDecls.get(actualDeclId);
+                            const actualDeclId = context.extImportRedirects.get(resolvedDeclId) || resolvedDeclId;
+                            const targetInfo = context.allTopLevelDecls.get(actualDeclId);
                             if (targetInfo) {
-                                const targetName = renameJobs.get(actualDeclId) || targetInfo.varName;
+                                const targetName = context.renameJobs.get(actualDeclId) || targetInfo.varName;
                                 const node = irNodeMap.get(refId);
                                 if (node && node.type === 'Identifier' && node.props.name !== targetName) {
-                                    replacements.set(refId, {
+                                    context.nodeReplacements.set(refId, {
                                         ...node,
                                         props: {
                                             ...node.props,
@@ -4544,11 +5131,11 @@
                                         }
                                     });
                                 }
-                            } else if (renameJobs.has(actualDeclId)) {
-                                const newName = renameJobs.get(actualDeclId);
+                            } else if (context.renameJobs.has(actualDeclId)) {
+                                const newName = context.renameJobs.get(actualDeclId);
                                 const node = irNodeMap.get(refId);
                                 if (node && node.type === 'Identifier') {
-                                    replacements.set(refId, {
+                                    context.nodeReplacements.set(refId, {
                                         ...node,
                                         props: {
                                             ...node.props,
@@ -4557,316 +5144,12 @@
                                     });
                                 }
                             }
-                        } // AST ノード再帰置換 (文字列リテラルとURLのフックに対応)
-                        const replaceNodes = (node, parentNode) => {
-                            if (replacements.has(node.irNodeId)) return replacements.get(node.irNodeId); // new URL('./worker', import.meta.url) などのURLコンストラクタパターンのフック (フォールバック)
-                            if (node.type === 'NewExpression') {
-                                const calleeRef = node.props['callee'];
-                                if (calleeRef && calleeRef.type === 'ref') {
-                                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-                                    if (calleeNode && calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'URL') {
-                                        const args = node.props['arguments'] || [];
-                                        if (args.length > 0 && args[0].type === 'ref') {
-                                            const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
-                                            if (firstArgNode) {
-                                                const resolvedUrlArg = resolver.resolve(firstArgNode);
-                                                if (resolvedUrlArg && (resolvedUrlArg.type === 'StringLiteral' || resolvedUrlArg.type === 'Literal')) {
-                                                    const val = resolvedUrlArg.props['value'];
-                                                    if (val && typeof val === 'string' && val.length > 2 && !/^(https?:)?\/\//i.test(val)) {
-                                                        const resolved = resolvePath(tree.filePath, val);
-                                                        const base = getBase(resolved);
-                                                        if (workerEntryBases && workerEntryBases.has(base)) {
-                                                            const safeChunkId = getSafeChunkId(base);
-                                                            if (logger) {
-                                                                logger({
-                                                                    type: 'info',
-                                                                    msg: `[ChunkMerger] Successfully inlined URL constructor call to "${val}" -> replaced with ${chunkUrlFuncName}("${safeChunkId}")`
-                                                                });
-                                                            }
-                                                            needsChunkUrlBoilerplate = true;
-                                                            const genId = () => getDeterministicId('ir_chunk_url');
-                                                            const calleeIdent = {
-                                                                type: 'Identifier',
-                                                                irNodeId: genId(),
-                                                                props: {
-                                                                    name: chunkUrlFuncName
-                                                                },
-                                                                children: []
-                                                            };
-                                                            const argNode = {
-                                                                type: 'StringLiteral',
-                                                                irNodeId: genId(),
-                                                                props: {
-                                                                    value: safeChunkId
-                                                                },
-                                                                children: []
-                                                            };
-                                                            return {
-                                                                type: 'CallExpression',
-                                                                irNodeId: node.irNodeId,
-                                                                props: {
-                                                                    callee: {
-                                                                        type: 'ref',
-                                                                        irNodeId: calleeIdent.irNodeId
-                                                                    },
-                                                                    arguments: [{
-                                                                        type: 'ref',
-                                                                        irNodeId: argNode.irNodeId
-                                                                    }]
-                                                                },
-                                                                children: [calleeIdent, argNode]
-                                                            };
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } // new Worker(...) を __spawn("workerId") に置換する
-                            if (node.type === 'NewExpression') {
-                                const calleeRef = node.props['callee'];
-                                if (calleeRef && calleeRef.type === 'ref') {
-                                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-                                    if (calleeNode && calleeNode.type === 'Identifier' && (calleeNode.props['name'] === 'Worker' || calleeNode.props['name'] === 'SharedWorker')) {
-                                        const name = calleeNode.props['name'];
-                                        const args = node.props['arguments'] || [];
-                                        if (args.length > 0 && args[0].type === 'ref') {
-                                            const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
-                                            if (firstArgNode) {
-                                                const resolvedArg = resolver.resolve(firstArgNode);
-                                                let relativePath = null;
-                                                let unresolvedReason = null;
-                                                if (resolvedArg.type === 'NewExpression') {
-                                                    const calleeRef2 = resolvedArg.props['callee'];
-                                                    if (calleeRef2 && calleeRef2.type === 'ref') {
-                                                        const calleeNode2 = resolvedArg.children.find(c => c.irNodeId === calleeRef2.irNodeId);
-                                                        if (calleeNode2 && calleeNode2.type === 'Identifier' && calleeNode2.props['name'] === 'URL') {
-                                                            const urlArgs = resolvedArg.props['arguments'] || [];
-                                                            if (urlArgs.length > 0 && urlArgs[0].type === 'ref') {
-                                                                const urlFirstArgNode = resolvedArg.children.find(c => c.irNodeId === urlArgs[0].irNodeId);
-                                                                if (urlFirstArgNode) {
-                                                                    const resolvedUrlArg = resolver.resolve(urlFirstArgNode);
-                                                                    if (resolvedUrlArg && (resolvedUrlArg.type === 'StringLiteral' || resolvedUrlArg.type === 'Literal')) {
-                                                                        relativePath = resolvedUrlArg.props['value'];
-                                                                    } else {
-                                                                        unresolvedReason = `URL constructor first argument resolved to non-string: "${resolvedUrlArg?.type || 'unknown'}"`;
-                                                                    }
-                                                                }
-                                                            } else {
-                                                                unresolvedReason = `URL constructor has no arguments`;
-                                                            }
-                                                        } else {
-                                                            unresolvedReason = `Instantiation of class other than URL: "${calleeNode2?.props['name'] || 'unknown'}"`;
-                                                        }
-                                                    }
-                                                } else if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
-                                                    relativePath = resolvedArg.props['value'];
-                                                } else {
-                                                    unresolvedReason = `Argument resolved to non-string/non-URL type: "${resolvedArg.type}"`;
-                                                }
-                                                if (relativePath) {
-                                                    if (/^(https?:)?\/\//i.test(relativePath)) {
-                                                        if (logger) {
-                                                            logger({
-                                                                type: 'info',
-                                                                msg: `[ChunkMerger] External network worker path detected in ${name} call: "${relativePath}" (at ${tree.filePath}). Spawning as a native external Worker.`
-                                                            });
-                                                        }
-                                                    } else {
-                                                        const resolved = resolvePath(tree.filePath, relativePath);
-                                                        const isExisting = modules.has(getBase(resolved)) || modules.has(getBase(resolved) + '/index') || fileExists(resolved);
-                                                        if (isExisting) {
-                                                            const workerId = getBase(resolved); // プレリンクフェーズ等で意図しない置換を防ぐため、
-                                                            // コンパイラが実際にWorkerと認定したパスのみボイラープレートに置換する
-                                                            if (workerEntryBases && workerEntryBases.has(workerId)) {
-                                                                const safeChunkId = getSafeChunkId(workerId);
-                                                                if (logger) {
-                                                                    logger({
-                                                                        type: 'info',
-                                                                        msg: `[ChunkMerger] Successfully inlined 	h${name} constructor call to "${relativePath}" -> replaced with ${spawnFuncName}("${safeChunkId}")`
-                                                                    });
-                                                                }
-                                                                needsSpawnBoilerplate = true;
-                                                                needsChunkUrlBoilerplate = true;
-                                                                const genId = () => getDeterministicId('ir_spawn_call');
-                                                                const spawnIdent = {
-                                                                    type: 'Identifier',
-                                                                    irNodeId: genId(),
-                                                                    props: {
-                                                                        name: spawnFuncName
-                                                                    },
-                                                                    children: []
-                                                                };
-                                                                const argStrNode = {
-                                                                    type: 'StringLiteral',
-                                                                    irNodeId: genId(),
-                                                                    props: {
-                                                                        value: safeChunkId
-                                                                    },
-                                                                    children: []
-                                                                };
-                                                                const typeStrNode = {
-                                                                    type: 'StringLiteral',
-                                                                    irNodeId: genId(),
-                                                                    props: {
-                                                                        value: name
-                                                                    },
-                                                                    children: []
-                                                                };
-                                                                const callArgs = [{
-                                                                    type: 'ref',
-                                                                    irNodeId: argStrNode.irNodeId
-                                                                }, {
-                                                                    type: 'ref',
-                                                                    irNodeId: typeStrNode.irNodeId
-                                                                }];
-                                                                const callChildren = [spawnIdent, argStrNode, typeStrNode];
-                                                                if (args.length > 1) {
-                                                                    callArgs.push(args[1]);
-                                                                    const optNode = node.children.find(c => c.irNodeId === args[1].irNodeId);
-                                                                    if (optNode) callChildren.push(optNode);
-                                                                }
-                                                                const spawnCallNode = {
-                                                                    type: 'CallExpression',
-                                                                    irNodeId: node.irNodeId,
-                                                                    props: {
-                                                                        callee: {
-                                                                            type: 'ref',
-                                                                            irNodeId: spawnIdent.irNodeId
-                                                                        },
-                                                                        arguments: callArgs
-                                                                    },
-                                                                    children: callChildren
-                                                                };
-                                                                return spawnCallNode;
-                                                            } else {
-                                                                if (logger) {
-                                                                    logger({
-                                                                        type: 'info',
-                                                                        msg: `[ChunkMerger Warning] Worker path "${relativePath}" resolved to "${workerId}" but is not present in workerEntryBases at ${tree.filePath}. It will be spawned as a native external Worker (intercepted by runtime polyfill if matched).`
-                                                                    });
-                                                                }
-                                                            }
-                                                        } else {
-                                                            if (logger) {
-                                                                logger({
-                                                                    type: 'info',
-                                                                    msg: `[ChunkMerger Warning] Worker path "${relativePath}" resolved to "${resolved}" but the file does not exist in VFS or modules at ${tree.filePath}.`
-                                                                });
-                                                            }
-                                                        }
-                                                    }
-                                                } else {
-                                                    if (logger) {
-                                                        logger({
-                                                            type: 'info',
-                                                            msg: `[ChunkMerger Warning] Unable to statically resolve ${name} argument at ${tree.filePath}. Reason: ${unresolvedReason}. Spawning as a native external Worker (intercepted by runtime polyfill if matched).`
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if (node.type === 'CallExpression') {
-                                const calleeRef = node.props['callee'];
-                                if (calleeRef && calleeRef.type === 'ref') {
-                                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-                                    if (calleeNode && calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'importScripts') {
-                                        const argsRef = node.props['arguments'] || [];
-                                        const remainingArgsRefs = [];
-                                        const remainingChildren = [];
-                                        const replacedCallee = replaceNodes(calleeNode, node);
-                                        remainingChildren.push(replacedCallee);
-                                        for (const argRef of argsRef) {
-                                            if (argRef && argRef.type === 'ref') {
-                                                const argNode = node.children.find(c => c.irNodeId === argRef.irNodeId);
-                                                if (argNode) {
-                                                    if (argNode.type === 'StringLiteral') {
-                                                        const pathVal = argNode.props['value'];
-                                                        if (isExternalModule(pathVal, tree.filePath)) {
-                                                            const replacedArg = replaceNodes(argNode, node);
-                                                            remainingArgsRefs.push({
-                                                                type: 'ref',
-                                                                irNodeId: replacedArg.irNodeId
-                                                            });
-                                                            remainingChildren.push(replacedArg);
-                                                        }
-                                                    } else {
-                                                        const replacedArg = replaceNodes(argNode, node);
-                                                        remainingArgsRefs.push({
-                                                            type: 'ref',
-                                                            irNodeId: replacedArg.irNodeId
-                                                        });
-                                                        remainingChildren.push(replacedArg);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        if (remainingArgsRefs.length === 0) {
-                                            return {
-                                                type: 'Identifier',
-                                                irNodeId: node.irNodeId,
-                                                props: {
-                                                    name: 'undefined'
-                                                },
-                                                children: []
-                                            };
-                                        } else {
-                                            return {
-                                                ...node,
-                                                props: {
-                                                    ...node.props,
-                                                    arguments: remainingArgsRefs
-                                                },
-                                                children: remainingChildren
-                                            };
-                                        }
-                                    }
-                                }
-                            }
-                            let hasChanges = false;
-                            const newChildren = [];
-                            for (const child of node.children) {
-                                const newChild = replaceNodes(child, node);
-                                newChildren.push(newChild);
-                                if (newChild !== child) hasChanges = true;
-                            }
-                            const newProps = {};
-                            for (const [key, val] of Object.entries(node.props)) {
-                                if (Array.isArray(val)) {
-                                    const newArray = [];
-                                    for (const item of val) {
-                                        if (item && item.type === 'ref' && replacements.has(item.irNodeId)) {
-                                            newArray.push({
-                                                type: 'ref',
-                                                irNodeId: replacements.get(item.irNodeId).irNodeId
-                                            });
-                                            hasChanges = true;
-                                        } else newArray.push(item);
-                                    }
-                                    newProps[key] = newArray;
-                                } else if (val && val.type === 'ref' && replacements.has(val.irNodeId)) {
-                                    newProps[key] = {
-                                        type: 'ref',
-                                        irNodeId: replacements.get(val.irNodeId).irNodeId
-                                    };
-                                    hasChanges = true;
-                                } else newProps[key] = val;
-                            }
-                            return hasChanges ? {
-                                ...node,
-                                children: newChildren,
-                                props: newProps
-                            } : node;
-                        };
-                        const isDynamic = dynamicImportedBases.has(basePath) || dynamicImportedBases.has(basePath + '/index');
-                        const fileBodyStatements = [];
-                        const updatedFileProgram = replaceNodes(fileProgram);
+                        } // 3. AST変換処理を実行
+                        const updatedFileProgram = transformer.transform(fileProgram, context);
                         const updatedBodyRefs = updatedFileProgram.props['body'];
                         if (!Array.isArray(updatedBodyRefs)) continue;
+                        const isDynamic = context.dynamicImportedBases.has(basePath) || context.dynamicImportedBases.has(basePath + '/index');
+                        const fileBodyStatements = []; // 4. ステートメントの仕分け前スキャン
                         for (let i = 0; i < updatedBodyRefs.length; i++) {
                             const childRef = updatedBodyRefs[i];
                             if (!childRef || childRef.type !== 'ref') continue;
@@ -4878,10 +5161,10 @@
                                     const sourceNode = child.children.find(c => c.irNodeId === sourceRef.irNodeId);
                                     if (sourceNode) {
                                         const sourceVal = sourceNode.props['value'];
-                                        const resolvedPath = resolvePath(tree.filePath, sourceVal);
-                                        if (isAsset(resolvedPath)) continue;
-                                        if (isExternalModule(sourceVal, tree.filePath)) {
-                                            globalExternalImports.push(child);
+                                        const resolvedPath = context.resolvePath(tree.filePath, sourceVal);
+                                        if (context.isAsset(resolvedPath)) continue;
+                                        if (context.isExternalModule(sourceVal, tree.filePath)) {
+                                            context.globalExternalImports.push(child);
                                         }
                                     }
                                 }
@@ -4907,10 +5190,10 @@
                                 node: child,
                                 originId: child.irNodeId
                             });
-                        }
+                        } // 5. 仕分け処理 (Dynamic ImportのThunk生成、または Main/Worker 分岐)
                         if (isDynamic) {
                             const thunkName = `__dynamic_import_${basePath.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-                            const thunkDeclId = thunkDeclIdMap.get(thunkName) || `thunk_decl_${basePath.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+                            const thunkDeclId = context.thunkDeclIdMap.get(thunkName) || `thunk_decl_${basePath.replace(/[^a-zA-Z0-9_]/g, '_')}`;
                             const targetExports = mod.exports;
                             const properties = [];
                             for (const [expName, declId] of targetExports.entries()) {
@@ -4919,10 +5202,10 @@
                                     targetDeclId: declId
                                 });
                             }
-                            const thunkNodes = this.createThunkFunction(thunkName, thunkDeclId, fileBodyStatements.map(s => s.node), properties, refToDeclMap, renameJobs, allTopLevelDecls, parseTemplate); // 架空のIDではなく、モジュールの全エクスポートと副作用の到達元を集約して配置先を決定する
+                            const thunkNodes = this.createThunkFunction(thunkName, thunkDeclId, fileBodyStatements.map(s => s.node), properties, refToDeclMap, context);
                             const thunkOrigins = new Set();
                             for (const declId of targetExports.values()) {
-                                const origins = reachabilityMap?.get(declId);
+                                const origins = context.reachabilityMap?.get(declId);
                                 if (origins) {
                                     for (const o of origins) {
                                         thunkOrigins.add(o);
@@ -4931,7 +5214,7 @@
                             }
                             for (const stmt of mod.statements.values()) {
                                 if (stmt.type === 'SideEffect') {
-                                    const origins = reachabilityMap?.get(stmt.irNodeId);
+                                    const origins = context.reachabilityMap?.get(stmt.irNodeId);
                                     if (origins) {
                                         for (const o of origins) {
                                             thunkOrigins.add(o);
@@ -4942,14 +5225,14 @@
                             const belongsTo = thunkOrigins.size === 0 ? 'none' : thunkOrigins.size > 1 ? 'common' : Array.from(thunkOrigins)[0];
                             for (const tNode of thunkNodes) {
                                 if (belongsTo === 'common') {
-                                    commonStatements.push(tNode);
+                                    context.commonStatements.push(tNode);
                                 } else if (belongsTo === 'main') {
-                                    mainStatements.push(tNode);
+                                    context.mainStatements.push(tNode);
                                 } else if (belongsTo !== 'none') {
-                                    let arr = workerStatementsMap.get(belongsTo);
+                                    let arr = context.workerStatementsMap.get(belongsTo);
                                     if (!arr) {
                                         arr = [];
-                                        workerStatementsMap.set(belongsTo, arr);
+                                        context.workerStatementsMap.set(belongsTo, arr);
                                     }
                                     arr.push(tNode);
                                 }
@@ -4967,7 +5250,7 @@
                                 return false;
                             };
                             const splitAndGuardVariableDeclaration = stmt => {
-                                const genId = () => getDeterministicId('ir_split_var');
+                                const genId = () => context.getDeterministicId('ir_split_var');
                                 const declNode = {
                                     type: 'VariableDeclaration',
                                     irNodeId: genId(),
@@ -4979,7 +5262,7 @@
                                 };
                                 const assignmentStmts = [];
                                 const cloneNode = n => {
-                                    const newId = getDeterministicId('ir_clone');
+                                    const newId = context.getDeterministicId('ir_clone');
                                     const newChildren = n.children ? n.children.map(cloneNode) : [];
                                     const newProps = n.props ? {
                                         ...n.props
@@ -5149,15 +5432,15 @@
                                         }
                                     }
                                 }
-                                const stmtOrigins = reachabilityMap?.get(stmtInfo.originId);
+                                const stmtOrigins = context.reachabilityMap?.get(stmtInfo.originId);
                                 if (!stmtOrigins || stmtOrigins.size === 0) {
                                     continue;
                                 }
                                 if (isWorkerEntryFile) {
-                                    let arr = workerStatementsMap.get(basePath);
+                                    let arr = context.workerStatementsMap.get(basePath);
                                     if (!arr) {
                                         arr = [];
-                                        workerStatementsMap.set(basePath, arr);
+                                        context.workerStatementsMap.set(basePath, arr);
                                     }
                                     arr.push(stmt);
                                 } else if (stmtOrigins.size > 1) {
@@ -5165,10 +5448,10 @@
                                         if (stmt.type === 'VariableDeclaration') {
                                             const splitted = splitAndGuardVariableDeclaration(stmt);
                                             for (const s of splitted) {
-                                                commonStatements.push(s);
+                                                context.commonStatements.push(s);
                                             }
                                         } else {
-                                            const genId = () => getDeterministicId('ir_side_effect_guard');
+                                            const genId = () => context.getDeterministicId('ir_side_effect_guard');
                                             const typeOfWinNode = {
                                                 type: 'UnaryExpression',
                                                 irNodeId: genId(),
@@ -5241,35 +5524,129 @@
                                                 },
                                                 children: [windowTestNode, blockNode]
                                             };
-                                            commonStatements.push(guardedStmt);
+                                            context.commonStatements.push(guardedStmt);
                                         }
                                     } else {
-                                        commonStatements.push(stmt);
+                                        context.commonStatements.push(stmt);
                                     }
                                 } else {
                                     const singleOrigin = Array.from(stmtOrigins)[0];
                                     if (singleOrigin === 'main') {
-                                        mainStatements.push(stmt);
+                                        context.mainStatements.push(stmt);
                                     } else {
-                                        let arr = workerStatementsMap.get(singleOrigin);
+                                        let arr = context.workerStatementsMap.get(singleOrigin);
                                         if (!arr) {
                                             arr = [];
-                                            workerStatementsMap.set(singleOrigin, arr);
+                                            context.workerStatementsMap.set(singleOrigin, arr);
                                         }
                                         arr.push(stmt);
                                     }
                                 }
                             }
                         }
-                    } // 8. 統合 bindings の references の再構築
-                    for (const binding of mergedScopeInfo.bindings.values()) {
+                    }
+                }
+                createThunkFunction(thunkName, thunkDeclId, bodyStatements, exportsProperties, refToDeclMap, context) {
+                    const cacheVarName = `${thunkName}_cache`;
+                    let propsCode = '';
+                    for (const prop of exportsProperties) {
+                        const targetInfo = context.allTopLevelDecls.get(prop.targetDeclId);
+                        const actualName = context.renameJobs.get(prop.targetDeclId) || (targetInfo ? targetInfo.varName : prop.keyName);
+                        propsCode += `"${prop.keyName}": ${actualName},\n`;
+                    }
+                    const code = `
+			            let ${cacheVarName};
+			            function ${thunkName}() {
+			                if (${cacheVarName}) return ${cacheVarName};
+			                __INJECT_BODY__();
+			                ${cacheVarName} = { ${propsCode} };
+			                return ${cacheVarName};
+			            }
+			        `;
+                    const astList = context.parseTemplate(code);
+                    this.replacePlaceholderWithStatements(astList[1], '__INJECT_BODY__', bodyStatements, context);
+                    const walk = node => {
+                        if (node.type === 'Identifier') {
+                            if (node.props['name'] === thunkName) {
+                                node.props['_declId'] = thunkDeclId;
+                            }
+                            for (const prop of exportsProperties) {
+                                const targetInfo = context.allTopLevelDecls.get(prop.targetDeclId);
+                                const actualName = context.renameJobs.get(prop.targetDeclId) || (targetInfo ? targetInfo.varName : prop.keyName);
+                                if (node.props['name'] === actualName && node.props['_declId'] !== thunkDeclId) {
+                                    node.props['_declId'] = prop.targetDeclId;
+                                    refToDeclMap.set(node.irNodeId, prop.targetDeclId);
+                                }
+                            }
+                        }
+                        if (node.children) node.children.forEach(walk);
+                    };
+                    astList.forEach(walk);
+                    return astList;
+                }
+                replacePlaceholderWithStatements(ast, placeholderName, statements, context) {
+                    let replaced = false;
+                    const walk = node => {
+                        if (node.type === 'BlockStatement' || node.type === 'Program') {
+                            const bodyRefs = node.props['body'];
+                            if (Array.isArray(bodyRefs)) {
+                                let indexToReplace = -1;
+                                for (let i = 0; i < bodyRefs.length; i++) {
+                                    const ref = bodyRefs[i];
+                                    if (ref && ref.type === 'ref') {
+                                        const child = node.children.find(c => c.irNodeId === ref.irNodeId);
+                                        if (child && child.type === 'ExpressionStatement') {
+                                            const exprRef = child.props['expression'];
+                                            if (exprRef && exprRef.type === 'ref') {
+                                                const exprNode = child.children.find(c => c.irNodeId === exprRef.irNodeId);
+                                                if (exprNode && exprNode.type === 'CallExpression') {
+                                                    const calleeRef = exprNode.props['callee'];
+                                                    if (calleeRef && calleeRef.type === 'ref') {
+                                                        const calleeNode = exprNode.children.find(c => c.irNodeId === calleeRef.irNodeId);
+                                                        if (calleeNode && calleeNode.type === 'Identifier' && calleeNode.props['name'] === placeholderName) {
+                                                            indexToReplace = i;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (indexToReplace !== -1) {
+                                    const targetRef = bodyRefs[indexToReplace];
+                                    const newRefs = statements.map(s => ({
+                                        type: 'ref',
+                                        irNodeId: s.irNodeId
+                                    }));
+                                    bodyRefs.splice(indexToReplace, 1, ...newRefs);
+                                    const childIndex = node.children.findIndex(c => c.irNodeId === targetRef.irNodeId);
+                                    if (childIndex !== -1) {
+                                        node.children.splice(childIndex, 1, ...statements);
+                                    }
+                                    replaced = true;
+                                }
+                            }
+                        }
+                        if (node.children) node.children.forEach(walk);
+                    };
+                    walk(ast);
+                    if (!replaced) {
+                        throw new Error(`[Compiler Internal Error] Template injection failed. Placeholder "${placeholderName}" was not found in the AST.`);
+                    }
+                }
+            }
+            class RebuildReferencesStage {
+                name = 'RebuildReferencesStage';
+                execute(context) {
+                    for (const binding of context.mergedScopeInfo.bindings.values()) {
                         binding.references = [];
                     }
-                    for (const refToDeclMap of refToDeclMaps.values()) {
+                    for (const refToDeclMap of context.refToDeclMaps.values()) {
                         for (const [refId, resolvedDeclId] of refToDeclMap.entries()) {
                             if (refId !== resolvedDeclId) {
-                                const actualDeclId = extImportRedirects.has(resolvedDeclId) ? extImportRedirects.get(resolvedDeclId) : resolvedDeclId;
-                                const binding = mergedScopeInfo.bindings.get(actualDeclId);
+                                const actualDeclId = context.extImportRedirects.get(resolvedDeclId) || resolvedDeclId;
+                                const binding = context.mergedScopeInfo.bindings.get(actualDeclId);
                                 if (binding) {
                                     if (!binding.references.includes(refId)) {
                                         binding.references.push(refId);
@@ -5277,9 +5654,14 @@
                                 }
                             }
                         }
-                    } // 9. 重複する外部インポートのマージ
-                    const mergedImports = new Map();
-                    for (const extImport of globalExternalImports) {
+                    }
+                }
+            }
+            class MergeExternalImportsStage {
+                name = 'MergeExternalImportsStage';
+                execute(context) {
+                    const mergedImports = new Map(); // 1. 重複する外部インポートを収集
+                    for (const extImport of context.globalExternalImports) {
                         const sourceRef = extImport.props['source'];
                         const sourceNode = extImport.children.find(c => c.irNodeId === sourceRef.irNodeId);
                         if (!sourceNode) continue;
@@ -5326,8 +5708,8 @@
                                 }
                             }
                         }
-                    }
-                    const generateIrId = () => getDeterministicId('ir_id');
+                    } // 2. 代表定義を元にインポート文をマージ再構築
+                    const generateIrId = () => context.getDeterministicId('ir_id');
                     for (const [sourcePath, group] of Array.from(mergedImports.entries()).reverse()) {
                         const newSpecifiers = [];
                         const newChildren = [];
@@ -5339,8 +5721,8 @@
                             const localNode = group.defaultSpecifier.children.find(c => c.irNodeId === localRef?.irNodeId);
                             let safeSpecifier = group.defaultSpecifier;
                             if (localNode && localNode.type === 'Identifier') {
-                                const actualDeclId = extImportRedirects.has(localNode.irNodeId) ? extImportRedirects.get(localNode.irNodeId) : localNode.irNodeId;
-                                const finalName = renameJobs.get(actualDeclId) || localNode.props['name'];
+                                const actualDeclId = context.extImportRedirects.get(localNode.irNodeId) || localNode.irNodeId;
+                                const finalName = context.renameJobs.get(actualDeclId) || localNode.props['name'];
                                 const newLocalNode = {
                                     ...localNode,
                                     irNodeId: actualDeclId,
@@ -5375,8 +5757,8 @@
                             if (nsLocalNode && nsLocalNode.type === 'Identifier') {
                                 const localDeclId = nsLocalNode.irNodeId;
                                 const originalName = nsLocalNode.props['name'];
-                                const actualDeclId = extImportRedirects.has(localDeclId) ? extImportRedirects.get(localDeclId) : localDeclId;
-                                const finalName = renameJobs.get(actualDeclId) || originalName;
+                                const actualDeclId = context.extImportRedirects.get(localDeclId) || localDeclId;
+                                const finalName = context.renameJobs.get(actualDeclId) || originalName;
                                 const tempName = `__ns_${originalName}_interop`;
                                 const nsInteropDeclId = generateIrId();
                                 const newNsLocalNode = {
@@ -5405,7 +5787,7 @@
                                 });
                                 newChildren.push(safeNsSpecifier);
                                 createNamespaceInteropDecl = () => {
-                                    const genId = () => getDeterministicId('ir_interop');
+                                    const genId = () => context.getDeterministicId('ir_interop');
                                     const objExpr = {
                                         type: 'ObjectExpression',
                                         irNodeId: genId(),
@@ -5523,8 +5905,8 @@
                             const localRef = spec.props['local'] || spec.props['imported'];
                             const localNode = spec.children.find(c => c.irNodeId === localRef?.irNodeId);
                             if (localNode && localNode.type === 'Identifier') {
-                                const actualDeclId = extImportRedirects.has(localNode.irNodeId) ? extImportRedirects.get(localNode.irNodeId) : localNode.irNodeId;
-                                const finalName = renameJobs.get(actualDeclId) || localNode.props['name'];
+                                const actualDeclId = context.extImportRedirects.get(localNode.irNodeId) || localNode.irNodeId;
+                                const finalName = context.renameJobs.get(actualDeclId) || localNode.props['name'];
                                 const newLocalNode = {
                                     ...localNode,
                                     irNodeId: actualDeclId,
@@ -5564,7 +5946,7 @@
                                 specifiers: newSpecifiers
                             },
                             children: newChildren
-                        };
+                        }; // 3. マージしたインポート文の依存ブランチ（Main/Worker）決定
                         let hasVariables = false;
                         const allOrigins = new Set();
                         for (const specRef of newSpecifiers) {
@@ -5575,15 +5957,15 @@
                                     hasVariables = true;
                                     const localId = localRef.irNodeId;
                                     const localNode = sNode.children.find(c => c.irNodeId === localId);
-                                    const actualId = localNode?.props['_declId'] || localId; // 代表IDだけでなく、リダイレクト元の全てのIDの到達元を合算する
+                                    const actualId = localNode?.props['_declId'] || localId;
                                     const relatedIds = [actualId];
-                                    for (const [origId, redirectId] of extImportRedirects.entries()) {
+                                    for (const [origId, redirectId] of context.extImportRedirects.entries()) {
                                         if (redirectId === actualId) {
                                             relatedIds.push(origId);
                                         }
                                     }
                                     for (const rId of relatedIds) {
-                                        const origins = reachabilityMap?.get(rId);
+                                        const origins = context.reachabilityMap?.get(rId);
                                         if (origins) {
                                             for (const o of origins) {
                                                 allOrigins.add(o);
@@ -5595,26 +5977,28 @@
                         }
                         let targetOrigins = Array.from(allOrigins);
                         if (targetOrigins.length === 0) {
-                            if (logger) logger({
-                                type: 'error',
-                                msg: `[ChunkMerger] -> Warning: "${sourcePath}" has NO active origins. Falling back to Main branch dynamically.`
-                            });
+                            if (context.logger) {
+                                context.logger({
+                                    type: 'error',
+                                    msg: `[ChunkMerger] -> Warning: "${sourcePath}" has NO active origins. Falling back to Main branch dynamically.`
+                                });
+                            }
                             targetOrigins = ['main'];
                         }
-                        if (logger) {
+                        if (context.logger) {
                             const originList = targetOrigins.join(',');
-                            logger({
+                            context.logger({
                                 type: 'info',
                                 msg: `[ChunkMerger] External Import "${sourcePath}" - Origins: [${originList}]`
                             });
-                        }
+                        } // 4. 動的インポート文へ変換のうえ、各バッファに挿入
                         for (const origin of targetOrigins) {
                             const isWorker = origin !== 'main';
                             let stmtNode;
                             if (hasVariables) {
-                                stmtNode = this.convertToDynamicImport(mergedImportNode, renameJobs, isWorker);
+                                stmtNode = this.convertToDynamicImport(mergedImportNode, context.renameJobs, isWorker, context);
                             } else {
-                                const genId = () => getDeterministicId('ir_dyn_sideeffect');
+                                const genId = () => context.getDeterministicId('ir_dyn_sideeffect');
                                 const importIdent = {
                                     type: 'Import',
                                     irNodeId: genId(),
@@ -5671,20 +6055,22 @@
                                     children: [awaitNode]
                                 };
                             }
-                            if (logger) logger({
-                                type: 'info',
-                                msg: `[ChunkMerger] -> Placing "${sourcePath}" as DYNAMIC into ${isWorker ? 'Worker' : 'Main'} branch. (Origin: ${origin})`
-                            });
+                            if (context.logger) {
+                                context.logger({
+                                    type: 'info',
+                                    msg: `[ChunkMerger] -> Placing "${sourcePath}" as DYNAMIC into ${isWorker ? 'Worker' : 'Main'} branch. (Origin: ${origin})`
+                                });
+                            }
                             if (origin === 'main') {
                                 if (createNamespaceInteropDecl) {
-                                    mainStatements.unshift(createNamespaceInteropDecl());
+                                    context.mainStatements.unshift(createNamespaceInteropDecl());
                                 }
-                                mainStatements.unshift(stmtNode);
+                                context.mainStatements.unshift(stmtNode);
                             } else {
-                                let arr = workerStatementsMap.get(origin);
+                                let arr = context.workerStatementsMap.get(origin);
                                 if (!arr) {
                                     arr = [];
-                                    workerStatementsMap.set(origin, arr);
+                                    context.workerStatementsMap.set(origin, arr);
                                 }
                                 if (createNamespaceInteropDecl) {
                                     arr.unshift(createNamespaceInteropDecl());
@@ -5692,145 +6078,15 @@
                                 arr.unshift(stmtNode);
                             }
                         }
-                    } // 10. programNode の AST 連結
-                    programNode.children = [];
-                    programNode.props['body'] = []; // 静的解析でパスを特定できない場合のフォールバック用ランタイム Worker ポリフィル
-                    if (workerEntryBases && workerEntryBases.size > 0) {
-                        let mapEntries = '';
-                        for (const [wBase, safeChunkId] of chunkIdMap.entries()) {
-                            mapEntries += `"${wBase}": "${safeChunkId}", `;
-                        }
-                        const workerPolyfillCode = `
-			                (function() {
-			                    if (typeof window !== 'undefined') {
-			                        var chunkMap = { ${mapEntries} };
-			                        
-			                        function getInterceptedUrl(url, isShared) {
-			                            var urlStr = (typeof url === 'string') ? url : (url && url.href ? url.href : String(url));
-			                            // 同一オリジンの絶対URLなら相対化
-			                            if (urlStr.indexOf(window.location.origin) === 0) {
-			                                urlStr = urlStr.substring(window.location.origin.length);
-			                            }
-			                            if (!urlStr.startsWith('blob:') && !urlStr.startsWith('http:') && !urlStr.startsWith('https:') && !urlStr.startsWith('data:')) {
-			                                var cleanUrl = urlStr.split('?')[0].replace(/^\\.?\\//, '').replace(/\\.js$/, '');
-			                                var chunkId = chunkMap[cleanUrl] || chunkMap[urlStr];
-			                                if (!chunkId) {
-			                                    for (var mapKey in chunkMap) {
-			                                        if (mapKey.endsWith(cleanUrl) || cleanUrl.endsWith(mapKey)) {
-			                                            chunkId = chunkMap[mapKey];
-			                                            break;
-			                                        }
-			                                    }
-			                                }
-			                                if (chunkId) {
-			                                    var script = document.getElementById("${bundleId || 'bundle_default'}") || document.scripts[document.scripts.length - 1];
-			                                    if (script) {
-			                                        if (isShared) {
-			                                            return 'data:application/javascript,' + encodeURIComponent(script.textContent) + '#__chunkId=' + chunkId;
-			                                        }
-			                                        var blob = new Blob([script.textContent], { type: 'application/javascript' });
-			                                        return URL.createObjectURL(blob) + '#__chunkId=' + chunkId;
-			                                    }
-			                                }
-			                            }
-			                            return null;
-			                        }
-			
-			                        if (window.Worker) {
-			                            var OriginalWorker = window.Worker;
-			                            window.Worker = function(url, options) {
-			                                var intercepted = getInterceptedUrl(url, false);
-			                                return new OriginalWorker(intercepted || url, options);
-			                            };
-			                            window.Worker.prototype = OriginalWorker.prototype;
-			                        }
-			
-			                        if (window.SharedWorker) {
-			                            var OriginalSharedWorker = window.SharedWorker;
-			                            window.SharedWorker = function(url, options) {
-			                                var intercepted = getInterceptedUrl(url, true);
-			                                return new OriginalSharedWorker(intercepted || url, options);
-			                            };
-			                            window.SharedWorker.prototype = OriginalSharedWorker.prototype;
-			                        }
-			                    }
-			                })();
-			            `;
-                        const polyfillAst = parseTemplate(workerPolyfillCode);
-                        if (polyfillAst && polyfillAst.length > 0) {
-                            // 先頭に注入するため逆順で処理
-                            for (const pNode of polyfillAst.reverse()) {
-                                commonStatements.unshift(pNode);
-                            }
-                        }
-                    } // A. Top-Level (Common) Statements の配置
-                    for (const stmt of commonStatements) {
-                        programNode.children.push(stmt);
-                        programNode.props['body'].push({
-                            type: 'ref',
-                            irNodeId: stmt.irNodeId
-                        });
-                    } // B. Worker を実際に呼び出した場合のみ、ユニークな名前でボイラープレートを出力
-                    // 依存関係に従い、URL生成関数を先に展開する
-                    if (needsChunkUrlBoilerplate) {
-                        const boilerplates = this.createChunkUrlBoilerplate(chunkUrlFuncName, bundleId || 'bundle_default', parseTemplate);
-                        for (const bNode of boilerplates) {
-                            programNode.children.push(bNode);
-                            programNode.props['body'].push({
-                                type: 'ref',
-                                irNodeId: bNode.irNodeId
-                            });
-                        }
                     }
-                    if (needsSpawnBoilerplate) {
-                        const boilerplates = this.createSelfSpawningBoilerplate(spawnFuncName, chunkUrlFuncName, parseTemplate);
-                        for (const bNode of boilerplates) {
-                            programNode.children.push(bNode);
-                            programNode.props['body'].push({
-                                type: 'ref',
-                                irNodeId: bNode.irNodeId
-                            });
-                        }
-                    } // C. スレッド分岐 (Main / Worker 実行パス) またはフラット展開
-                    let hasWorkers = false;
-                    for (const [workerId, stmts] of workerStatementsMap.entries()) {
-                        if (stmts.length === 0) {
-                            if (logger) logger({
-                                type: 'info',
-                                msg: `[Tree Shaking] Chunk "${workerId}" became empty after dead code elimination. Skipping chunk generation.`
-                            });
-                            workerStatementsMap.delete(workerId);
-                        } else {
-                            hasWorkers = true;
-                        }
-                    }
-                    if (hasWorkers) {
-                        const branchNodes = this.createMainAndWorkerBranches(mainStatements, workerStatementsMap, chunkIdMap, parseTemplate);
-                        for (const bNode of branchNodes) {
-                            programNode.children.push(bNode);
-                            programNode.props['body'].push({
-                                type: 'ref',
-                                irNodeId: bNode.irNodeId
-                            });
-                        }
-                    } else {
-                        for (const stmt of mainStatements) {
-                            programNode.children.push(stmt);
-                            programNode.props['body'].push({
-                                type: 'ref',
-                                irNodeId: stmt.irNodeId
-                            });
-                        }
-                    }
-                    return linkedRoot;
                 }
-                static convertToDynamicImport(importDecl, renameJobs, isWorkerImport = false) {
+                convertToDynamicImport(importDecl, renameJobs, isWorkerImport, context) {
                     const sourceRef = importDecl.props['source'];
                     const sourceNode = importDecl.children.find(c => c.irNodeId === sourceRef.irNodeId);
                     const sourceVal = sourceNode.props['value'];
-                    const genId = () => getDeterministicId('ir_dyn_conv');
+                    const genId = () => context.getDeterministicId('ir_dyn_conv');
                     const properties = [];
-                    const propertyRefs = []; // 名前空間（*）インポートを識別するためのフラグを追加
+                    const propertyRefs = [];
                     let hasNamespace = false;
                     let namespaceLocalId = '';
                     let namespaceLocalName = '';
@@ -5846,12 +6102,12 @@
                         if (localNode) {
                             localDeclId = localNode.irNodeId;
                             localName = renameJobs.get(localDeclId) || localNode.props['name'];
-                        } // Namespaceの時は ObjectPattern(分割代入) を作らず、Identifierに直接代入させる
+                        }
                         if (specNode.type === 'ImportNamespaceSpecifier') {
                             hasNamespace = true;
                             namespaceLocalId = localDeclId;
                             namespaceLocalName = localName;
-                            break; // Namespaceの場合は他の指定子はないはず
+                            break;
                         }
                         if (specNode.type === 'ImportDefaultSpecifier') {
                             importedName = 'default';
@@ -5901,7 +6157,7 @@
                                 irNodeId: propNode.irNodeId
                             });
                         }
-                    } // Declarator の左辺を分岐
+                    }
                     let declaratorIdNode;
                     if (hasNamespace) {
                         declaratorIdNode = {
@@ -5979,7 +6235,7 @@
                         },
                         children: [declaratorIdNode, awaitNode]
                     };
-                    const declNode = {
+                    return {
                         type: 'VariableDeclaration',
                         irNodeId: importDecl.irNodeId,
                         props: {
@@ -5991,12 +6247,142 @@
                         },
                         children: [declaratorNode]
                     };
-                    return declNode;
                 }
-                /**
-                   * Worker生成関数 (__spawn) の AST 表現を構築します。
-                   */
-                static createSelfSpawningBoilerplate(spawnFuncName, chunkUrlFuncName, parseTemplate) {
+            }
+            class AssembleFinalBundleStage {
+                name = 'AssembleFinalBundleStage';
+                execute(context) {
+                    const programNode = context.linkedRoot.children[0].children[0];
+                    programNode.children = [];
+                    programNode.props['body'] = []; // 1. Worker用のランタイムポリフィルの注入
+                    if (context.workerEntryBases && context.workerEntryBases.size > 0) {
+                        let mapEntries = '';
+                        for (const [wBase, safeChunkId] of context.chunkIdMap.entries()) {
+                            mapEntries += `"${wBase}": "${safeChunkId}", `;
+                        }
+                        const workerPolyfillCode = `
+			                (function() {
+			                    if (typeof window !== 'undefined') {
+			                        var chunkMap = { ${mapEntries} };
+			                        
+			                        function getInterceptedUrl(url, isShared) {
+			                            var urlStr = (typeof url === 'string') ? url : (url && url.href ? url.href : String(url));
+			                            if (urlStr.indexOf(window.location.origin) === 0) {
+			                                urlStr = urlStr.substring(window.location.origin.length);
+			                            }
+			                            if (!urlStr.startsWith('blob:') && !urlStr.startsWith('http:') && !urlStr.startsWith('https:') && !urlStr.startsWith('data:')) {
+			                                var cleanUrl = urlStr.split('?')[0].replace(/^\\.?\\//, '').replace(/\\.js$/, '');
+			                                var chunkId = chunkMap[cleanUrl] || chunkMap[urlStr];
+			                                if (!chunkId) {
+			                                    for (var mapKey in chunkMap) {
+			                                        if (mapKey.endsWith(cleanUrl) || cleanUrl.endsWith(mapKey)) {
+			                                            chunkId = chunkMap[mapKey];
+			                                            break;
+			                                        }
+			                                    }
+			                                }
+			                                if (chunkId) {
+			                                    var script = document.getElementById("${context.bundleId || 'bundle_default'}") || document.scripts[document.scripts.length - 1];
+			                                    if (script) {
+			                                        if (isShared) {
+			                                            return 'data:application/javascript,' + encodeURIComponent(script.textContent) + '#__chunkId=' + chunkId;
+			                                        }
+			                                        var blob = new Blob([script.textContent], { type: 'application/javascript' });
+			                                        return URL.createObjectURL(blob) + '#__chunkId=' + chunkId;
+			                                    }
+			                                }
+			                            }
+			                            return null;
+			                        }
+			
+			                        if (window.Worker) {
+			                            var OriginalWorker = window.Worker;
+			                            window.Worker = function(url, options) {
+			                                var intercepted = getInterceptedUrl(url, false);
+			                                return new OriginalWorker(intercepted || url, options);
+			                            };
+			                            window.Worker.prototype = OriginalWorker.prototype;
+			                        }
+			
+			                        if (window.SharedWorker) {
+			                            var OriginalSharedWorker = window.SharedWorker;
+			                            window.SharedWorker = function(url, options) {
+			                                var intercepted = getInterceptedUrl(url, true);
+			                                return new OriginalSharedWorker(intercepted || url, options);
+			                            };
+			                            window.SharedWorker.prototype = OriginalSharedWorker.prototype;
+			                        }
+			                    }
+			                })();
+			            `;
+                        const polyfillAst = context.parseTemplate(workerPolyfillCode);
+                        if (polyfillAst && polyfillAst.length > 0) {
+                            for (const pNode of polyfillAst.reverse()) {
+                                context.commonStatements.unshift(pNode);
+                            }
+                        }
+                    } // 2. 共通（Common）ステートメントを配置
+                    for (const stmt of context.commonStatements) {
+                        programNode.children.push(stmt);
+                        programNode.props['body'].push({
+                            type: 'ref',
+                            irNodeId: stmt.irNodeId
+                        });
+                    } // 3. ボイラープレート関数の生成と配置
+                    if (context.needsChunkUrlBoilerplate) {
+                        const boilerplates = this.createChunkUrlBoilerplate(context.chunkUrlFuncName, context.bundleId || 'bundle_default', context.parseTemplate);
+                        for (const bNode of boilerplates) {
+                            programNode.children.push(bNode);
+                            programNode.props['body'].push({
+                                type: 'ref',
+                                irNodeId: bNode.irNodeId
+                            });
+                        }
+                    }
+                    if (context.needsSpawnBoilerplate) {
+                        const boilerplates = this.createSelfSpawningBoilerplate(context.spawnFuncName, context.chunkUrlFuncName, context.parseTemplate);
+                        for (const bNode of boilerplates) {
+                            programNode.children.push(bNode);
+                            programNode.props['body'].push({
+                                type: 'ref',
+                                irNodeId: bNode.irNodeId
+                            });
+                        }
+                    } // 4. 空になった Worker チャンクの Tree Shaking クリーンアップ
+                    let hasWorkers = false;
+                    for (const [workerId, stmts] of context.workerStatementsMap.entries()) {
+                        if (stmts.length === 0) {
+                            if (context.logger) {
+                                context.logger({
+                                    type: 'info',
+                                    msg: `[Tree Shaking] Chunk "${workerId}" became empty after dead code elimination. Skipping chunk generation.`
+                                });
+                            }
+                            context.workerStatementsMap.delete(workerId);
+                        } else {
+                            hasWorkers = true;
+                        }
+                    } // 5. 分岐構造 (Main / Worker 実行パス) の生成と AST 連結
+                    if (hasWorkers) {
+                        const branchNodes = this.createMainAndWorkerBranches(context.mainStatements, context.workerStatementsMap, context.chunkIdMap, context.parseTemplate);
+                        for (const bNode of branchNodes) {
+                            programNode.children.push(bNode);
+                            programNode.props['body'].push({
+                                type: 'ref',
+                                irNodeId: bNode.irNodeId
+                            });
+                        }
+                    } else {
+                        for (const stmt of context.mainStatements) {
+                            programNode.children.push(stmt);
+                            programNode.props['body'].push({
+                                type: 'ref',
+                                irNodeId: stmt.irNodeId
+                            });
+                        }
+                    }
+                }
+                createSelfSpawningBoilerplate(spawnFuncName, chunkUrlFuncName, parseTemplate) {
                     const code = `
 			            function ${spawnFuncName}(workerId, workerType, options) {
 			                var opts = Object.assign({ type: 'module' }, options);
@@ -6007,7 +6393,25 @@
 			        `;
                     return parseTemplate(code);
                 }
-                static createMainAndWorkerBranches(mainStatements, workerStatementsMap, chunkIdMap, parseTemplate) {
+                createChunkUrlBoilerplate(funcName, bundleId, parseTemplate) {
+                    const code = `
+			            function ${funcName}(chunkId, isShared) {
+			                if (typeof document !== 'undefined') {
+			                    var script = document.getElementById("${bundleId}") || document.scripts[document.scripts.length - 1];
+			                    if (isShared) {
+			                        return 'data:application/javascript,' + encodeURIComponent(script.textContent) + '#__chunkId=' + chunkId;
+			                    }
+			                    var blob = new Blob([script.textContent], { type: 'application/javascript' });
+			                    return URL.createObjectURL(blob) + '#__chunkId=' + chunkId;
+			                } else {
+			                    var baseUrl = self.location.href.split('#')[0];
+			                    return baseUrl + '#__chunkId=' + chunkId;
+			                }
+			            }
+			        `;
+                    return parseTemplate(code);
+                }
+                createMainAndWorkerBranches(mainStatements, workerStatementsMap, chunkIdMap, parseTemplate) {
                     let workerBranchesCode = '';
                     const workerKeys = Array.from(workerStatementsMap.keys()).reverse();
                     for (const workerId of workerKeys) {
@@ -6017,7 +6421,7 @@
 			                    __INJECT_WORKER_${safeChunkId}__();
 			                }
 			            `;
-                    } // 起動直後の同期的メッセージをバッファリングし、リスナー登録遅延によるメッセージ消失を防ぐポリフィルを注入
+                    }
                     const code = `
 			            var _chunkId = typeof __chunkId !== 'undefined' ? __chunkId : (
 			                (typeof location !== 'undefined' && location.hash && location.hash.indexOf('__chunkId=') !== -1) ? location.hash.split('__chunkId=')[1].split('&')[0] : 
@@ -6061,15 +6465,12 @@
 			            
 			            if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
 			                var __boot = function() {
-			                    // スタイル適用完了を待つため、requestAnimationFrame と setTimeout で実行タイミングを遅延させる
 			                    requestAnimationFrame(function() {
 			                        setTimeout(async function() {
 			                            __INJECT_MAIN__();
 			                        }, 0);
 			                    });
 			                };
-			                
-			                // ブラウザが全てのスタイルとリソースの適用完了を保証する状態まで待機
 			                if (document.readyState === 'complete') {
 			                    __boot();
 			                } else {
@@ -6077,7 +6478,7 @@
 			                }
 			            } ${workerBranchesCode}
 			        `;
-                    const astNodes = parseTemplate(code); // ポリフィル注入による IfStatement 増加を考慮し、末尾から分岐の IfStatement を特定する
+                    const astNodes = parseTemplate(code);
                     const branchAst = [...astNodes].reverse().find(node => node.type === 'IfStatement');
                     if (branchAst) {
                         this.replacePlaceholderWithStatements(branchAst, '__INJECT_MAIN__', mainStatements);
@@ -6089,80 +6490,7 @@
                     }
                     return astNodes;
                 }
-                static replaceDynamicImports(node, refToDeclMap, currentFilePath, resolvePath, modules, isExternalModule, getBase, dynamicImportedBases, thunkDeclIdMap, state, parseTemplate) {
-                    if (node.children) {
-                        for (let i = 0; i < node.children.length; i++) {
-                            const child = node.children[i];
-                            let isDynamicImport = false;
-                            let argNode; // Babelの新しい ImportExpression 仕様への対応
-                            if (child.type === 'ImportExpression') {
-                                const sourceRef = child.props['source'];
-                                if (sourceRef && sourceRef.type === 'ref') {
-                                    argNode = child.children.find(c => c.irNodeId === sourceRef.irNodeId);
-                                    if (argNode && (argNode.type === 'StringLiteral' || argNode.type === 'Literal')) {
-                                        isDynamicImport = true;
-                                    }
-                                }
-                            } // 従来の CallExpression (callee: Import) 仕様への対応
-                            else if (child.type === 'CallExpression') {
-                                const calleeRef = child.props['callee'];
-                                if (calleeRef && calleeRef.type === 'ref') {
-                                    const calleeNode = child.children.find(c => c.irNodeId === calleeRef.irNodeId);
-                                    if (calleeNode && calleeNode.type === 'Import') {
-                                        const args = child.props['arguments'] || [];
-                                        if (args.length > 0 && args[0].type === 'ref') {
-                                            argNode = child.children.find(c => c.irNodeId === args[0].irNodeId);
-                                            if (argNode && (argNode.type === 'StringLiteral' || argNode.type === 'Literal')) {
-                                                isDynamicImport = true;
-                                            }
-                                        }
-                                    }
-                                }
-                            } // 動的インポートが検知された場合の置換処理
-                            if (isDynamicImport && argNode) {
-                                const modulePath = argNode.props['value'];
-                                if (modulePath && !isExternalModule(modulePath, currentFilePath)) {
-                                    const resolvedPath = resolvePath(currentFilePath, modulePath);
-                                    const targetBase = getBase(resolvedPath);
-                                    dynamicImportedBases.add(targetBase);
-                                    const thunkName = `__dynamic_import_${targetBase.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-                                    let thunkDeclId = thunkDeclIdMap.get(thunkName);
-                                    if (!thunkDeclId) {
-                                        thunkDeclId = `thunk_decl_id_${targetBase.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-                                        thunkDeclIdMap.set(thunkName, thunkDeclId);
-                                    }
-                                    const replacementNode = this.createPromiseThenDynamicImport(thunkName, state.counter++, thunkDeclId, parseTemplate);
-                                    node.children[i] = replacementNode;
-                                    for (const key of Object.keys(node.props)) {
-                                        const prop = node.props[key];
-                                        if (prop && prop.type === 'ref' && prop.irNodeId === child.irNodeId) {
-                                            node.props[key] = {
-                                                type: 'ref',
-                                                irNodeId: replacementNode.irNodeId
-                                            };
-                                        } else if (Array.isArray(prop)) {
-                                            for (let pIdx = 0; pIdx < prop.length; pIdx++) {
-                                                if (prop[pIdx] && prop[pIdx].type === 'ref' && prop[pIdx].irNodeId === child.irNodeId) {
-                                                    prop[pIdx] = {
-                                                        type: 'ref',
-                                                        irNodeId: replacementNode.irNodeId
-                                                    };
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            const targetNode = node.children[i];
-                            this.replaceDynamicImports(targetNode, refToDeclMap, currentFilePath, resolvePath, modules, isExternalModule, getBase, dynamicImportedBases, thunkDeclIdMap, state, parseTemplate);
-                        }
-                    }
-                }
-                /**
-                   * ASTツリー内の特定のプレースホルダー関数呼び出し（例: __INJECT_MAIN__()）を含む ExpressionStatement を、
-                   * 任意の IRNode[] ステートメント群に丸ごと置換（展開）します。
-                   */
-                static replacePlaceholderWithStatements(ast, placeholderName, statements) {
+                replacePlaceholderWithStatements(ast, placeholderName, statements) {
                     let replaced = false;
                     const walk = node => {
                         if (node.type === 'BlockStatement' || node.type === 'Program') {
@@ -6213,78 +6541,15 @@
                         throw new Error(`[Compiler Internal Error] Template injection failed. Placeholder "${placeholderName}" was not found in the AST.`);
                     }
                 }
-                static createPromiseThenDynamicImport(thunkName, counter, thunkDeclId, parseTemplate) {
-                    const code = `Promise.resolve().then(() => ${thunkName}());`;
-                    const astList = parseTemplate(code);
-                    const exprStmt = astList[0]; // ExpressionStatement
-                    // メタデータ(_declId)の復元
-                    const walk = node => {
-                        if (node.type === 'Identifier' && node.props['name'] === thunkName) node.props['_declId'] = thunkDeclId;
-                        if (node.children) node.children.forEach(walk);
-                    };
-                    walk(exprStmt); // ExpressionStatement から CallExpression を抽出して返す
-                    const exprRef = exprStmt.props['expression'];
-                    return exprStmt.children.find(c => c.irNodeId === exprRef.irNodeId);
-                }
-                static createThunkFunction(thunkName, thunkDeclId, bodyStatements, exportsProperties, refToDeclMap, renameJobs, allTopLevelDecls, parseTemplate) {
-                    const cacheVarName = `${thunkName}_cache`;
-                    let propsCode = '';
-                    for (const prop of exportsProperties) {
-                        const targetInfo = allTopLevelDecls.get(prop.targetDeclId);
-                        const actualName = renameJobs.get(prop.targetDeclId) || (targetInfo ? targetInfo.varName : prop.keyName);
-                        propsCode += `"${prop.keyName}": ${actualName},\n`;
-                    }
-                    const code = `
-			            let ${cacheVarName};
-			            function ${thunkName}() {
-			                if (${cacheVarName}) return ${cacheVarName};
-			                __INJECT_BODY__();
-			                ${cacheVarName} = { ${propsCode} };
-			                return ${cacheVarName};
-			            }
-			        `;
-                    const astList = parseTemplate(code); // 1. 本体のステートメント群を展開注入
-                    this.replacePlaceholderWithStatements(astList[1], '__INJECT_BODY__', bodyStatements); // _declId と refToDeclMap のマッピング復元
-                    const walk = node => {
-                        if (node.type === 'Identifier') {
-                            if (node.props['name'] === thunkName) {
-                                node.props['_declId'] = thunkDeclId; // node.irNodeId を破壊すると親からの参照（IRNodeRef）が切断され、
-                                // Babel変換時に id が null となり匿名関数化してしまうため、IDの書き換えを削除。
-                            }
-                            for (const prop of exportsProperties) {
-                                const targetInfo = allTopLevelDecls.get(prop.targetDeclId);
-                                const actualName = renameJobs.get(prop.targetDeclId) || (targetInfo ? targetInfo.varName : prop.keyName); // _declId を用いて識別子を判定
-                                if (node.props['name'] === actualName && node.props['_declId'] !== thunkDeclId) {
-                                    node.props['_declId'] = prop.targetDeclId;
-                                    refToDeclMap.set(node.irNodeId, prop.targetDeclId);
-                                }
-                            }
-                        }
-                        if (node.children) node.children.forEach(walk);
-                    };
-                    astList.forEach(walk);
-                    return astList;
-                }
-                /**
-                   * Worker チャンク用の URL 取得関数 (__getChunkUrl) を構築します。
-                   */
-                static createChunkUrlBoilerplate(funcName, bundleId, parseTemplate) {
-                    const code = `
-			            function ${funcName}(chunkId, isShared) {
-			                if (typeof document !== 'undefined') {
-			                    var script = document.getElementById("${bundleId}") || document.scripts[document.scripts.length - 1];
-			                    if (isShared) {
-			                        return 'data:application/javascript,' + encodeURIComponent(script.textContent) + '#__chunkId=' + chunkId;
-			                    }
-			                    var blob = new Blob([script.textContent], { type: 'application/javascript' });
-			                    return URL.createObjectURL(blob) + '#__chunkId=' + chunkId;
-			                } else {
-			                    var baseUrl = self.location.href.split('#')[0];
-			                    return baseUrl + '#__chunkId=' + chunkId;
-			                }
-			            }
-			        `;
-                    return parseTemplate(code);
+            }
+            class ChunkMerger {
+                static merge(irTrees, modules, entryBasePaths, isExternalModule, getBase, refToDeclMaps, resolvePath, isAsset, fileExists, parseTemplate, reachabilityMap, workerEntryBases, bundleId, logger) {
+                    // 1. パイプライン共通コンテキストの初期化
+                    const context = new MergeContext(irTrees, modules, entryBasePaths, isExternalModule, getBase, refToDeclMaps, resolvePath, isAsset, fileExists, parseTemplate, reachabilityMap, workerEntryBases, bundleId, logger); // 2. パイプラインを構築
+                    const pipeline = new Pipeline(context);
+                    pipeline.add(new ExtractTopLevelDeclarationsStage()).add(new ResolveExternalImportsStage()).add(new BindImportResolutionsStage()).add(new ResolveNameConflictsStage()).add(new ReplaceDynamicImportsStage()).add(new PrepareMergedScopeStage()).add(new TransformASTNodesStage()).add(new RebuildReferencesStage()).add(new MergeExternalImportsStage()).add(new AssembleFinalBundleStage()); // 3. パイプラインを実行
+                    pipeline.run(); // 4. 結合後のルートASTを返却
+                    return context.linkedRoot;
                 }
             }
             class IRLinker {
