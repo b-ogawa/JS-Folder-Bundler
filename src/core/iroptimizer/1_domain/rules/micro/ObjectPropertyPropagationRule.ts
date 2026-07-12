@@ -32,7 +32,7 @@ export const ObjectPropertyPropagationRule: TransformRule = {
         
         const identNode = objNode as IdentifierIR;
         
-        // 自分が代入の左辺などにいないかチェック
+        // 対象ノードが代入の左辺などに位置していないかチェック
         const parentId = snapshot.parentMap.get(memNode.irNodeId);
         if (parentId) {
             const parent = snapshot.nodeMap.get(parentId);
@@ -72,7 +72,7 @@ export const ObjectPropertyPropagationRule: TransformRule = {
         if (!sourceNode || sourceNode.type !== 'ObjectExpression') return false;
 
         // ミューテーション検査: 対象のオブジェクトに対する変更がないか
-        // このオブジェクト(a_decl)への全ての参照をチェックし、プロパティ変更や引数渡しなどがあれば安全のため伝播を諦める
+        // このオブジェクト(a_decl)への全ての参照をチェックし、プロパティ変更や引数渡しなどがあれば安全のため伝播の対象外とする
         let isMutatedOrEscaped = false;
         for (const [refId, declId] of snapshot.refToDeclMap.entries()) {
             if (declId === a_decl) {
@@ -97,7 +97,7 @@ export const ObjectPropertyPropagationRule: TransformRule = {
                                         break;
                                     }
                                     if (memParent.type === 'CallExpression' && (memParent as any).props.callee?.irNodeId === refParent.irNodeId) {
-                                        // メソッド呼び出し (thisを通して変更される可能性があるため保守的に諦める)
+                                        // メソッド呼び出し (thisを通して変更される可能性があるため保守的に適用をスキップする)
                                         // e.g. obj.method()
                                         isMutatedOrEscaped = true;
                                         break;
@@ -105,12 +105,12 @@ export const ObjectPropertyPropagationRule: TransformRule = {
                                 }
                             }
                         } else if (refParent.type === 'AssignmentExpression' && (refParent as AssignmentExpressionIR).props.left?.irNodeId === refId) {
-                            // 再代入 (a_defs.size === 1 だが、別の箇所で再代入されているなら複雑化するので保守的に諦める)
+                            // 再代入 (a_defs.size === 1 だが、別の箇所で再代入されているなら複雑化を避けるため保守的に適用をスキップする)
                             isMutatedOrEscaped = true;
                             break;
                         } else {
                             // 関数呼び出しの引数として渡されている(CallExpression arguments)など、その他の使われ方
-                            // 保守的に諦める
+                            // 保守的に適用をスキップする
                             isMutatedOrEscaped = true;
                             break;
                         }

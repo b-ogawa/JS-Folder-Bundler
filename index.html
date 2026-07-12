@@ -119,7 +119,7 @@ class PathResolver {
   }
   /**
      * 相対パスや絶対パスからVFS上のフルパスを解決する。
-     * プロジェクトフォルダごとアップロードされた際の「ルートディレクトリ名のズレ」も自動吸収する。
+     * プロジェクトフォルダ単位でアップロードされた際の「ルートディレクトリ名の不一致」を自動的に補正する。
      */
   static resolve(basePath, relativePath, existingFiles, silent = false) {
     // --- 早期のファジーマッチング関数 ---
@@ -265,7 +265,7 @@ class AssetFilter {
 class BabelPatcher {
   /**
      * Babel-standalone の内部API (traverse, types) を
-     * ダミープラグイン経由で抽出し、グローバルオブジェクトに露出させるハック
+     * ダミープラグイン経由で抽出し、グローバルオブジェクトに露出させるワークアラウンド
      */
   static applyPatch() {
     const Babel = globalThis.Babel;
@@ -324,7 +324,7 @@ var __isWorker = !_g.document;
 if (__isWorker) {
   var __mq = [];
   var __mo = null;
-  var __hl = []; // ネイティブセッターへの横流しを削除し、二重発火を防止
+  var __hl = []; // ネイティブセッターへの直接の伝播（委譲）を削除し、二重発火を防止
   Object.defineProperty(_g, 'onmessage', {
     configurable: true,
     get: function () {
@@ -514,7 +514,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             if (!html) return '';
             let minified = html;
             const placeholders = [];
-            const protectedTags = ['pre', 'textarea', 'code', 'script', 'style']; // 1. 【最優先】スクリプトやスタイルなど、内部を破壊してはいけないタグを保護(退避)する
+            const protectedTags = ['pre', 'textarea', 'code', 'script', 'style']; // 1. スクリプトやスタイルなど、内容の改変（ミニファイ処理）を行ってはいけないタグを保護(退避)する
             for (const tag of protectedTags) {
               const regex = new RegExp(`<${tag}(\\s[^>]*)?>([\\s\\S]*?)<\/${tag}>`, 'gi');
               minified = minified.replace(regex, match => {
@@ -1211,11 +1211,18 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             description: '連続する同じ種類(let/const)の変数宣言をカンマで結合します。',
             defaultEnabled: true
           },
+          'micro:for-init-merge': {
+            id: 'micro:for-init-merge',
+            type: 'micro',
+            name: 'Forループ初期化子のマージ (For Init Merge)',
+            description: 'for文の直前にある変数宣言を、for文以降で参照されないことが静的解析で証明された場合に限り、初期化子内に安全に押し込みます。',
+            defaultEnabled: true
+          },
           'micro:dead-store-elimination': {
             id: 'micro:dead-store-elimination',
             type: 'micro',
             name: '不要代入の削除 (Dead Store Elimination)',
-            description: '再代入などで上書きされて一度も読み取られない無駄な代入や初期化コードを削除します。',
+            description: '再代入などで上書きされて一度も読み取られない不要な代入や初期化コードを削除します。',
             defaultEnabled: false
           },
           'micro:copy-propagation': {
@@ -1285,7 +1292,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             id: 'macro:class-to-tuple',
             type: 'macro',
             name: 'クラスの配列（タプル）化',
-            description: '完全に隠蔽されたデータ用クラス（DTO）を通常の配列へと変換し、高効率・低フットプリント化します。',
+            description: 'プライベートプロパティのみを持つデータ用クラス（DTO）を通常の配列へと変換し、メモリ使用量と実行時のオーバーヘッドを削減します。',
             defaultEnabled: false
           },
           'macro:function-inlining': {
@@ -2145,7 +2152,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                   }
                 });
                 readPromises.push(readPromise);
-              } // すべてのファイルを並行して読み込む (劇的に高速化)
+              } // すべてのファイルを並行して読み込み、処理時間を短縮する
               const results = await Promise.all(readPromises); // 読み込み結果をMapに格納
               for (const res of results) {
                 const cleanPath = res.path.startsWith('/') ? res.path.slice(1) : res.path;
@@ -2946,15 +2953,30 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       if (visitor.exit) visitor.exit(node, parent);
     }
   }
+  class IRUtils {
+    /**
+       * 参照オブジェクトから子ノードを安全に解決します。
+       * 内部状態（キャッシュ）を持たない純粋関数として実装し、
+       * ASTのミュータブルな変更（splice等）に対する不整合を完全に防ぎます。
+       */
+    static resolveRef(node, prop) {
+      if (!prop || prop.type !== 'ref' || !node.children) return undefined;
+      return node.children.find(c => c.irNodeId === prop.irNodeId);
+    }
+    /**
+       * 参照プロパティの配列から、子ノードの配列を安全に解決します。
+       */
+    static resolveRefArray(node, propArray) {
+      if (!Array.isArray(propArray)) return [];
+      return propArray.map(p => this.resolveRef(node, p)).filter(n => n !== undefined);
+    }
+  }
   class DependencyExtractor {
     static extract(ir) {
       const deps = new Set();
       const extractSource = node => {
-        const sourceRef = node.props['source'];
-        if (sourceRef && sourceRef.type === 'ref') {
-          const sourceNode = node.children.find(c => c.irNodeId === sourceRef.irNodeId);
-          if (sourceNode && sourceNode.type === 'StringLiteral') deps.add(sourceNode.props['value']);
-        }
+        const sourceNode = IRUtils.resolveRef(node, node.props['source']);
+        if (sourceNode && sourceNode.type === 'StringLiteral') deps.add(sourceNode.props['value']);
       };
       const visitor = {
         ImportDeclaration: extractSource,
@@ -2962,26 +2984,21 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         ExportAllDeclaration: extractSource,
         ImportExpression: extractSource,
         CallExpression: node => {
-          const calleeRef = node.props['callee'];
-          if (calleeRef && calleeRef.type === 'ref') {
-            const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-            if (calleeNode) {
-              const isRequire = calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'require';
-              const isDynamicImport = calleeNode.type === 'Import';
-              const isImportScripts = calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'importScripts';
-              if (isRequire || isDynamicImport) {
-                const argsRef = node.props['arguments'];
-                if (Array.isArray(argsRef) && argsRef.length > 0 && argsRef[0].type === 'ref') {
-                  const argNode = node.children.find(c => c.irNodeId === argsRef[0].irNodeId);
-                  if (argNode && argNode.type === 'StringLiteral') deps.add(argNode.props['value']);
-                }
-              } else if (isImportScripts) {
-                for (const argRef of node.props['arguments'] || []) {
-                  if (argRef && argRef.type === 'ref') {
-                    const argNode = node.children.find(c => c.irNodeId === argRef.irNodeId);
-                    if (argNode && argNode.type === 'StringLiteral') deps.add(argNode.props['value']);
-                  }
-                }
+          const calleeNode = IRUtils.resolveRef(node, node.props['callee']);
+          if (calleeNode) {
+            const isRequire = calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'require';
+            const isDynamicImport = calleeNode.type === 'Import';
+            const isImportScripts = calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'importScripts';
+            if (isRequire || isDynamicImport) {
+              const argsRef = node.props['arguments'];
+              if (Array.isArray(argsRef) && argsRef.length > 0) {
+                const argNode = IRUtils.resolveRef(node, argsRef[0]);
+                if (argNode && argNode.type === 'StringLiteral') deps.add(argNode.props['value']);
+              }
+            } else if (isImportScripts) {
+              for (const argRef of node.props['arguments'] || []) {
+                const argNode = IRUtils.resolveRef(node, argRef);
+                if (argNode && argNode.type === 'StringLiteral') deps.add(argNode.props['value']);
               }
             }
           }
@@ -3028,9 +3045,225 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     // 変数初期化時などに「副作用」とみなすノードタイプ
     SIDE_EFFECT_NODE_TYPES: new Set(['CallExpression', 'NewExpression', 'AssignmentExpression', 'UpdateExpression', 'AwaitExpression', 'YieldExpression'])
   };
+  class ConstantResolver {
+    declToInitMap = new Map();
+    refToDeclMap;
+    constructor(irRoot, refToDeclMap) {
+      this.refToDeclMap = refToDeclMap;
+      this.buildDeclToInitMap(irRoot);
+    }
+    buildDeclToInitMap(node) {
+      if (node.type === 'VariableDeclarator') {
+        const idNode = IRUtils.resolveRef(node, node.props.id);
+        const initNode = IRUtils.resolveRef(node, node.props.init);
+        if (idNode && idNode.type === 'Identifier' && initNode) {
+          this.declToInitMap.set(idNode.irNodeId, initNode);
+        }
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          this.buildDeclToInitMap(child);
+        }
+      }
+    }
+    /**
+       * 指定されたノード（識別子など）を定数追跡して最終的な値を返します。
+       * 解決できない場合は元のノードをそのまま返します。
+       */
+    resolve(node, visited = new Set()) {
+      if (node.type === 'Identifier') {
+        const declId = this.refToDeclMap.get(node.irNodeId);
+        if (declId && !visited.has(declId)) {
+          visited.add(declId);
+          const initNode = this.declToInitMap.get(declId);
+          if (initNode) {
+            return this.resolve(initNode, visited);
+          }
+        }
+      }
+      return node;
+    }
+  }
+  class WorkerDetector {
+    /**
+       * IRツリーから Worker 等の未解決の依存パス（生文字列）一覧を抽出します。
+       * VFS（ファイルシステム）上での解決は上位オーケストレーターの責務
+       */
+    static extractRawWorkerPaths(ir, logger) {
+      const paths = new Set();
+      const refToDeclMap = ScopeResolver.resolve(ir);
+      const resolver = new ConstantResolver(ir, refToDeclMap);
+      if (ir.children && ir.children.length > 0) {
+        IRTraverser.traverse(ir.children[0], {
+          NewExpression: node => {
+            const ref = this.detectWorkerPattern(node, resolver);
+            if (ref) this.handleDetectedWorker(ref, ir, paths, logger);
+          },
+          CallExpression: node => {
+            const ref = this.detectWorkerPattern(node, resolver);
+            if (ref) this.handleDetectedWorker(ref, ir, paths, logger);
+          }
+        });
+      }
+      return Array.from(paths);
+    }
+    static handleDetectedWorker(ref, ir, paths, logger) {
+      if (ref.rawPath) {
+        if (/^(https?:)?\/\//i.test(ref.rawPath)) {
+          if (logger) {
+            logger({
+              type: 'info',
+              msg: `[WorkerDetector] External network worker path detected: "${ref.rawPath}" (in ${ir.filePath}). Skipping bundle inlining.`
+            });
+          }
+        } else {
+          paths.add(ref.rawPath);
+          if (logger) {
+            logger({
+              type: 'info',
+              msg: `[WorkerDetector] Successfully resolved worker path: "${ref.rawPath}" (in ${ir.filePath})`
+            });
+          }
+        }
+      } else {
+        if (logger) {
+          logger({
+            type: 'info',
+            msg: `[WorkerDetector Warning] Detected ${ref.kind} call at ${ir.filePath} but could not resolve path statically. Reason: ${ref.unresolvedReason || 'unknown'}. Falling back to runtime loading.`
+          });
+        }
+      }
+    }
+    /**
+       * ASTノードがWorker系の生成パターンに合致するかを判定し、引数パスを追跡して返します。
+       */
+    static detectWorkerPattern(node, resolver) {
+      if (node.type === 'NewExpression') {
+        const calleeNode = IRUtils.resolveRef(node, node.props['callee']);
+        if (calleeNode?.type === 'Identifier') {
+          const name = calleeNode.props['name'];
+          if (name === 'Worker' || name === 'SharedWorker') {
+            const args = node.props['arguments'] || [];
+            if (args.length > 0) {
+              const firstArgNode = IRUtils.resolveRef(node, args[0]);
+              if (firstArgNode) {
+                const resolved = this.resolvePathArg(firstArgNode, resolver);
+                return {
+                  kind: name,
+                  rawPath: resolved.path,
+                  unresolvedReason: resolved.unresolvedReason,
+                  sourceNode: node
+                };
+              }
+            }
+            return {
+              kind: name,
+              rawPath: null,
+              unresolvedReason: `${name} instantiated with no arguments`,
+              sourceNode: node
+            };
+          }
+        }
+      } else if (node.type === 'CallExpression') {
+        const calleeNode = IRUtils.resolveRef(node, node.props['callee']);
+        if (calleeNode?.type === 'MemberExpression') {
+          const propNode = IRUtils.resolveRef(calleeNode, calleeNode.props['property']);
+          const objNode = IRUtils.resolveRef(calleeNode, calleeNode.props['object']);
+          if (propNode?.type === 'Identifier' && objNode) {
+            const name = propNode.props['name'];
+            if (name === 'addModule' || name === 'register') {
+              let isTarget = false;
+              let kind = null;
+              if (objNode.type === 'Identifier') {
+                const objName = objNode.props['name'];
+                if (objName === 'serviceWorker' || objName.toLowerCase().includes('worklet')) {
+                  isTarget = true;
+                  kind = objName === 'serviceWorker' ? 'ServiceWorker' : 'Worklet';
+                }
+              } else if (objNode.type === 'MemberExpression') {
+                const subPropNode = IRUtils.resolveRef(objNode, objNode.props['property']);
+                if (subPropNode?.type === 'Identifier') {
+                  const subPropName = subPropNode.props['name'];
+                  if (subPropName === 'serviceWorker' || subPropName.toLowerCase().includes('worklet')) {
+                    isTarget = true;
+                    kind = subPropName === 'serviceWorker' ? 'ServiceWorker' : 'Worklet';
+                  }
+                }
+              }
+              if (isTarget && kind) {
+                const args = node.props['arguments'] || [];
+                if (args.length > 0) {
+                  const firstArgNode = IRUtils.resolveRef(node, args[0]);
+                  if (firstArgNode) {
+                    const resolved = this.resolvePathArg(firstArgNode, resolver);
+                    return {
+                      kind,
+                      rawPath: resolved.path,
+                      unresolvedReason: resolved.unresolvedReason,
+                      sourceNode: node
+                    };
+                  }
+                }
+                return {
+                  kind,
+                  rawPath: null,
+                  unresolvedReason: `${kind === 'ServiceWorker' ? 'navigator.serviceWorker.register' : 'Worklet.addModule'} called with no arguments`,
+                  sourceNode: node
+                };
+              }
+            }
+          }
+        }
+      }
+      return null;
+    }
+    static resolvePathArg(argNode, resolver) {
+      const resolvedArg = resolver.resolve(argNode);
+      if (resolvedArg.type === 'NewExpression') {
+        const calleeNode = IRUtils.resolveRef(resolvedArg, resolvedArg.props['callee']);
+        if (calleeNode?.type === 'Identifier' && calleeNode.props['name'] === 'URL') {
+          const urlArgs = resolvedArg.props['arguments'] || [];
+          if (urlArgs.length > 0) {
+            const urlFirstArgNode = IRUtils.resolveRef(resolvedArg, urlArgs[0]);
+            if (urlFirstArgNode) {
+              const resolvedUrlArg = resolver.resolve(urlFirstArgNode);
+              if (resolvedUrlArg && (resolvedUrlArg.type === 'StringLiteral' || resolvedUrlArg.type === 'Literal')) {
+                return {
+                  path: resolvedUrlArg.props['value']
+                };
+              } else {
+                return {
+                  path: null,
+                  unresolvedReason: `URL constructor argument resolved to non-string type: "${resolvedUrlArg.type}"`
+                };
+              }
+            }
+          }
+          return {
+            path: null,
+            unresolvedReason: `URL constructor has no arguments`
+          };
+        }
+        return {
+          path: null,
+          unresolvedReason: `Instantiation of class other than URL: "${calleeNode?.props['name'] || 'unknown'}"`
+        };
+      } else if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
+        return {
+          path: resolvedArg.props['value']
+        };
+      }
+      return {
+        path: null,
+        unresolvedReason: `Argument resolved to non-string/non-URL type: "${resolvedArg.type}"`
+      };
+    }
+  }
   class TopLevelAnalyzer {
     /**
-       * 匿名 export default 宣言をバーチャルな変数宣言に置き換える前処理を行います。
+       * 無名 export default を変数宣言に正規化します。
+       * 例: export default function() {} -> const _default_anon_xxx = function() {}; export default _default_anon_xxx;
+       * 参照一貫性を保つため、リンキング前の事前抽出段階でこれを完了させておきます。
        */
     static normalizeAnonymousExports(tree, getBase) {
       const fileProgram = tree.children[0]?.children?.find(c => c.type === 'Program');
@@ -3101,7 +3334,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                     }]
                   },
                   children: [virtualDeclarator]
-                }; // AST を更新して匿名 default を実体のあるローカル宣言に変換
+                };
                 fileProgram.children.push(virtualVarDecl);
                 bodyRefs[i] = {
                   type: 'ref',
@@ -3120,18 +3353,15 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         }
       }
     }
-    /**
-       * 各トップレベル文を走査し、依存関係（defines, references）を抽出します。
-       */
     static analyze(tree, refToDeclMap) {
       const statements = new Map();
       const fileProgram = tree.children[0]?.children?.find(c => c.type === 'Program');
       if (!fileProgram) return statements;
       const bodyRefs = fileProgram.props['body'];
-      if (!Array.isArray(bodyRefs)) return statements; // 子ノードから再帰的に参照を収集するヘルパー
+      if (!Array.isArray(bodyRefs)) return statements;
       const collectReferencesInNode = (node, refs, defines) => {
         if (node.type === 'Identifier') {
-          const declId = refToDeclMap.get(node.irNodeId); // 自身で定義したものではなく、解決先が存在すれば参照とする
+          const declId = refToDeclMap.get(node.irNodeId);
           if (declId && declId !== node.irNodeId && !defines.has(declId)) {
             refs.add(declId);
           }
@@ -3243,7 +3473,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         if (!child) continue;
         let actualNode = child;
         let type = 'SideEffect';
-        const defines = new Set(); // export 指定を剥ぎ取って内包する実体宣言ノードを取得
+        const defines = new Set();
         if (child.type === 'ExportNamedDeclaration' || child.type === 'ExportDefaultDeclaration') {
           const declRef = child.props['declaration'];
           if (declRef && declRef.type === 'ref') {
@@ -3252,7 +3482,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               actualNode = declNode;
             }
           }
-        } // directive (e.g. "use strict") は副作用から除外
+        }
         if (child.type === 'ExpressionStatement') {
           const exprRef = child.props['expression'];
           if (exprRef && exprRef.type === 'ref') {
@@ -3262,7 +3492,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             }
           }
         }
-        let sideEffectImportPath; // 変数宣言の右辺に副作用（関数呼び出し、インスタンス化等）が含まれるか検証する
+        let sideEffectImportPath;
         let hasSideEffectInit = false;
         if (actualNode.type === 'VariableDeclaration') {
           const checkSideEffect = n => {
@@ -3317,7 +3547,6 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           type = 'Declaration';
           collectDefinesInNode(actualNode, defines);
         } else if (actualNode.type === 'VariableDeclaration') {
-          // 初期化式に副作用がある場合は SideEffect として扱い保護する
           type = hasSideEffectInit ? 'SideEffect' : 'Declaration';
           collectDefinesInNode(actualNode, defines);
         }
@@ -3325,52 +3554,36 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         collectReferencesInNode(child, references, defines);
         const chunkReferences = new Set();
         const classicImports = [];
-        const dynamicImports = []; // VisitorパターンによるAST走査への置き換え
+        const dynamicImports = [];
+        const resolver = new ConstantResolver(tree, refToDeclMap);
         IRTraverser.traverse(child, {
           ImportExpression: n => {
             const sourceRef = n.props['source'];
             if (sourceRef && sourceRef.type === 'ref') {
               const argNode = n.children.find(c => c.irNodeId === sourceRef.irNodeId);
-              if (argNode && (argNode.type === 'StringLiteral' || argNode.type === 'Literal')) {
-                const pathVal = argNode.props['value'];
-                if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) dynamicImports.push(pathVal);
-              }
-            }
-          },
-          NewExpression: n => {
-            const calleeRef = n.props['callee'];
-            if (calleeRef && calleeRef.type === 'ref') {
-              const calleeNode = n.children.find(c => c.irNodeId === calleeRef.irNodeId);
-              if (calleeNode && calleeNode.type === 'Identifier' && (calleeNode.props['name'] === 'Worker' || calleeNode.props['name'] === 'SharedWorker')) {
-                const args = n.props['arguments'] || [];
-                if (args.length > 0 && args[0].type === 'ref') {
-                  const firstArgNode = n.children.find(c => c.irNodeId === args[0].irNodeId);
-                  if (firstArgNode) {
-                    let pathVal = null;
-                    if (firstArgNode.type === 'NewExpression') {
-                      const innerCalleeRef = firstArgNode.props['callee'];
-                      if (innerCalleeRef && innerCalleeRef.type === 'ref') {
-                        const innerCalleeNode = firstArgNode.children.find(c => c.irNodeId === innerCalleeRef.irNodeId);
-                        if (innerCalleeNode && innerCalleeNode.type === 'Identifier' && innerCalleeNode.props['name'] === 'URL') {
-                          const urlArgs = firstArgNode.props['arguments'] || [];
-                          if (urlArgs.length > 0 && urlArgs[0].type === 'ref') {
-                            const urlFirstArgNode = firstArgNode.children.find(c => c.irNodeId === urlArgs[0].irNodeId);
-                            if (urlFirstArgNode && (urlFirstArgNode.type === 'StringLiteral' || urlFirstArgNode.type === 'Literal')) {
-                              pathVal = urlFirstArgNode.props['value'];
-                            }
-                          }
-                        }
-                      }
-                    } else if (firstArgNode.type === 'StringLiteral' || firstArgNode.type === 'Literal') {
-                      pathVal = firstArgNode.props['value'];
-                    }
-                    if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) chunkReferences.add(pathVal);
-                  }
+              if (argNode) {
+                const resolvedArg = resolver.resolve(argNode);
+                if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
+                  const pathVal = resolvedArg.props['value'];
+                  if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) dynamicImports.push(pathVal);
                 }
               }
             }
           },
+          NewExpression: n => {
+            const ref = WorkerDetector.detectWorkerPattern(n, resolver);
+            if (ref && ref.rawPath && !/^(https?:)?\/\//i.test(ref.rawPath)) {
+              chunkReferences.add(ref.rawPath);
+            }
+          },
           CallExpression: n => {
+            const workerRef = WorkerDetector.detectWorkerPattern(n, resolver);
+            if (workerRef) {
+              if (workerRef.rawPath && !/^(https?:)?\/\//i.test(workerRef.rawPath)) {
+                chunkReferences.add(workerRef.rawPath);
+              }
+              return;
+            }
             const calleeRef = n.props['callee'];
             if (calleeRef && calleeRef.type === 'ref') {
               const calleeNode = n.children.find(c => c.irNodeId === calleeRef.irNodeId);
@@ -3378,26 +3591,11 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 const args = n.props['arguments'] || [];
                 if (args.length > 0 && args[0].type === 'ref') {
                   const argNode = n.children.find(c => c.irNodeId === args[0].irNodeId);
-                  if (argNode && (argNode.type === 'StringLiteral' || argNode.type === 'Literal')) {
-                    const pathVal = argNode.props['value'];
-                    if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) dynamicImports.push(pathVal);
-                  }
-                }
-              } else if (calleeNode && calleeNode.type === 'MemberExpression') {
-                const propRef = calleeNode.props['property'];
-                if (propRef && propRef.type === 'ref') {
-                  const propNode = calleeNode.children.find(c => c.irNodeId === propRef.irNodeId);
-                  if (propNode && propNode.type === 'Identifier') {
-                    const name = propNode.props['name'];
-                    if (name === 'addModule' || name === 'register') {
-                      const args = n.props['arguments'] || [];
-                      if (args.length > 0 && args[0].type === 'ref') {
-                        const firstArgNode = n.children.find(c => c.irNodeId === args[0].irNodeId);
-                        if (firstArgNode && (firstArgNode.type === 'StringLiteral' || firstArgNode.type === 'Literal')) {
-                          const pathVal = firstArgNode.props['value'];
-                          if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) chunkReferences.add(pathVal);
-                        }
-                      }
+                  if (argNode) {
+                    const resolvedArg = resolver.resolve(argNode);
+                    if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
+                      const pathVal = resolvedArg.props['value'];
+                      if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) dynamicImports.push(pathVal);
                     }
                   }
                 }
@@ -3405,9 +3603,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 for (const argRef of n.props['arguments'] || []) {
                   if (argRef && argRef.type === 'ref') {
                     const argNode = n.children.find(c => c.irNodeId === argRef.irNodeId);
-                    if (argNode && (argNode.type === 'StringLiteral' || argNode.type === 'Literal')) {
-                      const pathVal = argNode.props['value'];
-                      if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) classicImports.push(pathVal);
+                    if (argNode) {
+                      const resolvedArg = resolver.resolve(argNode);
+                      if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
+                        const pathVal = resolvedArg.props['value'];
+                        if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) classicImports.push(pathVal);
+                      }
                     }
                   }
                 }
@@ -3438,8 +3639,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       const modules = new Map();
       const exportsMap = new Map(); // 1. 各モジュールの初期化と匿名 export default の正規化
       for (const tree of irTrees) {
-        const basePath = getBase(tree.filePath);
-        TopLevelAnalyzer.normalizeAnonymousExports(tree, getBase);
+        const basePath = getBase(tree.filePath); // 事前抽出フェーズで正規化処理が完了しているため、重複呼び出しを避けてスキップする
         exportsMap.set(basePath, new Map());
       } // 2. トポロジカルソート順に従い、再エクスポート関係を解決しながら exportsMap を作成
       for (const tree of irTrees) {
@@ -4250,20 +4450,37 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                         if (localRef && localRef.type === 'ref') {
                           localNode = specNode.children.find(c => c.irNodeId === localRef.irNodeId);
                         }
+                      } else if (specNode.type === 'ImportNamespaceSpecifier') {
+                        importedName = '*';
+                        const localRef = specNode.props['local'];
+                        if (localRef && localRef.type === 'ref') {
+                          localNode = specNode.children.find(c => c.irNodeId === localRef.irNodeId);
+                        }
                       }
                       if (localNode && localNode.type === 'Identifier') {
-                        const targetDeclId = fromExports.get(importedName);
-                        if (targetDeclId) {
-                          for (const [rId, dId] of refToDeclMap.entries()) {
-                            if (dId === localNode.irNodeId) refToDeclMap.set(rId, targetDeclId);
+                        if (specNode.type === 'ImportNamespaceSpecifier') {
+                          // Namespace Importの処理: 新しいトップレベル変数として登録する
+                          if (!context.allTopLevelDecls.has(localNode.irNodeId)) {
+                            context.allTopLevelDecls.set(localNode.irNodeId, {
+                              varName: localNode.props.name,
+                              declId: localNode.irNodeId,
+                              filePath: mod.filePath
+                            });
                           }
                         } else {
-                          const sourceVal = sourceNode.props['value'];
-                          const msg = `[Linker Error] "${importedName}" is not exported by "${sourceVal}" (imported from "${mod.filePath}").`;
-                          if (context.logger) context.logger({
-                            type: 'error',
-                            msg
-                          });
+                          const targetDeclId = fromExports.get(importedName);
+                          if (targetDeclId) {
+                            for (const [rId, dId] of refToDeclMap.entries()) {
+                              if (dId === localNode.irNodeId) refToDeclMap.set(rId, targetDeclId);
+                            }
+                          } else {
+                            const sourceVal = sourceNode.props['value'];
+                            const msg = `[Linker Error] "${importedName}" is not exported by "${sourceVal}" (imported from "${mod.filePath}").`;
+                            if (context.logger) context.logger({
+                              type: 'error',
+                              msg
+                            });
+                          }
                         }
                       }
                     }
@@ -4439,6 +4656,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         const mod = context.modules.get(basePath) || context.modules.get(basePath + '/index');
         if (!mod) continue;
         const isEntryFile = context.entryBasePaths.has(basePath) || context.entryBasePaths.has(basePath + '/index');
+        const isWorkerEntryFile = context.workerEntryBases && (context.workerEntryBases.has(basePath) || context.workerEntryBases.has(basePath + '/index'));
         if (tree.scopeInfo) {
           // bindings マージ & renameJobsの適用
           for (const [id, binding] of tree.scopeInfo.bindings.entries()) {
@@ -4458,10 +4676,19 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           } // errors マージ
           context.mergedScopeInfo.errors.push(...tree.scopeInfo.errors);
         } // エントリーポイントからのエクスポートされた定義を escapedVars に追加する
-        if (isEntryFile) {
+        if (isEntryFile || isWorkerEntryFile) {
           for (const declId of mod.exports.values()) {
             const actualDeclId = context.extImportRedirects.get(declId) || declId;
             context.mergedScopeInfo.escapedVars.add(actualDeclId);
+          } // ReachabilityTracerで行っている保護ロジックと一致させるため、
+          // エントリーファイルのトップレベル宣言も escapedVars に登録し、後段の最適化エンジン(Golf)のDCEから保護する
+          for (const stmt of mod.statements.values()) {
+            if (stmt.type === 'Declaration') {
+              for (const declId of stmt.defines) {
+                const actualDeclId = context.extImportRedirects.get(declId) || declId;
+                context.mergedScopeInfo.escapedVars.add(actualDeclId);
+              }
+            }
           }
         }
       }
@@ -4571,49 +4798,6 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       return context.nodeReplacements.get(node.irNodeId);
     }
   }
-  class ConstantResolver {
-    declToInitMap = new Map();
-    refToDeclMap;
-    constructor(irRoot, refToDeclMap) {
-      this.refToDeclMap = refToDeclMap;
-      this.buildDeclToInitMap(irRoot);
-    }
-    buildDeclToInitMap(node) {
-      if (node.type === 'VariableDeclarator') {
-        const idRef = node.props.id;
-        const initRef = node.props.init;
-        if (idRef && idRef.type === 'ref' && initRef && initRef.type === 'ref') {
-          const idNode = node.children.find(c => c.irNodeId === idRef.irNodeId);
-          const initNode = node.children.find(c => c.irNodeId === initRef.irNodeId);
-          if (idNode && idNode.type === 'Identifier' && initNode) {
-            this.declToInitMap.set(idNode.irNodeId, initNode);
-          }
-        }
-      }
-      if (node.children) {
-        for (const child of node.children) {
-          this.buildDeclToInitMap(child);
-        }
-      }
-    }
-    /**
-       * 指定されたノード（識別子など）を定数追跡して最終的な値を返します。
-       * 解決できない場合は元のノードをそのまま返します。
-       */
-    resolve(node, visited = new Set()) {
-      if (node.type === 'Identifier') {
-        const declId = this.refToDeclMap.get(node.irNodeId);
-        if (declId && !visited.has(declId)) {
-          visited.add(declId);
-          const initNode = this.declToInitMap.get(declId);
-          if (initNode) {
-            return this.resolve(initNode, visited);
-          }
-        }
-      }
-      return node;
-    }
-  }
   class UrlConstructorRule {
     match(node, context) {
       if (node.type !== 'NewExpression') return false;
@@ -4692,50 +4876,31 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
   }
   class WorkerConstructorRule {
     match(node, context) {
-      if (node.type !== 'NewExpression') return false;
-      const calleeRef = node.props['callee'];
-      if (!calleeRef || calleeRef.type !== 'ref') return false;
-      const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-      if (!calleeNode || calleeNode.type !== 'Identifier') return false;
-      const name = calleeNode.props['name'];
-      if (name !== 'Worker' && name !== 'SharedWorker') return false;
-      const args = node.props['arguments'] || [];
-      if (args.length === 0 || args[0].type !== 'ref') return false;
-      const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
-      if (!firstArgNode) return false;
       const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath);
       if (!currentTree) return false;
       const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map();
       const resolver = new ConstantResolver(currentTree, refToDeclMap);
-      const {
-        relativePath
-      } = this.resolveWorkerPath(firstArgNode, resolver);
-      if (!relativePath || /^(https?:)?\/\//i.test(relativePath)) return false;
-      const resolved = context.resolvePath(context.currentFilePath, relativePath);
+      const ref = WorkerDetector.detectWorkerPattern(node, resolver);
+      if (!ref || !ref.rawPath || ref.kind !== 'Worker' && ref.kind !== 'SharedWorker') return false;
+      if (/^(https?:)?\/\//i.test(ref.rawPath)) return false;
+      const resolved = context.resolvePath(context.currentFilePath, ref.rawPath);
       const base = context.getBase(resolved);
       const isExisting = context.modules.has(base) || context.modules.has(base + '/index') || context.fileExists(resolved);
       if (!isExisting) return false;
       return !!context.workerEntryBases && context.workerEntryBases.has(base);
     }
     transform(node, context, walk, parent) {
-      const calleeRef = node.props['callee'];
-      const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-      const name = calleeNode.props['name'];
-      const args = node.props['arguments'] || [];
-      const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
       const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath);
       const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map();
       const resolver = new ConstantResolver(currentTree, refToDeclMap);
-      const {
-        relativePath
-      } = this.resolveWorkerPath(firstArgNode, resolver);
-      const resolved = context.resolvePath(context.currentFilePath, relativePath);
+      const ref = WorkerDetector.detectWorkerPattern(node, resolver);
+      const resolved = context.resolvePath(context.currentFilePath, ref.rawPath);
       const workerId = context.getBase(resolved);
       const safeChunkId = context.getSafeChunkId(workerId);
       if (context.logger) {
         context.logger({
           type: 'info',
-          msg: `[ChunkMerger] Successfully inlined ${name} constructor call to "${relativePath}" -> replaced with ${context.spawnFuncName}("${safeChunkId}")`
+          msg: `[ChunkMerger] Successfully inlined ${ref.kind} constructor call to "${ref.rawPath}" -> replaced with ${context.spawnFuncName}("${safeChunkId}")`
         });
       }
       context.needsSpawnBoilerplate = true;
@@ -4761,7 +4926,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         type: 'StringLiteral',
         irNodeId: genId(),
         props: {
-          value: name
+          value: ref.kind
         },
         children: []
       };
@@ -4773,10 +4938,10 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         irNodeId: typeStrNode.irNodeId
       }];
       const callChildren = [spawnIdent, argStrNode, typeStrNode];
+      const args = node.props['arguments'] || [];
       if (args.length > 1) {
         const optNode = node.children.find(c => c.irNodeId === args[1].irNodeId);
         if (optNode) {
-          // オプショナルな引数（optionsなど）があれば再帰走査したうえで追加
           const walkedOpt = walk(optNode, node);
           callArgs.push({
             type: 'ref',
@@ -4798,57 +4963,6 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           arguments: callArgs
         },
         children: callChildren
-      };
-    }
-    resolveWorkerPath(firstArgNode, resolver) {
-      const resolvedArg = resolver.resolve(firstArgNode);
-      if (!resolvedArg) {
-        return {
-          relativePath: null,
-          unresolvedReason: 'Unable to resolve first argument'
-        };
-      }
-      if (resolvedArg.type === 'NewExpression') {
-        const calleeRef2 = resolvedArg.props['callee'];
-        if (calleeRef2 && calleeRef2.type === 'ref') {
-          const calleeNode2 = resolvedArg.children.find(c => c.irNodeId === calleeRef2.irNodeId);
-          if (calleeNode2 && calleeNode2.type === 'Identifier' && calleeNode2.props['name'] === 'URL') {
-            const urlArgs = resolvedArg.props['arguments'] || [];
-            if (urlArgs.length > 0 && urlArgs[0].type === 'ref') {
-              const urlFirstArgNode = resolvedArg.children.find(c => c.irNodeId === urlArgs[0].irNodeId);
-              if (urlFirstArgNode) {
-                const resolvedUrlArg = resolver.resolve(urlFirstArgNode);
-                if (resolvedUrlArg && (resolvedUrlArg.type === 'StringLiteral' || resolvedUrlArg.type === 'Literal')) {
-                  return {
-                    relativePath: resolvedUrlArg.props['value'],
-                    unresolvedReason: null
-                  };
-                }
-                return {
-                  relativePath: null,
-                  unresolvedReason: `URL constructor first argument resolved to non-string: "${resolvedUrlArg?.type || 'unknown'}"`
-                };
-              }
-            }
-            return {
-              relativePath: null,
-              unresolvedReason: 'URL constructor has no arguments'
-            };
-          }
-          return {
-            relativePath: null,
-            unresolvedReason: `Instantiation of class other than URL: "${calleeNode2?.props['name'] || 'unknown'}"`
-          };
-        }
-      } else if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
-        return {
-          relativePath: resolvedArg.props['value'],
-          unresolvedReason: null
-        };
-      }
-      return {
-        relativePath: null,
-        unresolvedReason: `Argument resolved to non-string/non-URL type: "${resolvedArg.type}"`
       };
     }
   }
@@ -4989,6 +5103,121 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 if (context.isAsset(resolvedPath)) continue;
                 if (context.isExternalModule(sourceVal, tree.filePath)) {
                   context.globalExternalImports.push(child);
+                } else {
+                  // 内部モジュールのNamespace Importに対して名前空間オブジェクトの実体を動的に合成して出力する
+                  const specifiers = child.props['specifiers'] || [];
+                  for (const specRef of specifiers) {
+                    if (specRef && specRef.type === 'ref') {
+                      const specNode = child.children.find(c => c.irNodeId === specRef.irNodeId);
+                      if (specNode && specNode.type === 'ImportNamespaceSpecifier') {
+                        const localRef = specNode.props['local'];
+                        const localNode = specNode.children.find(c => c.irNodeId === localRef?.irNodeId);
+                        if (localNode && localNode.type === 'Identifier') {
+                          const fromBase = context.getBase(resolvedPath);
+                          const fromExports = context.modules.get(fromBase)?.exports || context.modules.get(fromBase + '/index')?.exports;
+                          if (fromExports) {
+                            const genId = () => context.getDeterministicId('ir_ns_obj');
+                            const properties = [];
+                            for (const [expName, expDeclId] of fromExports.entries()) {
+                              const keyNode = {
+                                type: 'Identifier',
+                                irNodeId: genId(),
+                                props: {
+                                  name: expName
+                                },
+                                children: []
+                              };
+                              const actualDeclId = context.extImportRedirects.get(expDeclId) || expDeclId;
+                              const valName = context.renameJobs.get(actualDeclId) || 'unknown';
+                              const valNode = {
+                                type: 'Identifier',
+                                irNodeId: genId(),
+                                props: {
+                                  name: valName,
+                                  _declId: actualDeclId
+                                },
+                                children: []
+                              };
+                              refToDeclMap.set(valNode.irNodeId, actualDeclId);
+                              const propNode = {
+                                type: 'ObjectProperty',
+                                irNodeId: genId(),
+                                props: {
+                                  key: {
+                                    type: 'ref',
+                                    irNodeId: keyNode.irNodeId
+                                  },
+                                  value: {
+                                    type: 'ref',
+                                    irNodeId: valNode.irNodeId
+                                  },
+                                  computed: false,
+                                  shorthand: false,
+                                  method: false,
+                                  kind: 'init'
+                                },
+                                children: [keyNode, valNode]
+                              };
+                              properties.push(propNode);
+                            }
+                            const objNode = {
+                              type: 'ObjectExpression',
+                              irNodeId: genId(),
+                              props: {
+                                properties: properties.map(p => ({
+                                  type: 'ref',
+                                  irNodeId: p.irNodeId
+                                }))
+                              },
+                              children: properties
+                            };
+                            const nsDeclId = localNode.irNodeId;
+                            const nsName = context.renameJobs.get(nsDeclId) || localNode.props['name'];
+                            const idNode = {
+                              type: 'Identifier',
+                              irNodeId: nsDeclId,
+                              props: {
+                                name: nsName,
+                                _declId: nsDeclId
+                              },
+                              children: []
+                            };
+                            const decltorNode = {
+                              type: 'VariableDeclarator',
+                              irNodeId: genId(),
+                              props: {
+                                id: {
+                                  type: 'ref',
+                                  irNodeId: idNode.irNodeId
+                                },
+                                init: {
+                                  type: 'ref',
+                                  irNodeId: objNode.irNodeId
+                                }
+                              },
+                              children: [idNode, objNode]
+                            };
+                            const nsVarDecl = {
+                              type: 'VariableDeclaration',
+                              irNodeId: genId(),
+                              props: {
+                                kind: 'const',
+                                declarations: [{
+                                  type: 'ref',
+                                  irNodeId: decltorNode.irNodeId
+                                }]
+                              },
+                              children: [decltorNode]
+                            };
+                            fileBodyStatements.push({
+                              node: nsVarDecl,
+                              originId: child.irNodeId
+                            });
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -5169,6 +5398,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             }
             const result = [declNode];
             for (const assignStmt of assignmentStmts) {
+              const winIdentId = context.getDeterministicId('ir_win_guard_ident');
               const typeOfWinNode = {
                 type: 'UnaryExpression',
                 irNodeId: genId(),
@@ -5177,12 +5407,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                   prefix: true,
                   argument: {
                     type: 'ref',
-                    irNodeId: 'win_ident_id_guard'
+                    irNodeId: winIdentId
                   }
                 },
                 children: [{
                   type: 'Identifier',
-                  irNodeId: 'win_ident_id_guard',
+                  irNodeId: winIdentId,
                   props: {
                     name: 'window'
                   },
@@ -5201,7 +5431,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 type: 'BinaryExpression',
                 irNodeId: genId(),
                 props: {
-                  operator: '!--===',
+                  operator: '!==',
                   left: {
                     type: 'ref',
                     irNodeId: typeOfWinNode.irNodeId
@@ -5213,7 +5443,6 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 },
                 children: [typeOfWinNode, undefStrNode]
               };
-              windowTestNode.props['operator'] = '!==';
               const blockNode = {
                 type: 'BlockStatement',
                 irNodeId: genId(),
@@ -5246,7 +5475,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             return result;
           };
           for (const stmtInfo of fileBodyStatements) {
-            const stmt = stmtInfo.node; // 不要になった importScripts の残骸 ( undefined; ) をツリーから剪定
+            const stmt = stmtInfo.node; // 不要になった importScripts の呼び出し跡 ( 空の表現 / undefined; ) をツリーから除去
             if (stmt.type === 'ExpressionStatement') {
               const exprRef = stmt.props.expression;
               if (exprRef && exprRef.type === 'ref') {
@@ -5276,6 +5505,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                   }
                 } else {
                   const genId = () => context.getDeterministicId('ir_side_effect_guard');
+                  const winIdentId = context.getDeterministicId('ir_win_guard_ident');
                   const typeOfWinNode = {
                     type: 'UnaryExpression',
                     irNodeId: genId(),
@@ -5284,12 +5514,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                       prefix: true,
                       argument: {
                         type: 'ref',
-                        irNodeId: 'win_ident_id_guard'
+                        irNodeId: winIdentId
                       }
                     },
                     children: [{
                       type: 'Identifier',
-                      irNodeId: 'win_ident_id_guard',
+                      irNodeId: winIdentId,
                       props: {
                         name: 'window'
                       },
@@ -5308,7 +5538,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                     type: 'BinaryExpression',
                     irNodeId: genId(),
                     props: {
-                      operator: '!--===',
+                      operator: '!==',
                       left: {
                         type: 'ref',
                         irNodeId: typeOfWinNode.irNodeId
@@ -5320,7 +5550,6 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                     },
                     children: [typeOfWinNode, undefStrNode]
                   };
-                  windowTestNode.props['operator'] = '!==';
                   const blockNode = {
                     type: 'BlockStatement',
                     irNodeId: genId(),
@@ -6280,7 +6509,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 var __mo = null;
                 var __hl = [];
                 
-                // ネイティブセッターへの横流しを削除し、二重発火を防止
+                // ネイティブセッターへの直接の伝播（委譲）を削除し、二重発火を防止
                 Object.defineProperty(_g, 'onmessage', {
                     configurable: true,
                     get: function() { return __mo; },
@@ -6575,7 +6804,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     refToDeclMap, // refId -> declId
     referenceCounts, // declId -> reference count
     escapedVars, // declId that are escaped (used in closures, exports, globals)
-    reachingDefStates, defToVar, nodeMap, unmergedReachingDefs = new Map()) {
+    reachingDefStates, defToVar, // 1対多の定義リストに変更
+    nodeMap, unmergedReachingDefs = new Map()) {
       this.blocks = blocks;
       this.nodeToBlock = nodeToBlock;
       this.livenessStates = livenessStates;
@@ -6615,7 +6845,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       if (this.escapedVars.has(declId)) {
         return true;
       }
-      const state = this.livenessStates.get(nodeAfterId); // 情報がない（探索中に新しく生成されたノードなど）場合は安全側に倒して「生存している(true)」と判定する
+      const state = this.livenessStates.get(nodeAfterId); // 情報がない（探索中に新しく生成されたノードなど）場合は保守的に「生存している(true)」と判定する
       return state ? state.out.has(declId) : true;
     }
     getReachingDefinitions(nodeId, declId) {
@@ -6623,7 +6853,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       if (!state) return new Set();
       const result = new Set();
       for (const defId of state.in) {
-        if (this.defToVar.get(defId) === declId) {
+        const definedVars = this.defToVar.get(defId); // 配列内に目的の変数が含まれているかをチェック
+        if (definedVars && definedVars.includes(declId)) {
           result.add(defId);
         }
       }
@@ -6747,8 +6978,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     } // Macro Scanner: 分析スナップショットに基づく大域的な探索
     static scanMacro(state, rules, actions) {
       const snapshot = state.analysisSnapshot;
-      if (!snapshot) return; // Macro探索はASTを上から舐めるのではなく、解析結果のノード一覧から
-      // 大域的な条件（参照カウント0など）に合致するものを直接狙い撃つ
+      if (!snapshot) return; // Macro探索はASTをトップダウンで走査するのではなく、解析結果のノード一覧から
+      // 大域的な条件（参照カウント0など）に合致するノードを直接抽出する
       for (const node of snapshot.nodeMap.values()) {
         for (const rule of rules) {
           try {
@@ -6974,7 +7205,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           nextStates.push(new CompilationState(newState.irRoot, newMetadata, newState.analysisSnapshot, newState.services));
         }
       } // 「何もしない(No-Op)」状態（ベース状態）も候補として必ず追加する。
-      // 全てのルール適用によるコストが改悪だった場合、元の状態が最善として選択可能になる。
+      // 全てのルール適用によってコストが増加（悪化）した場合、元の状態を最善として選択できるようにする。
       nextStates.push(baseState);
       return nextStates;
     }
@@ -7779,7 +8010,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             currentBlock = exitBlock;
             return;
           }
-        } // ラベルの消費忘れ防止
+        } // 未消費のラベル情報をクリア（初期化）
         pendingLabel = null;
         if (node.type === 'BreakStatement') {
           const labelRef = node.props['label'];
@@ -7885,25 +8116,83 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     }
     return null;
   }
-  function getDefinedVars(node, refToDeclMap) {
+  function extractIdentifiersFromPattern(n, defines, nodeMap) {
+    if (!n) return;
+    if (n.type === 'Identifier') {
+      defines.add(n.irNodeId);
+      return;
+    }
+    if (n.type === 'ObjectPattern') {
+      const properties = n.props.properties || [];
+      for (const propRef of properties) {
+        if (propRef && propRef.type === 'ref') {
+          const propNode = nodeMap.get(propRef.irNodeId);
+          if (propNode) {
+            if (propNode.type === 'Property' || propNode.type === 'ObjectProperty') {
+              const valRef = propNode.props.value;
+              if (valRef && valRef.type === 'ref') {
+                const valNode = nodeMap.get(valRef.irNodeId);
+                if (valNode) extractIdentifiersFromPattern(valNode, defines, nodeMap);
+              }
+            } else if (propNode.type === 'RestElement') {
+              const argRef = propNode.props.argument;
+              if (argRef && argRef.type === 'ref') {
+                const argNode = nodeMap.get(argRef.irNodeId);
+                if (argNode) extractIdentifiersFromPattern(argNode, defines, nodeMap);
+              }
+            }
+          }
+        }
+      }
+    } else if (n.type === 'ArrayPattern') {
+      const elements = n.props.elements || [];
+      for (const elRef of elements) {
+        if (elRef && elRef.type === 'ref') {
+          const elNode = nodeMap.get(elRef.irNodeId);
+          if (elNode) extractIdentifiersFromPattern(elNode, defines, nodeMap);
+        }
+      }
+    } else if (n.type === 'AssignmentPattern') {
+      const leftRef = n.props.left;
+      if (leftRef && leftRef.type === 'ref') {
+        const leftNode = nodeMap.get(leftRef.irNodeId);
+        if (leftNode) extractIdentifiersFromPattern(leftNode, defines, nodeMap);
+      }
+    } else if (n.type === 'RestElement') {
+      const argRef = n.props.argument;
+      if (argRef && argRef.type === 'ref') {
+        const argNode = nodeMap.get(argRef.irNodeId);
+        if (argNode) extractIdentifiersFromPattern(argNode, defines, nodeMap);
+      }
+    }
+  }
+  function getDefinedVars(node, refToDeclMap, nodeMap) {
     const vars = [];
     if (node.type === 'VariableDeclarator') {
       const idNode = getChild(node, 'id');
-      if (idNode && idNode.type === 'Identifier') {
-        const declId = refToDeclMap.get(idNode.irNodeId) || idNode.irNodeId;
-        vars.push(declId);
+      if (idNode) {
+        const rawIds = new Set();
+        extractIdentifiersFromPattern(idNode, rawIds, nodeMap);
+        for (const rawId of rawIds) {
+          const declId = refToDeclMap.get(rawId) || rawId;
+          vars.push(declId);
+        }
       }
     } else if (node.type === 'AssignmentExpression') {
       const leftNode = getChild(node, 'left');
-      if (leftNode && leftNode.type === 'Identifier') {
-        const declId = refToDeclMap.get(leftNode.irNodeId);
-        if (declId) vars.push(declId);
+      if (leftNode) {
+        const rawIds = new Set();
+        extractIdentifiersFromPattern(leftNode, rawIds, nodeMap);
+        for (const rawId of rawIds) {
+          const declId = refToDeclMap.get(rawId) || rawId;
+          vars.push(declId);
+        }
       }
     } else if (node.type === 'UpdateExpression') {
       const argNode = getChild(node, 'argument');
       if (argNode && argNode.type === 'Identifier') {
-        const declId = refToDeclMap.get(argNode.irNodeId);
-        if (declId) vars.push(declId);
+        const declId = refToDeclMap.get(argNode.irNodeId) || argNode.irNodeId;
+        vars.push(declId);
       }
     }
     return vars;
@@ -7914,12 +8203,25 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     const parent = nodeMap.get(parentId);
     if (!parent) return false;
     if (parent.type === 'VariableDeclarator' && getChild(parent, 'id')?.irNodeId === node.irNodeId) return true;
-    if (parent.type === 'AssignmentExpression' && getChild(parent, 'left')?.irNodeId === node.irNodeId) {
-      // Compound assignments (e.g., +=) require reading the variable before writing to it.
-      // Thus, we treat it as an LVal for DEF purposes, but we will explicitly register its USE in extractLivenessData.
-      return true;
-    }
+    if (parent.type === 'AssignmentExpression' && getChild(parent, 'left')?.irNodeId === node.irNodeId) return true;
     if (parent.type === 'UpdateExpression' && getChild(parent, 'argument')?.irNodeId === node.irNodeId) return true;
+    let curr = parent;
+    let childId = node.irNodeId;
+    while (curr) {
+      if (curr.type === 'Property' || curr.type === 'ObjectProperty') {
+        if (getChild(curr, 'value')?.irNodeId === childId) {// value側ならLValの可能性継続
+        } else if (curr.props.shorthand) {// shorthandなら継続
+        } else {
+          return false;
+        }
+      }
+      if (curr.type === 'ObjectPattern' || curr.type === 'ArrayPattern' || curr.type === 'AssignmentPattern' || curr.type === 'RestElement') {
+        return true;
+      }
+      childId = curr.irNodeId;
+      const nextParentId = parentMap.get(curr.irNodeId);
+      curr = nextParentId ? nodeMap.get(nextParentId) : undefined;
+    }
     return false;
   }
   class IRDataFlowExtractor {
@@ -7929,7 +8231,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         for (const node of block.nodes) {
           const def = new Set();
           const use = new Set();
-          const definedVars = getDefinedVars(node, refToDeclMap);
+          const definedVars = getDefinedVars(node, refToDeclMap, nodeMap);
           for (const varName of definedVars) {
             def.add(varName);
           }
@@ -7948,9 +8250,13 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             const op = node.props.operator;
             if (op && op !== '=') {
               const leftNode = getChild(node, 'left');
-              if (leftNode && leftNode.type === 'Identifier') {
-                const declId = refToDeclMap.get(leftNode.irNodeId);
-                if (declId) use.add(declId);
+              if (leftNode) {
+                const rawIds = new Set();
+                extractIdentifiersFromPattern(leftNode, rawIds, nodeMap);
+                for (const rawId of rawIds) {
+                  const declId = refToDeclMap.get(rawId);
+                  if (declId) use.add(declId);
+                }
               }
             }
           }
@@ -7962,19 +8268,21 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       }
       return dataMap;
     }
-    static extractReachingDefData(blocks, refToDeclMap) {
+    static extractReachingDefData(blocks, refToDeclMap, nodeMap) {
       const dataMap = new Map();
       const defsByVar = new Map();
       const defToVar = new Map(); // First pass: Collect all definitions
       for (const block of blocks.values()) {
         for (const node of block.nodes) {
-          const definedVars = getDefinedVars(node, refToDeclMap);
-          for (const declId of definedVars) {
-            if (!defsByVar.has(declId)) {
-              defsByVar.set(declId, new Set());
+          const definedVars = getDefinedVars(node, refToDeclMap, nodeMap);
+          if (definedVars.length > 0) {
+            defToVar.set(node.irNodeId, definedVars); // 上書きではなく定義された全変数のリストをセットする
+            for (const declId of definedVars) {
+              if (!defsByVar.has(declId)) {
+                defsByVar.set(declId, new Set());
+              }
+              defsByVar.get(declId).add(node.irNodeId);
             }
-            defsByVar.get(declId).add(node.irNodeId);
-            defToVar.set(node.irNodeId, declId);
           }
         }
       } // Second pass: Compute gen and kill sets
@@ -7982,7 +8290,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         for (const node of block.nodes) {
           const gen = new Set();
           const kill = new Set();
-          const definedVars = getDefinedVars(node, refToDeclMap);
+          const definedVars = getDefinedVars(node, refToDeclMap, nodeMap);
           if (definedVars.length > 0) {
             for (const declId of definedVars) {
               const allDefsForVar = defsByVar.get(declId);
@@ -8224,7 +8532,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       const {
         dataMap: reachingDefDataMap,
         defToVar
-      } = IRDataFlowExtractor.extractReachingDefData(blocks, refToDeclMap); // 2. Solving Phase
+      } = IRDataFlowExtractor.extractReachingDefData(blocks, refToDeclMap, nodeMap); // 2. Solving Phase
       const livenessProblem = new LivenessAnalysis();
       const {
         nodeStates: livenessStates
@@ -8245,7 +8553,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     defaultEnabled: true,
     match: (node, state) => {
       // ここで型ガード。以降 node は確実に BinaryExpressionIR として推論される
-      if (node.type !== 'BinaryExpression') return false; // TSが node.props.left が存在することを保証してくれる
+      if (node.type !== 'BinaryExpression') return false; // TypeScriptの型システムにより、node.props.left の存在が保証される
       const leftRef = node.props.left;
       const rightRef = node.props.right;
       if (!leftRef || !rightRef) return false;
@@ -8394,7 +8702,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     defaultEnabled: true,
     match: (node, state) => {
       // ここで型ガード
-      if (node.type !== 'IfStatement') return false; // props に as キャストや ['consequent'] と書く必要がなくなる
+      if (node.type !== 'IfStatement') return false; // props に対する明示的な型キャストやブラケットアクセスを回避する
       const consequentRef = node.props.consequent;
       if (!consequentRef) return false;
       const consequentNode = node.children.find(c => c.irNodeId === consequentRef.irNodeId);
@@ -8562,7 +8870,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       const bodyRefs = blockNode.props['body'];
       const newBodyRefs = [];
       const newChildren = [];
-      let currentSequence = []; // 溜まった ExpressionStatement を 1つの SequenceExpression に結合してフラッシュする関数
+      let currentSequence = []; // 蓄積された ExpressionStatement を 1つの SequenceExpression に結合して出力する関数
       const flushSequence = () => {
         if (currentSequence.length === 0) return;
         if (currentSequence.length === 1) {
@@ -8610,7 +8918,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       for (const ref of bodyRefs) {
         if (!ref || ref.type !== 'ref') continue;
         const child = blockNode.children.find(c => c.irNodeId === ref.irNodeId);
-        if (!child) continue; // ExpressionStatement ならバッファに溜める
+        if (!child) continue; // ExpressionStatement であればバッファに蓄積する
         // （変数宣言や if 文などが来たら、そこで安全に結合を打ち切る）
         if (child.type === 'ExpressionStatement') {
           currentSequence.push(child);
@@ -8743,6 +9051,250 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       return [newNode];
     }
   };
+  // 参照先がターゲットノードの内部に完全に収まっているかを判定する
+  function isDescendant(childId, ancestorId, parentMap) {
+    let curr = childId;
+    while (curr) {
+      if (curr === ancestorId) return true;
+      curr = parentMap.get(curr);
+    }
+    return false;
+  } // 分割代入パターンから変数を再帰的に抽出するヘルパー
+  function extractIdentifiersFromPattern_1(n, defines, nodeMap) {
+    if (!n) return;
+    if (n.type === 'Identifier') {
+      defines.add(n.irNodeId);
+      return;
+    }
+    if (n.type === 'ObjectPattern') {
+      const properties = n.props.properties || [];
+      for (const propRef of properties) {
+        if (propRef && propRef.type === 'ref') {
+          const propNode = nodeMap.get(propRef.irNodeId);
+          if (propNode) {
+            if (propNode.type === 'Property' || propNode.type === 'ObjectProperty') {
+              const valRef = propNode.props.value;
+              if (valRef && valRef.type === 'ref') {
+                const valNode = nodeMap.get(valRef.irNodeId);
+                if (valNode) extractIdentifiersFromPattern_1(valNode, defines, nodeMap);
+              }
+            } else if (propNode.type === 'RestElement') {
+              const argRef = propNode.props.argument;
+              if (argRef && argRef.type === 'ref') {
+                const argNode = nodeMap.get(argRef.irNodeId);
+                if (argNode) extractIdentifiersFromPattern_1(argNode, defines, nodeMap);
+              }
+            }
+          }
+        }
+      }
+    } else if (n.type === 'ArrayPattern') {
+      const elements = n.props.elements || [];
+      for (const elRef of elements) {
+        if (elRef && elRef.type === 'ref') {
+          const elNode = nodeMap.get(elRef.irNodeId);
+          if (elNode) extractIdentifiersFromPattern_1(elNode, defines, nodeMap);
+        }
+      }
+    } else if (n.type === 'AssignmentPattern') {
+      const leftRef = n.props.left;
+      if (leftRef && leftRef.type === 'ref') {
+        const leftNode = nodeMap.get(leftRef.irNodeId);
+        if (leftNode) extractIdentifiersFromPattern_1(leftNode, defines, nodeMap);
+      }
+    } else if (n.type === 'RestElement') {
+      const argRef = n.props.argument;
+      if (argRef && argRef.type === 'ref') {
+        const argNode = nodeMap.get(argRef.irNodeId);
+        if (argNode) extractIdentifiersFromPattern_1(argNode, defines, nodeMap);
+      }
+    }
+  }
+  const ForInitMergeRule = {
+    id: 'micro:for-init-merge',
+    type: 'micro',
+    name: 'Forループ初期化子のマージ',
+    description: 'for文の直前にある変数宣言を、for文以降で参照されないことが静的解析で証明された場合に限り、初期化子内に安全に押し込みます。',
+    defaultEnabled: true,
+    match: (node, state) => {
+      if (node.type !== 'BlockStatement' && node.type !== 'Program') return false;
+      const bodyRefs = node.props['body'];
+      if (!Array.isArray(bodyRefs) || bodyRefs.length < 2) return false;
+      const snapshot = state.analysisSnapshot;
+      if (!snapshot) return false;
+      for (let i = 0; i < bodyRefs.length - 1; i++) {
+        const currentRef = bodyRefs[i];
+        const nextRef = bodyRefs[i + 1];
+        if (!currentRef || currentRef.type !== 'ref' || !nextRef || nextRef.type !== 'ref') continue;
+        const currentChild = node.children.find(c => c.irNodeId === currentRef.irNodeId);
+        const nextChild = node.children.find(c => c.irNodeId === nextRef.irNodeId);
+        if (currentChild && nextChild && currentChild.type === 'VariableDeclaration' && nextChild.type === 'ForStatement') {
+          const kind = currentChild.props['kind'];
+          const forInitRef = nextChild.props['init']; // 宣言種別の互換性検証
+          let isInitCompatible = false;
+          if (!forInitRef) {
+            isInitCompatible = true;
+          } else if (forInitRef.type === 'ref') {
+            const forInitNode = nextChild.children.find(c => c.irNodeId === forInitRef.irNodeId);
+            if (forInitNode && forInitNode.type === 'VariableDeclaration' && forInitNode.props['kind'] === kind) {
+              isInitCompatible = true;
+            }
+          }
+          if (!isInitCompatible) continue; // スコープの生存期間解析
+          let isSafeToMerge = true;
+          if (kind === 'let' || kind === 'const') {
+            const declaredIds = new Set();
+            for (const dRef of currentChild.props['declarations'] || []) {
+              if (dRef && dRef.type === 'ref') {
+                const dNode = currentChild.children.find(c => c.irNodeId === dRef.irNodeId);
+                if (dNode && dNode.type === 'VariableDeclarator') {
+                  const idRef = dNode.props['id'];
+                  if (idRef && idRef.type === 'ref') {
+                    const idNode = dNode.children.find(c => c.irNodeId === idRef.irNodeId);
+                    if (idNode) {
+                      // 単なる Identifier だけでなく分割代入なども再帰的に抽出
+                      const rawIds = new Set();
+                      extractIdentifiersFromPattern_1(idNode, rawIds, snapshot.nodeMap);
+                      for (const rawId of rawIds) {
+                        declaredIds.add(snapshot.refToDeclMap.get(rawId) || rawId);
+                      }
+                    }
+                  }
+                }
+              }
+            } // すべての参照ノードがfor文の子孫ノードに収まっているかを判定する
+            for (const [refId, declId] of snapshot.refToDeclMap.entries()) {
+              if (declaredIds.has(declId) && refId !== declId) {
+                if (!isDescendant(refId, nextChild.irNodeId, snapshot.parentMap)) {
+                  isSafeToMerge = false;
+                  break;
+                }
+              }
+            }
+          }
+          if (isSafeToMerge) return true;
+        }
+      }
+      return false;
+    },
+    candidates: (node, state) => {
+      const genId = () => state.services.generateId('ir_for_merge');
+      const blockNode = node;
+      const bodyRefs = blockNode.props['body'];
+      const snapshot = state.analysisSnapshot;
+      const newBodyRefs = [];
+      const newChildren = [];
+      let skipNext = false;
+      for (let i = 0; i < bodyRefs.length; i++) {
+        if (skipNext) {
+          skipNext = false;
+          continue;
+        }
+        const currentRef = bodyRefs[i];
+        const nextRef = i < bodyRefs.length - 1 ? bodyRefs[i + 1] : null;
+        let merged = false;
+        if (currentRef && currentRef.type === 'ref' && nextRef && nextRef.type === 'ref') {
+          const currentChild = blockNode.children.find(c => c.irNodeId === currentRef.irNodeId);
+          const nextChild = blockNode.children.find(c => c.irNodeId === nextRef.irNodeId);
+          if (currentChild && nextChild && currentChild.type === 'VariableDeclaration' && nextChild.type === 'ForStatement') {
+            const kind = currentChild.props['kind'];
+            const forInitRef = nextChild.props['init'];
+            let canMerge = false;
+            let existingForDecls = [];
+            let existingForDeclChildren = [];
+            if (!forInitRef) {
+              canMerge = true;
+            } else if (forInitRef.type === 'ref') {
+              const forInitNode = nextChild.children.find(c => c.irNodeId === forInitRef.irNodeId);
+              if (forInitNode && forInitNode.type === 'VariableDeclaration' && forInitNode.props['kind'] === kind) {
+                canMerge = true;
+                existingForDecls = forInitNode.props['declarations'] || [];
+                for (const dRef of existingForDecls) {
+                  const dNode = forInitNode.children.find(c => c.irNodeId === dRef.irNodeId);
+                  if (dNode) existingForDeclChildren.push(dNode);
+                }
+              }
+            } // 候補生成時におけるスコープの安全性検証
+            if (canMerge && (kind === 'let' || kind === 'const')) {
+              const declaredIds = new Set();
+              for (const dRef of currentChild.props['declarations'] || []) {
+                const dNode = currentChild.children.find(c => c.irNodeId === dRef.irNodeId);
+                if (dNode && dNode.type === 'VariableDeclarator') {
+                  const idNode = dNode.children.find(c => c.irNodeId === dNode.props['id']?.irNodeId);
+                  if (idNode) {
+                    const rawIds = new Set();
+                    extractIdentifiersFromPattern_1(idNode, rawIds, snapshot.nodeMap);
+                    for (const rawId of rawIds) {
+                      declaredIds.add(snapshot.refToDeclMap.get(rawId) || rawId);
+                    }
+                  }
+                }
+              }
+              for (const [refId, declId] of snapshot.refToDeclMap.entries()) {
+                if (declaredIds.has(declId) && refId !== declId) {
+                  if (!isDescendant(refId, nextChild.irNodeId, snapshot.parentMap)) {
+                    canMerge = false;
+                    break;
+                  }
+                }
+              }
+            }
+            if (canMerge) {
+              const mergedDeclarations = [...(currentChild.props['declarations'] || []), ...existingForDecls];
+              const currentDeclChildren = (currentChild.props['declarations'] || []).map(dRef => currentChild.children.find(c => c.irNodeId === dRef.irNodeId)).filter(Boolean);
+              const mergedVarDeclNode = {
+                type: 'VariableDeclaration',
+                irNodeId: genId(),
+                props: {
+                  kind,
+                  declarations: mergedDeclarations
+                },
+                children: [...currentDeclChildren, ...existingForDeclChildren]
+              };
+              const newForChildren = nextChild.children.filter(c => !forInitRef || c.irNodeId !== forInitRef.irNodeId);
+              newForChildren.push(mergedVarDeclNode);
+              const newForNode = {
+                ...nextChild,
+                irNodeId: genId(),
+                props: {
+                  ...nextChild.props,
+                  init: {
+                    type: 'ref',
+                    irNodeId: mergedVarDeclNode.irNodeId
+                  }
+                },
+                children: newForChildren
+              };
+              newBodyRefs.push({
+                type: 'ref',
+                irNodeId: newForNode.irNodeId
+              });
+              newChildren.push(newForNode);
+              skipNext = true;
+              merged = true;
+            }
+          }
+        }
+        if (!merged) {
+          const currentChild = blockNode.children.find(c => c.irNodeId === currentRef.irNodeId);
+          if (currentChild) {
+            newBodyRefs.push(currentRef);
+            newChildren.push(currentChild);
+          }
+        }
+      }
+      const newNode = {
+        ...blockNode,
+        irNodeId: genId(),
+        props: {
+          ...blockNode.props,
+          body: newBodyRefs
+        },
+        children: newChildren
+      };
+      return [newNode];
+    }
+  };
   // 副作用を持たない安全なノードかどうかを判定
   function isSimple(node) {
     return node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral';
@@ -8751,7 +9303,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     id: 'micro:dead-store-elimination',
     type: 'micro',
     name: '不要代入の削除 (Dead Store Elimination)',
-    description: '再代入などで上書きされて一度も読み取られない無駄な代入や初期化コードを削除します。',
+    description: '再代入などで上書きされて一度も読み取られない不要な代入や初期化コードを削除します。',
     defaultEnabled: true,
     match: (node, state) => {
       if (!state.analysisSnapshot) return false;
@@ -8987,7 +9539,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       const snapshot = state.analysisSnapshot;
       const objNode = snapshot.nodeMap.get(objRef.irNodeId);
       if (!objNode || objNode.type !== 'Identifier') return false;
-      const identNode = objNode; // 自分が代入の左辺などにいないかチェック
+      const identNode = objNode; // 対象ノードが代入の左辺などに位置していないかチェック
       const parentId = snapshot.parentMap.get(memNode.irNodeId);
       if (parentId) {
         const parent = snapshot.nodeMap.get(parentId);
@@ -9019,7 +9571,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         }
       }
       if (!sourceNode || sourceNode.type !== 'ObjectExpression') return false; // ミューテーション検査: 対象のオブジェクトに対する変更がないか
-      // このオブジェクト(a_decl)への全ての参照をチェックし、プロパティ変更や引数渡しなどがあれば安全のため伝播を諦める
+      // このオブジェクト(a_decl)への全ての参照をチェックし、プロパティ変更や引数渡しなどがあれば安全のため伝播の対象外とする
       let isMutatedOrEscaped = false;
       for (const [refId, declId] of snapshot.refToDeclMap.entries()) {
         if (declId === a_decl) {
@@ -9043,7 +9595,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                       break;
                     }
                     if (memParent.type === 'CallExpression' && memParent.props.callee?.irNodeId === refParent.irNodeId) {
-                      // メソッド呼び出し (thisを通して変更される可能性があるため保守的に諦める)
+                      // メソッド呼び出し (thisを通して変更される可能性があるため保守的に適用をスキップする)
                       // e.g. obj.method()
                       isMutatedOrEscaped = true;
                       break;
@@ -9051,12 +9603,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                   }
                 }
               } else if (refParent.type === 'AssignmentExpression' && refParent.props.left?.irNodeId === refId) {
-                // 再代入 (a_defs.size === 1 だが、別の箇所で再代入されているなら複雑化するので保守的に諦める)
+                // 再代入 (a_defs.size === 1 だが、別の箇所で再代入されているなら複雑化を避けるため保守的に適用をスキップする)
                 isMutatedOrEscaped = true;
                 break;
               } else {
                 // 関数呼び出しの引数として渡されている(CallExpression arguments)など、その他の使われ方
-                // 保守的に諦める
+                // 保守的に適用をスキップする
                 isMutatedOrEscaped = true;
                 break;
               }
@@ -10597,7 +11149,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     id: 'macro:class-to-tuple',
     type: 'macro',
     name: 'クラスの配列（タプル）化',
-    description: '完全に隠蔽されたデータ用クラス（DTO）を通常の配列へと変換し、高効率・低フットプリント化します。',
+    description: 'プライベートプロパティのみを持つデータ用クラス（DTO）を通常の配列へと変換し、メモリ使用量と実行時のオーバーヘッドを削減します。',
     defaultEnabled: true,
     match: (node, state) => {
       if (node.type !== 'Program') return false;
@@ -10789,7 +11341,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           };
           if (n.type === 'Identifier') {
             const declId = snapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
-            const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId) : declId; // 自分が「宣言」そのものである場合は、先ほど事前生成したIDを付与する
+            const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId) : declId; // 対象ノードが「宣言」である場合は、事前生成したIDを付与する
             const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId) : genId();
             return {
               type: 'Identifier',
@@ -11590,7 +12142,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
        * Get all registered micro rules.
        */
     static getMicroRules() {
-      return [ConstantFoldingRule, IfToTernaryRule, StatementMergeRule, VariableDeclarationMergeRule, DeadStoreEliminationRule, CopyPropagationRule, ConstantPropagationRule, ObjectPropertyPropagationRule, LogicalSimplificationRule, PureFunctionEvaluationRule, UnreachableCodeEliminationRule];
+      return [ConstantFoldingRule, IfToTernaryRule, StatementMergeRule, VariableDeclarationMergeRule, ForInitMergeRule, DeadStoreEliminationRule, CopyPropagationRule, ConstantPropagationRule, ObjectPropertyPropagationRule, LogicalSimplificationRule, PureFunctionEvaluationRule, UnreachableCodeEliminationRule];
     }
     /**
        * Get all registered macro rules.
@@ -11733,125 +12285,6 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         lastBestCost = bestOverallCost;
       }
       return currentRoot;
-    }
-  }
-  class WorkerDetector {
-    /**
-       * IRツリーから Worker 等の未解決 of 依存パス（生文字列）一覧を抽出します。
-       * VFS（ファイルシステム）上での解決は上位オーケストレーターの責務です。
-       */
-    static extractRawWorkerPaths(ir, logger) {
-      const paths = new Set();
-      const refToDeclMap = ScopeResolver.resolve(ir);
-      const resolver = new ConstantResolver(ir, refToDeclMap);
-      const extractPath = (argNode, constructorName) => {
-        const resolvedArg = resolver.resolve(argNode);
-        let relativePath = null;
-        let unresolvedReason = null;
-        if (resolvedArg.type === 'NewExpression') {
-          const calleeRef = resolvedArg.props['callee'];
-          if (calleeRef && calleeRef.type === 'ref') {
-            const calleeNode = resolvedArg.children.find(c => c.irNodeId === calleeRef.irNodeId);
-            if (calleeNode && calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'URL') {
-              const urlArgs = resolvedArg.props['arguments'] || [];
-              if (urlArgs.length > 0 && urlArgs[0].type === 'ref') {
-                const urlFirstArgNode = resolvedArg.children.find(c => c.irNodeId === urlArgs[0].irNodeId);
-                if (urlFirstArgNode) {
-                  const resolvedUrlArg = resolver.resolve(urlFirstArgNode);
-                  if (resolvedUrlArg && (resolvedUrlArg.type === 'StringLiteral' || resolvedUrlArg.type === 'Literal')) {
-                    relativePath = resolvedUrlArg.props['value'];
-                  } else {
-                    unresolvedReason = `URL constructor argument resolved to non-string type: "${resolvedUrlArg.type}"`;
-                  }
-                }
-              } else {
-                unresolvedReason = `URL constructor has no arguments`;
-              }
-            } else {
-              unresolvedReason = `Instantiation of class other than URL: "${calleeNode?.props['name'] || 'unknown'}"`;
-            }
-          }
-        } else if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
-          relativePath = resolvedArg.props['value'];
-        } else {
-          unresolvedReason = `Argument resolved to non-string/non-URL type: "${resolvedArg.type}"`;
-        }
-        if (relativePath) {
-          if (/^(https?:)?\/\//i.test(relativePath)) {
-            if (logger) {
-              logger({
-                type: 'info',
-                msg: `[WorkerDetector] External network worker path detected: "${relativePath}" (in ${ir.filePath}). Skipping bundle inlining.`
-              });
-            }
-          } else {
-            paths.add(relativePath);
-            if (logger) {
-              logger({
-                type: 'info',
-                msg: `[WorkerDetector] Successfully resolved worker path: "${relativePath}" (in ${ir.filePath})`
-              });
-            }
-          }
-        } else {
-          if (logger) {
-            logger({
-              type: 'info',
-              msg: `[WorkerDetector Warning] Detected ${constructorName} call at ${ir.filePath} but could not resolve path statically. Reason: ${unresolvedReason || 'unknown'}. Falling back to runtime loading.`
-            });
-          }
-        }
-      };
-      if (ir.children && ir.children.length > 0) {
-        IRTraverser.traverse(ir.children[0], {
-          NewExpression: node => {
-            const calleeRef = node.props['callee'];
-            if (calleeRef && calleeRef.type === 'ref') {
-              const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-              if (calleeNode && calleeNode.type === 'Identifier') {
-                const name = calleeNode.props['name'];
-                if (name === 'Worker' || name === 'SharedWorker') {
-                  const args = node.props['arguments'] || [];
-                  if (args.length > 0 && args[0].type === 'ref') {
-                    const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
-                    if (firstArgNode) extractPath(firstArgNode, name);
-                  } else {
-                    if (logger) {
-                      logger({
-                        type: 'info',
-                        msg: `[WorkerDetector Warning] ${name} instantiated with no arguments at ${ir.filePath}.`
-                      });
-                    }
-                  }
-                }
-              }
-            }
-          },
-          CallExpression: node => {
-            const calleeRef = node.props['callee'];
-            if (calleeRef && calleeRef.type === 'ref') {
-              const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-              if (calleeNode && calleeNode.type === 'MemberExpression') {
-                const propRef = calleeNode.props['property'];
-                if (propRef && propRef.type === 'ref') {
-                  const propNode = calleeNode.children.find(c => c.irNodeId === propRef.irNodeId);
-                  if (propNode && propNode.type === 'Identifier') {
-                    const name = propNode.props['name'];
-                    if (name === 'addModule' || name === 'register') {
-                      const args = node.props['arguments'] || [];
-                      if (args.length > 0 && args[0].type === 'ref') {
-                        const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
-                        if (firstArgNode) extractPath(firstArgNode, `navigator.serviceWorker.${name}`);
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        });
-      }
-      return Array.from(paths);
     }
   }
   class VariableMangler {
@@ -12528,7 +12961,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         const htmlContent = vfs.read(htmlPath);
         if (htmlContent) originalSize += new Blob([htmlContent]).size;
       }
-      const worldCompiler = new WorldCompiler(vfs, config, filterOptions, logger); // インラインスクリプトの個別限界圧縮 (WorldCompiler + VariableMangler)
+      const worldCompiler = new WorldCompiler(vfs, config, filterOptions, logger); // インラインスクリプトの最適化と圧縮 (WorldCompiler + VariableMangler)
       const inlineMetaStr = vfs.read('_meta_inline_scripts.json');
       if (inlineMetaStr) {
         const inlineList = JSON.parse(inlineMetaStr);

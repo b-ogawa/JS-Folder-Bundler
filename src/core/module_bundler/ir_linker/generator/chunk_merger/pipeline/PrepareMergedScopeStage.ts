@@ -53,6 +53,7 @@ export class PrepareMergedScopeStage implements PipelineStage<MergeContext> {
             if (!mod) continue;
 
             const isEntryFile = context.entryBasePaths.has(basePath) || context.entryBasePaths.has(basePath + '/index');
+            const isWorkerEntryFile = context.workerEntryBases && (context.workerEntryBases.has(basePath) || context.workerEntryBases.has(basePath + '/index'));
 
             if (tree.scopeInfo) {
                 // bindings マージ & renameJobsの適用
@@ -76,10 +77,21 @@ export class PrepareMergedScopeStage implements PipelineStage<MergeContext> {
             }
 
             // エントリーポイントからのエクスポートされた定義を escapedVars に追加する
-            if (isEntryFile) {
+            if (isEntryFile || isWorkerEntryFile) {
                 for (const declId of mod.exports.values()) {
                     const actualDeclId = context.extImportRedirects.get(declId) || declId;
                     context.mergedScopeInfo.escapedVars.add(actualDeclId);
+                }
+
+                // ReachabilityTracerで行っている保護ロジックと一致させるため、
+                // エントリーファイルのトップレベル宣言も escapedVars に登録し、後段の最適化エンジン(Golf)のDCEから保護する
+                for (const stmt of mod.statements.values()) {
+                    if (stmt.type === 'Declaration') {
+                        for (const declId of stmt.defines) {
+                            const actualDeclId = context.extImportRedirects.get(declId) || declId;
+                            context.mergedScopeInfo.escapedVars.add(actualDeclId);
+                        }
+                    }
                 }
             }
         }

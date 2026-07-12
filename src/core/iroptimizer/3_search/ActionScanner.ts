@@ -82,8 +82,8 @@ export class ActionScanner {
         const snapshot = state.analysisSnapshot;
         if (!snapshot) return;
 
-        // Macro探索はASTを上から舐めるのではなく、解析結果のノード一覧から
-        // 大域的な条件（参照カウント0など）に合致するものを直接狙い撃つ
+        // Macro探索はASTをトップダウンで走査するのではなく、解析結果のノード一覧から
+        // 大域的な条件（参照カウント0など）に合致するノードを直接抽出する
         for (const node of snapshot.nodeMap.values()) {
             for (const rule of rules) {
                 try {

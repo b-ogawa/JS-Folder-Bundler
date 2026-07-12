@@ -95,6 +95,84 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
 
                             if (context.isExternalModule(sourceVal, tree.filePath)) {
                                 context.globalExternalImports.push(child);
+                            } else {
+                                // 内部モジュールのNamespace Importに対して名前空間オブジェクトの実体を動的に合成して出力する
+                                const specifiers = child.props['specifiers'] || [];
+                                for (const specRef of specifiers) {
+                                    if (specRef && specRef.type === 'ref') {
+                                        const specNode = child.children.find(c => c.irNodeId === specRef.irNodeId);
+                                        if (specNode && specNode.type === 'ImportNamespaceSpecifier') {
+                                            const localRef = specNode.props['local'];
+                                            const localNode = specNode.children.find(c => c.irNodeId === localRef?.irNodeId);
+                                            
+                                            if (localNode && localNode.type === 'Identifier') {
+                                                const fromBase = context.getBase(resolvedPath);
+                                                const fromExports = context.modules.get(fromBase)?.exports || context.modules.get(fromBase + '/index')?.exports;
+                                                
+                                                if (fromExports) {
+                                                    const genId = () => context.getDeterministicId('ir_ns_obj');
+                                                    const properties: IRNode[] = [];
+                                                    
+                                                    for (const [expName, expDeclId] of fromExports.entries()) {
+                                                        const keyNode: IRNode = { type: 'Identifier', irNodeId: genId(), props: { name: expName }, children: [] };
+                                                        
+                                                        const actualDeclId = context.extImportRedirects.get(expDeclId) || expDeclId;
+                                                        const valName = context.renameJobs.get(actualDeclId) || 'unknown'; 
+                                                        
+                                                        const valNode: IRNode = { 
+                                                            type: 'Identifier', 
+                                                            irNodeId: genId(), 
+                                                            props: { name: valName, _declId: actualDeclId }, 
+                                                            children: [] 
+                                                        };
+                                                        refToDeclMap.set(valNode.irNodeId, actualDeclId);
+                                                        
+                                                        const propNode: IRNode = {
+                                                            type: 'ObjectProperty',
+                                                            irNodeId: genId(),
+                                                            props: { key: { type: 'ref', irNodeId: keyNode.irNodeId }, value: { type: 'ref', irNodeId: valNode.irNodeId }, computed: false, shorthand: false, method: false, kind: 'init' },
+                                                            children: [keyNode, valNode]
+                                                        };
+                                                        properties.push(propNode);
+                                                    }
+                                                    
+                                                    const objNode: IRNode = {
+                                                        type: 'ObjectExpression',
+                                                        irNodeId: genId(),
+                                                        props: { properties: properties.map(p => ({ type: 'ref', irNodeId: p.irNodeId })) },
+                                                        children: properties
+                                                    };
+                                                    
+                                                    const nsDeclId = localNode.irNodeId;
+                                                    const nsName = context.renameJobs.get(nsDeclId) || localNode.props['name'];
+                                                    
+                                                    const idNode: IRNode = {
+                                                        type: 'Identifier',
+                                                        irNodeId: nsDeclId,
+                                                        props: { name: nsName, _declId: nsDeclId },
+                                                        children: []
+                                                    };
+                                                    
+                                                    const decltorNode: IRNode = {
+                                                        type: 'VariableDeclarator',
+                                                        irNodeId: genId(),
+                                                        props: { id: { type: 'ref', irNodeId: idNode.irNodeId }, init: { type: 'ref', irNodeId: objNode.irNodeId } },
+                                                        children: [idNode, objNode]
+                                                    };
+                                                    
+                                                    const nsVarDecl: IRNode = {
+                                                        type: 'VariableDeclaration',
+                                                        irNodeId: genId(),
+                                                        props: { kind: 'const', declarations: [{ type: 'ref', irNodeId: decltorNode.irNodeId }] },
+                                                        children: [decltorNode]
+                                                    };
+                                                    
+                                                    fileBodyStatements.push({ node: nsVarDecl, originId: child.irNodeId });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -278,11 +356,12 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
                     const result: IRNode[] = [declNode];
                     
                     for (const assignStmt of assignmentStmts) {
+                        const winIdentId = context.getDeterministicId('ir_win_guard_ident');
                         const typeOfWinNode: IRNode = {
                             type: 'UnaryExpression',
                             irNodeId: genId(),
-                            props: { operator: 'typeof', prefix: true, argument: { type: 'ref', irNodeId: 'win_ident_id_guard' } },
-                            children: [{ type: 'Identifier', irNodeId: 'win_ident_id_guard', props: { name: 'window' }, children: [] }]
+                            props: { operator: 'typeof', prefix: true, argument: { type: 'ref', irNodeId: winIdentId } },
+                            children: [{ type: 'Identifier', irNodeId: winIdentId, props: { name: 'window' }, children: [] }]
                         };
                         const undefStrNode: IRNode = {
                             type: 'StringLiteral',
@@ -293,10 +372,9 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
                         const windowTestNode: IRNode = {
                             type: 'BinaryExpression',
                             irNodeId: genId(),
-                            props: { operator: '!--===', left: { type: 'ref', irNodeId: typeOfWinNode.irNodeId }, right: { type: 'ref', irNodeId: undefStrNode.irNodeId } },
+                            props: { operator: '!==', left: { type: 'ref', irNodeId: typeOfWinNode.irNodeId }, right: { type: 'ref', irNodeId: undefStrNode.irNodeId } },
                             children: [typeOfWinNode, undefStrNode]
                         };
-                        windowTestNode.props['operator'] = '!==';
 
                         const blockNode: IRNode = {
                             type: 'BlockStatement',
@@ -323,7 +401,7 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
                 for (const stmtInfo of fileBodyStatements) {
                     const stmt = stmtInfo.node;
 
-                    // 不要になった importScripts の残骸 ( undefined; ) をツリーから剪定
+                    // 不要になった importScripts の呼び出し跡 ( 空の表現 / undefined; ) をツリーから除去
                     if (stmt.type === 'ExpressionStatement') {
                         const exprRef = stmt.props.expression;
                         if (exprRef && exprRef.type === 'ref') {
@@ -355,12 +433,13 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
                                 }
                             } else {
                                 const genId = () => context.getDeterministicId('ir_side_effect_guard');
+                                const winIdentId = context.getDeterministicId('ir_win_guard_ident');
 
                                 const typeOfWinNode: IRNode = {
                                     type: 'UnaryExpression',
                                     irNodeId: genId(),
-                                    props: { operator: 'typeof', prefix: true, argument: { type: 'ref', irNodeId: 'win_ident_id_guard' } },
-                                    children: [{ type: 'Identifier', irNodeId: 'win_ident_id_guard', props: { name: 'window' }, children: [] }]
+                                    props: { operator: 'typeof', prefix: true, argument: { type: 'ref', irNodeId: winIdentId } },
+                                    children: [{ type: 'Identifier', irNodeId: winIdentId, props: { name: 'window' }, children: [] }]
                                 };
                                 const undefStrNode: IRNode = {
                                     type: 'StringLiteral',
@@ -371,10 +450,9 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
                                 const windowTestNode: IRNode = {
                                     type: 'BinaryExpression',
                                     irNodeId: genId(),
-                                    props: { operator: '!--===', left: { type: 'ref', irNodeId: typeOfWinNode.irNodeId }, right: { type: 'ref', irNodeId: undefStrNode.irNodeId } },
+                                    props: { operator: '!==', left: { type: 'ref', irNodeId: typeOfWinNode.irNodeId }, right: { type: 'ref', irNodeId: undefStrNode.irNodeId } },
                                     children: [typeOfWinNode, undefStrNode]
                                 };
-                                windowTestNode.props['operator'] = '!==';
 
                                 const blockNode: IRNode = {
                                     type: 'BlockStatement',

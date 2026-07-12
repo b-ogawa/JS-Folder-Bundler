@@ -8,7 +8,7 @@ export interface RuleMetadata {
 
 /**
  * UIや設定が参照するための「純粋なデータ（メタデータ）」。
- * コンパイラエンジンへの依存（import）を一切持たないため、UI側に引きずり込まれても安全。
+ * コンパイラエンジンへの依存（import）を持たないため、UI側のバンドルに含まれても意図しない依存関係を発生させない。
  */
 export const RULE_DEFINITIONS: Record<string, RuleMetadata> = {
     'micro:constant-folding': {
@@ -39,11 +39,18 @@ export const RULE_DEFINITIONS: Record<string, RuleMetadata> = {
         description: '連続する同じ種類(let/const)の変数宣言をカンマで結合します。',
         defaultEnabled: true
     },
+    'micro:for-init-merge': {
+        id: 'micro:for-init-merge',
+        type: 'micro',
+        name: 'Forループ初期化子のマージ (For Init Merge)',
+        description: 'for文の直前にある変数宣言を、for文以降で参照されないことが静的解析で証明された場合に限り、初期化子内に安全に押し込みます。',
+        defaultEnabled: true
+    },
     'micro:dead-store-elimination': {
         id: 'micro:dead-store-elimination',
         type: 'micro',
         name: '不要代入の削除 (Dead Store Elimination)',
-        description: '再代入などで上書きされて一度も読み取られない無駄な代入や初期化コードを削除します。',
+        description: '再代入などで上書きされて一度も読み取られない不要な代入や初期化コードを削除します。',
         defaultEnabled: false
     },
     'micro:copy-propagation': {
@@ -113,7 +120,7 @@ export const RULE_DEFINITIONS: Record<string, RuleMetadata> = {
         id: 'macro:class-to-tuple',
         type: 'macro',
         name: 'クラスの配列（タプル）化',
-        description: '完全に隠蔽されたデータ用クラス（DTO）を通常の配列へと変換し、高効率・低フットプリント化します。',
+        description: 'プライベートプロパティのみを持つデータ用クラス（DTO）を通常の配列へと変換し、メモリ使用量と実行時のオーバーヘッドを削減します。',
         defaultEnabled: false
     },
     'macro:function-inlining': {

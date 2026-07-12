@@ -1,4 +1,5 @@
 import { IRNode, IRRoot } from '../ir_converter/ASTtoIRConverter';
+import { IRUtils } from '../ir_converter/IRUtils';
 
 export class ConstantResolver {
     private declToInitMap = new Map<string, IRNode>();
@@ -11,14 +12,10 @@ export class ConstantResolver {
 
     private buildDeclToInitMap(node: IRNode) {
         if (node.type === 'VariableDeclarator') {
-            const idRef = node.props.id;
-            const initRef = node.props.init;
-            if (idRef && idRef.type === 'ref' && initRef && initRef.type === 'ref') {
-                const idNode = node.children.find(c => c.irNodeId === idRef.irNodeId);
-                const initNode = node.children.find(c => c.irNodeId === initRef.irNodeId);
-                if (idNode && idNode.type === 'Identifier' && initNode) {
-                    this.declToInitMap.set(idNode.irNodeId, initNode);
-                }
+            const idNode = IRUtils.resolveRef(node, node.props.id);
+            const initNode = IRUtils.resolveRef(node, node.props.init);
+            if (idNode && idNode.type === 'Identifier' && initNode) {
+                this.declToInitMap.set(idNode.irNodeId, initNode);
             }
         }
         if (node.children) {

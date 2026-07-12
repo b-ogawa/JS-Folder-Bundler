@@ -128,7 +128,7 @@ export default function App() {
         readPromises.push(readPromise);
       }
 
-      // すべてのファイルを並行して読み込む (劇的に高速化)
+      // すべてのファイルを並行して読み込み、処理時間を短縮する
       const results = await Promise.all(readPromises);
 
       // 読み込み結果をMapに格納

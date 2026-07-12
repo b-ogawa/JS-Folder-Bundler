@@ -73,7 +73,7 @@ self.onmessage = async (e: MessageEvent<any>) => {
 
         const worldCompiler = new WorldCompiler(vfs, config, filterOptions, logger);
 
-        // インラインスクリプトの個別限界圧縮 (WorldCompiler + VariableMangler)
+        // インラインスクリプトの最適化と圧縮 (WorldCompiler + VariableMangler)
         const inlineMetaStr = vfs.read('_meta_inline_scripts.json');
         if (inlineMetaStr) {
             const inlineList = JSON.parse(inlineMetaStr);

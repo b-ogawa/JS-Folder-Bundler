@@ -82,7 +82,7 @@ export class StateExpander {
         }
 
         // 「何もしない(No-Op)」状態（ベース状態）も候補として必ず追加する。
-        // 全てのルール適用によるコストが改悪だった場合、元の状態が最善として選択可能になる。
+        // 全てのルール適用によってコストが増加（悪化）した場合、元の状態を最善として選択できるようにする。
         nextStates.push(baseState);
 
         return nextStates;

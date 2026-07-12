@@ -9,7 +9,7 @@ export interface DataFlowProblem<State, NodeData> {
     initialState(): State;
     
     // Transfer function for a single node, using only extracted data
-    // This function can modify inputState in-place to achieve extreme performance.
+    // This function can modify inputState in-place to reduce memory allocation overhead.
     transferNode(data: NodeData, inputState: State): State;
     
     // Compare states for convergence

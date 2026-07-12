@@ -47,7 +47,7 @@ export class NativeFlowAnalyzer {
         // --- New Data-Driven DFA Engine ---
         // 1. Data Extraction Phase
         const livenessDataMap = IRDataFlowExtractor.extractLivenessData(blocks, refToDeclMap, parentMap, nodeMap);
-        const { dataMap: reachingDefDataMap, defToVar } = IRDataFlowExtractor.extractReachingDefData(blocks, refToDeclMap);
+        const { dataMap: reachingDefDataMap, defToVar } = IRDataFlowExtractor.extractReachingDefData(blocks, refToDeclMap, nodeMap);
 
         // 2. Solving Phase
         const livenessProblem = new LivenessAnalysis();

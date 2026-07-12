@@ -241,7 +241,7 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                 var __mo = null;
                 var __hl = [];
                 
-                // ネイティブセッターへの横流しを削除し、二重発火を防止
+                // ネイティブセッターへの直接の伝播（委譲）を削除し、二重発火を防止
                 Object.defineProperty(_g, 'onmessage', {
                     configurable: true,
                     get: function() { return __mo; },

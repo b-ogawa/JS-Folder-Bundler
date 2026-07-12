@@ -1,16 +1,14 @@
 import { IRRoot, IRNode } from '../../source_analyzer/ir_converter/ASTtoIRConverter';
 import { IRTraverser } from '../../source_analyzer/ir_converter/IRTraverser';
+import { IRUtils } from '../../source_analyzer/ir_converter/IRUtils';
 
 export class DependencyExtractor {
     static extract(ir: IRRoot): string[] {
         const deps = new Set<string>();
 
         const extractSource = (node: IRNode) => {
-            const sourceRef = node.props['source'];
-            if (sourceRef && sourceRef.type === 'ref') {
-                const sourceNode = node.children.find(c => c.irNodeId === sourceRef.irNodeId);
-                if (sourceNode && sourceNode.type === 'StringLiteral') deps.add(sourceNode.props['value']);
-            }
+            const sourceNode = IRUtils.resolveRef(node, node.props['source']);
+            if (sourceNode && sourceNode.type === 'StringLiteral') deps.add(sourceNode.props['value']);
         };
 
         const visitor = {
@@ -19,27 +17,22 @@ export class DependencyExtractor {
             ExportAllDeclaration: extractSource,
             ImportExpression: extractSource,
             CallExpression: (node: IRNode) => {
-                const calleeRef = node.props['callee'];
-                if (calleeRef && calleeRef.type === 'ref') {
-                    const calleeNode = node.children.find(c => c.irNodeId === calleeRef.irNodeId);
-                    if (calleeNode) {
-                        const isRequire = calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'require';
-                        const isDynamicImport = calleeNode.type === 'Import';
-                        const isImportScripts = calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'importScripts';
-                        
-                        if (isRequire || isDynamicImport) {
-                            const argsRef = node.props['arguments'];
-                            if (Array.isArray(argsRef) && argsRef.length > 0 && argsRef[0].type === 'ref') {
-                                const argNode = node.children.find(c => c.irNodeId === argsRef[0].irNodeId);
-                                if (argNode && argNode.type === 'StringLiteral') deps.add(argNode.props['value']);
-                            }
-                        } else if (isImportScripts) {
-                            for (const argRef of node.props['arguments'] || []) {
-                                if (argRef && argRef.type === 'ref') {
-                                    const argNode = node.children.find(c => c.irNodeId === argRef.irNodeId);
-                                    if (argNode && argNode.type === 'StringLiteral') deps.add(argNode.props['value']);
-                                }
-                            }
+                const calleeNode = IRUtils.resolveRef(node, node.props['callee']);
+                if (calleeNode) {
+                    const isRequire = calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'require';
+                    const isDynamicImport = calleeNode.type === 'Import';
+                    const isImportScripts = calleeNode.type === 'Identifier' && calleeNode.props['name'] === 'importScripts';
+                    
+                    if (isRequire || isDynamicImport) {
+                        const argsRef = node.props['arguments'];
+                        if (Array.isArray(argsRef) && argsRef.length > 0) {
+                            const argNode = IRUtils.resolveRef(node, argsRef[0]);
+                            if (argNode && argNode.type === 'StringLiteral') deps.add(argNode.props['value']);
+                        }
+                    } else if (isImportScripts) {
+                        for (const argRef of node.props['arguments'] || []) {
+                            const argNode = IRUtils.resolveRef(node, argRef);
+                            if (argNode && argNode.type === 'StringLiteral') deps.add(argNode.props['value']);
                         }
                     }
                 }

@@ -463,7 +463,7 @@ export const ClassToTupleRule: TransformRule = {
     id: 'macro:class-to-tuple',
     type: 'macro',
     name: 'クラスの配列（タプル）化',
-    description: '完全に隠蔽されたデータ用クラス（DTO）を通常の配列へと変換し、高効率・低フットプリント化します。',
+    description: 'プライベートプロパティのみを持つデータ用クラス（DTO）を通常の配列へと変換し、メモリ使用量と実行時のオーバーヘッドを削減します。',
     defaultEnabled: true,
     match: (node: IRNode, state: CompilationState): node is ProgramIR => {
         if (node.type !== 'Program') return false;
@@ -666,7 +666,7 @@ export const ClassToTupleRule: TransformRule = {
                     const declId = snapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
                     const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId)! : declId;
                     
-                    // 自分が「宣言」そのものである場合は、先ほど事前生成したIDを付与する
+                    // 対象ノードが「宣言」である場合は、事前生成したIDを付与する
                     const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId)! : genId();
 
                     return {

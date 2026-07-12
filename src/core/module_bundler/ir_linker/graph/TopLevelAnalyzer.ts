@@ -2,10 +2,14 @@ import { IRRoot, IRNode } from '../../../source_analyzer/ir_converter/ASTtoIRCon
 import { StatementInfo } from '../types';
 import { IRTraverser } from '../../../source_analyzer/ir_converter/IRTraverser';
 import { COMPILER_CONSTANTS } from '../../../utils/Constants';
+import { ConstantResolver } from '../../../source_analyzer/scope_analyzer/ConstantResolver';
+import { WorkerDetector } from '../../dependency_extractor/WorkerDetector';
 
 export class TopLevelAnalyzer {
     /**
-     * 匿名 export default 宣言をバーチャルな変数宣言に置き換える前処理を行います。
+     * 無名 export default を変数宣言に正規化します。
+     * 例: export default function() {} -> const _default_anon_xxx = function() {}; export default _default_anon_xxx;
+     * 参照一貫性を保つため、リンキング前の事前抽出段階でこれを完了させておきます。
      */
     public static normalizeAnonymousExports(tree: IRRoot, getBase: (p: string) => string): void {
         const fileProgram = tree.children[0]?.children?.find(c => c.type === 'Program');
@@ -63,7 +67,6 @@ export class TopLevelAnalyzer {
                                 children: [virtualDeclarator]
                             };
 
-                            // AST を更新して匿名 default を実体のあるローカル宣言に変換
                             fileProgram.children.push(virtualVarDecl);
                             bodyRefs[i] = { type: 'ref', irNodeId: virtualVarId };
 
@@ -77,9 +80,6 @@ export class TopLevelAnalyzer {
         }
     }
 
-    /**
-     * 各トップレベル文を走査し、依存関係（defines, references）を抽出します。
-     */
     public static analyze(
         tree: IRRoot,
         refToDeclMap: Map<string, string>
@@ -91,11 +91,9 @@ export class TopLevelAnalyzer {
         const bodyRefs = fileProgram.props['body'];
         if (!Array.isArray(bodyRefs)) return statements;
 
-        // 子ノードから再帰的に参照を収集するヘルパー
         const collectReferencesInNode = (node: IRNode, refs: Set<string>, defines: Set<string>) => {
             if (node.type === 'Identifier') {
                 const declId = refToDeclMap.get(node.irNodeId);
-                // 自身で定義したものではなく、解決先が存在すれば参照とする
                 if (declId && declId !== node.irNodeId && !defines.has(declId)) {
                     refs.add(declId);
                 }
@@ -213,7 +211,6 @@ export class TopLevelAnalyzer {
             let type: 'Declaration' | 'SideEffect' = 'SideEffect';
             const defines = new Set<string>();
 
-            // export 指定を剥ぎ取って内包する実体宣言ノードを取得
             if (child.type === 'ExportNamedDeclaration' || child.type === 'ExportDefaultDeclaration') {
                 const declRef = child.props['declaration'];
                 if (declRef && declRef.type === 'ref') {
@@ -224,7 +221,6 @@ export class TopLevelAnalyzer {
                 }
             }
 
-            // directive (e.g. "use strict") は副作用から除外
             if (child.type === 'ExpressionStatement') {
                 const exprRef = child.props['expression'];
                 if (exprRef && exprRef.type === 'ref') {
@@ -237,7 +233,6 @@ export class TopLevelAnalyzer {
 
             let sideEffectImportPath: string | undefined;
 
-            // 変数宣言の右辺に副作用（関数呼び出し、インスタンス化等）が含まれるか検証する
             let hasSideEffectInit = false;
             if (actualNode.type === 'VariableDeclaration') {
                 const checkSideEffect = (n: IRNode): boolean => {
@@ -297,7 +292,6 @@ export class TopLevelAnalyzer {
                 type = 'Declaration';
                 collectDefinesInNode(actualNode, defines);
             } else if (actualNode.type === 'VariableDeclaration') {
-                // 初期化式に副作用がある場合は SideEffect として扱い保護する
                 type = hasSideEffectInit ? 'SideEffect' : 'Declaration';
                 collectDefinesInNode(actualNode, defines);
             }
@@ -309,52 +303,37 @@ export class TopLevelAnalyzer {
             const classicImports: string[] = [];
             const dynamicImports: string[] = [];
             
-            // VisitorパターンによるAST走査への置き換え
+            const resolver = new ConstantResolver(tree, refToDeclMap);
+
             IRTraverser.traverse(child, {
                 ImportExpression: (n: IRNode) => {
                     const sourceRef = n.props['source'];
                     if (sourceRef && sourceRef.type === 'ref') {
                         const argNode = n.children.find(c => c.irNodeId === sourceRef.irNodeId);
-                        if (argNode && (argNode.type === 'StringLiteral' || argNode.type === 'Literal')) {
-                            const pathVal = argNode.props['value'] as string;
-                            if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) dynamicImports.push(pathVal);
-                        }
-                    }
-                },
-                NewExpression: (n: IRNode) => {
-                    const calleeRef = n.props['callee'];
-                    if (calleeRef && calleeRef.type === 'ref') {
-                        const calleeNode = n.children.find(c => c.irNodeId === calleeRef.irNodeId);
-                        if (calleeNode && calleeNode.type === 'Identifier' && (calleeNode.props['name'] === 'Worker' || calleeNode.props['name'] === 'SharedWorker')) {
-                            const args = n.props['arguments'] || [];
-                            if (args.length > 0 && args[0].type === 'ref') {
-                                const firstArgNode = n.children.find(c => c.irNodeId === args[0].irNodeId);
-                                if (firstArgNode) {
-                                    let pathVal: string | null = null;
-                                    if (firstArgNode.type === 'NewExpression') {
-                                        const innerCalleeRef = firstArgNode.props['callee'];
-                                        if (innerCalleeRef && innerCalleeRef.type === 'ref') {
-                                            const innerCalleeNode = firstArgNode.children.find(c => c.irNodeId === innerCalleeRef.irNodeId);
-                                            if (innerCalleeNode && innerCalleeNode.type === 'Identifier' && innerCalleeNode.props['name'] === 'URL') {
-                                                const urlArgs = firstArgNode.props['arguments'] || [];
-                                                if (urlArgs.length > 0 && urlArgs[0].type === 'ref') {
-                                                    const urlFirstArgNode = firstArgNode.children.find(c => c.irNodeId === urlArgs[0].irNodeId);
-                                                    if (urlFirstArgNode && (urlFirstArgNode.type === 'StringLiteral' || urlFirstArgNode.type === 'Literal')) {
-                                                        pathVal = urlFirstArgNode.props['value'] as string;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } else if (firstArgNode.type === 'StringLiteral' || firstArgNode.type === 'Literal') {
-                                        pathVal = firstArgNode.props['value'] as string;
-                                    }
-                                    if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) chunkReferences.add(pathVal);
-                                }
+                        if (argNode) {
+                            const resolvedArg = resolver.resolve(argNode);
+                            if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
+                                const pathVal = resolvedArg.props['value'] as string;
+                                if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) dynamicImports.push(pathVal);
                             }
                         }
                     }
                 },
+                NewExpression: (n: IRNode) => {
+                    const ref = WorkerDetector.detectWorkerPattern(n, resolver);
+                    if (ref && ref.rawPath && !/^(https?:)?\/\//i.test(ref.rawPath)) {
+                        chunkReferences.add(ref.rawPath);
+                    }
+                },
                 CallExpression: (n: IRNode) => {
+                    const workerRef = WorkerDetector.detectWorkerPattern(n, resolver);
+                    if (workerRef) {
+                        if (workerRef.rawPath && !/^(https?:)?\/\//i.test(workerRef.rawPath)) {
+                            chunkReferences.add(workerRef.rawPath);
+                        }
+                        return;
+                    }
+
                     const calleeRef = n.props['callee'];
                     if (calleeRef && calleeRef.type === 'ref') {
                         const calleeNode = n.children.find(c => c.irNodeId === calleeRef.irNodeId);
@@ -362,26 +341,11 @@ export class TopLevelAnalyzer {
                             const args = n.props['arguments'] || [];
                             if (args.length > 0 && args[0].type === 'ref') {
                                 const argNode = n.children.find(c => c.irNodeId === args[0].irNodeId);
-                                if (argNode && (argNode.type === 'StringLiteral' || argNode.type === 'Literal')) {
-                                    const pathVal = argNode.props['value'] as string;
-                                    if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) dynamicImports.push(pathVal);
-                                }
-                            }
-                        } else if (calleeNode && calleeNode.type === 'MemberExpression') {
-                            const propRef = calleeNode.props['property'];
-                            if (propRef && propRef.type === 'ref') {
-                                const propNode = calleeNode.children.find(c => c.irNodeId === propRef.irNodeId);
-                                if (propNode && propNode.type === 'Identifier') {
-                                    const name = propNode.props['name'];
-                                    if (name === 'addModule' || name === 'register') {
-                                        const args = n.props['arguments'] || [];
-                                        if (args.length > 0 && args[0].type === 'ref') {
-                                            const firstArgNode = n.children.find(c => c.irNodeId === args[0].irNodeId);
-                                            if (firstArgNode && (firstArgNode.type === 'StringLiteral' || firstArgNode.type === 'Literal')) {
-                                                const pathVal = firstArgNode.props['value'] as string;
-                                                if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) chunkReferences.add(pathVal);
-                                            }
-                                        }
+                                if (argNode) {
+                                    const resolvedArg = resolver.resolve(argNode);
+                                    if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
+                                        const pathVal = resolvedArg.props['value'] as string;
+                                        if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) dynamicImports.push(pathVal);
                                     }
                                 }
                             }
@@ -389,9 +353,12 @@ export class TopLevelAnalyzer {
                             for (const argRef of n.props['arguments'] || []) {
                                 if (argRef && argRef.type === 'ref') {
                                     const argNode = n.children.find(c => c.irNodeId === argRef.irNodeId);
-                                    if (argNode && (argNode.type === 'StringLiteral' || argNode.type === 'Literal')) {
-                                        const pathVal = argNode.props['value'] as string;
-                                        if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) classicImports.push(pathVal);
+                                    if (argNode) {
+                                        const resolvedArg = resolver.resolve(argNode);
+                                        if (resolvedArg.type === 'StringLiteral' || resolvedArg.type === 'Literal') {
+                                            const pathVal = resolvedArg.props['value'] as string;
+                                            if (pathVal && !/^(https?:)?\/\//i.test(pathVal)) classicImports.push(pathVal);
+                                        }
                                     }
                                 }
                             }

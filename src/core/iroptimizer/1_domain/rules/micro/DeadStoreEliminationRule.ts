@@ -15,7 +15,7 @@ export const DeadStoreEliminationRule: TransformRule = {
     id: 'micro:dead-store-elimination',
     type: 'micro',
     name: '不要代入の削除 (Dead Store Elimination)',
-    description: '再代入などで上書きされて一度も読み取られない無駄な代入や初期化コードを削除します。',
+    description: '再代入などで上書きされて一度も読み取られない不要な代入や初期化コードを削除します。',
     defaultEnabled: true,
     match: (node: IRNode, state: CompilationState): boolean => {
         if (!state.analysisSnapshot) return false;

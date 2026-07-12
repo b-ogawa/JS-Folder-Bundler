@@ -34,7 +34,7 @@ export const IfToTernaryRule: TransformRule = {
         // ここで型ガード
         if (node.type !== 'IfStatement') return false;
         
-        // props に as キャストや ['consequent'] と書く必要がなくなる
+        // props に対する明示的な型キャストやブラケットアクセスを回避する
         const consequentRef = node.props.consequent;
         if (!consequentRef) return false;
         

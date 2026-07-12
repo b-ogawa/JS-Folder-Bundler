@@ -51,17 +51,35 @@ export class BindImportResolutionsStage implements PipelineStage<MergeContext> {
                                             if (localRef && localRef.type === 'ref') {
                                                 localNode = specNode.children.find(c => c.irNodeId === localRef.irNodeId);
                                             }
+                                        } else if (specNode.type === 'ImportNamespaceSpecifier') {
+                                            importedName = '*';
+                                            const localRef = specNode.props['local'];
+                                            if (localRef && localRef.type === 'ref') {
+                                                localNode = specNode.children.find(c => c.irNodeId === localRef.irNodeId);
+                                            }
                                         }
+                                        
                                         if (localNode && localNode.type === 'Identifier') {
-                                            const targetDeclId = fromExports.get(importedName);
-                                            if (targetDeclId) {
-                                                for (const [rId, dId] of refToDeclMap.entries()) {
-                                                    if (dId === localNode.irNodeId) refToDeclMap.set(rId, targetDeclId);
+                                            if (specNode.type === 'ImportNamespaceSpecifier') {
+                                                // Namespace Importの処理: 新しいトップレベル変数として登録する
+                                                if (!context.allTopLevelDecls.has(localNode.irNodeId)) {
+                                                    context.allTopLevelDecls.set(localNode.irNodeId, {
+                                                        varName: localNode.props.name as string,
+                                                        declId: localNode.irNodeId,
+                                                        filePath: mod.filePath
+                                                    });
                                                 }
                                             } else {
-                                                const sourceVal = sourceNode.props['value'] as string;
-                                                const msg = `[Linker Error] "${importedName}" is not exported by "${sourceVal}" (imported from "${mod.filePath}").`;
-                                                if (context.logger) context.logger({ type: 'error', msg });
+                                                const targetDeclId = fromExports.get(importedName);
+                                                if (targetDeclId) {
+                                                    for (const [rId, dId] of refToDeclMap.entries()) {
+                                                        if (dId === localNode.irNodeId) refToDeclMap.set(rId, targetDeclId);
+                                                    }
+                                                } else {
+                                                    const sourceVal = sourceNode.props['value'] as string;
+                                                    const msg = `[Linker Error] "${importedName}" is not exported by "${sourceVal}" (imported from "${mod.filePath}").`;
+                                                    if (context.logger) context.logger({ type: 'error', msg });
+                                                }
                                             }
                                         }
                                     }

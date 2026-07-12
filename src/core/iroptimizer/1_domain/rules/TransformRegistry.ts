@@ -3,6 +3,7 @@ import { ConstantFoldingRule } from './micro/ConstantFoldingRule';
 import { IfToTernaryRule } from './micro/IfToTernaryRule';
 import { StatementMergeRule } from './micro/StatementMergeRule';
 import { VariableDeclarationMergeRule } from './micro/VariableDeclarationMergeRule';
+import { ForInitMergeRule } from './micro/ForInitMergeRule';
 import { DeadStoreEliminationRule } from './micro/DeadStoreEliminationRule';
 import { CopyPropagationRule } from './micro/CopyPropagationRule';
 import { ConstantPropagationRule } from './micro/ConstantPropagationRule';
@@ -26,6 +27,7 @@ export class TransformRegistry {
             IfToTernaryRule,
             StatementMergeRule,
             VariableDeclarationMergeRule,
+            ForInitMergeRule,
             DeadStoreEliminationRule,
             CopyPropagationRule,
             ConstantPropagationRule,

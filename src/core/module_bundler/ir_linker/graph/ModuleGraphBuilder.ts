@@ -21,7 +21,7 @@ export class ModuleGraphBuilder {
         // 1. 各モジュールの初期化と匿名 export default の正規化
         for (const tree of irTrees) {
             const basePath = getBase(tree.filePath);
-            TopLevelAnalyzer.normalizeAnonymousExports(tree, getBase);
+            // 事前抽出フェーズで正規化処理が完了しているため、重複呼び出しを避けてスキップする
             exportsMap.set(basePath, new Map<string, string>());
         }
 

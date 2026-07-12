@@ -6,7 +6,7 @@ export class HtmlMinifier {
         const placeholders: string[] = [];
         const protectedTags = ['pre', 'textarea', 'code', 'script', 'style'];
         
-        // 1. 【最優先】スクリプトやスタイルなど、内部を破壊してはいけないタグを保護(退避)する
+        // 1. スクリプトやスタイルなど、内容の改変（ミニファイ処理）を行ってはいけないタグを保護(退避)する
         for (const tag of protectedTags) {
             const regex = new RegExp(`<${tag}(\\s[^>]*)?>([\\s\\S]*?)<\/${tag}>`, 'gi');
             minified = minified.replace(regex, (match) => {

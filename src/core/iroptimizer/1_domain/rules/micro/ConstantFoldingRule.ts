@@ -13,7 +13,7 @@ export const ConstantFoldingRule: TransformRule = {
         // ここで型ガード。以降 node は確実に BinaryExpressionIR として推論される
         if (node.type !== 'BinaryExpression') return false;
         
-        // TSが node.props.left が存在することを保証してくれる
+        // TypeScriptの型システムにより、node.props.left の存在が保証される
         const leftRef = node.props.left;
         const rightRef = node.props.right;
         if (!leftRef || !rightRef) return false;

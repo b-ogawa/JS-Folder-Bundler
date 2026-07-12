@@ -9,7 +9,7 @@ export class PathResolver {
 
     /**
      * 相対パスや絶対パスからVFS上のフルパスを解決する。
-     * プロジェクトフォルダごとアップロードされた際の「ルートディレクトリ名のズレ」も自動吸収する。
+     * プロジェクトフォルダ単位でアップロードされた際の「ルートディレクトリ名の不一致」を自動的に補正する。
      */
     static resolve(basePath: string, relativePath: string, existingFiles?: string[], silent: boolean = false): string {
         // --- 早期のファジーマッチング関数 ---

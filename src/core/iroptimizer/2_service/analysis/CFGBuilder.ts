@@ -446,7 +446,7 @@ export class CFGBuilder {
                 }
             }
 
-            // ラベルの消費忘れ防止
+            // 未消費のラベル情報をクリア（初期化）
             pendingLabel = null;
 
             if (node.type === 'BreakStatement') {

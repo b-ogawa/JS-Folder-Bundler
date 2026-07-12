@@ -39,7 +39,7 @@ export const StatementMergeRule: TransformRule = {
         
         let currentSequence: IRNode[] = [];
 
-        // 溜まった ExpressionStatement を 1つの SequenceExpression に結合してフラッシュする関数
+        // 蓄積された ExpressionStatement を 1つの SequenceExpression に結合して出力する関数
         const flushSequence = () => {
             if (currentSequence.length === 0) return;
             
@@ -82,7 +82,7 @@ export const StatementMergeRule: TransformRule = {
             const child = blockNode.children.find(c => c.irNodeId === ref.irNodeId);
             if (!child) continue;
 
-            // ExpressionStatement ならバッファに溜める
+            // ExpressionStatement であればバッファに蓄積する
             // （変数宣言や if 文などが来たら、そこで安全に結合を打ち切る）
             if (child.type === 'ExpressionStatement') {
                 currentSequence.push(child);

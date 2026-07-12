@@ -1,7 +1,7 @@
 export class BabelPatcher {
     /**
      * Babel-standalone の内部API (traverse, types) を
-     * ダミープラグイン経由で抽出し、グローバルオブジェクトに露出させるハック
+     * ダミープラグイン経由で抽出し、グローバルオブジェクトに露出させるワークアラウンド
      */
     static applyPatch(): void {
         const Babel = (globalThis as any).Babel;

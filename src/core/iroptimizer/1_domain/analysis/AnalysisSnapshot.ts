@@ -13,7 +13,7 @@ export class AnalysisSnapshot {
         public readonly referenceCounts: ReadonlyMap<string, number>, // declId -> reference count
         public readonly escapedVars: ReadonlySet<string>, // declId that are escaped (used in closures, exports, globals)
         public readonly reachingDefStates: ReadonlyMap<string, ReachingDefState>,
-        public readonly defToVar: ReadonlyMap<string, string>,
+        public readonly defToVar: ReadonlyMap<string, string[]>, // 1対多の定義リストに変更
         public readonly nodeMap: ReadonlyMap<string, IRNode>,
         public readonly unmergedReachingDefs: ReadonlyMap<string, Map<string, ReachingDefState>> = new Map()
     ) {}
@@ -53,7 +53,7 @@ export class AnalysisSnapshot {
         }
 
         const state = this.livenessStates.get(nodeAfterId);
-        // 情報がない（探索中に新しく生成されたノードなど）場合は安全側に倒して「生存している(true)」と判定する
+        // 情報がない（探索中に新しく生成されたノードなど）場合は保守的に「生存している(true)」と判定する
         return state ? state.out.has(declId) : true;
     }
 
@@ -63,7 +63,9 @@ export class AnalysisSnapshot {
 
         const result = new Set<string>();
         for (const defId of state.in) {
-            if (this.defToVar.get(defId) === declId) {
+            const definedVars = this.defToVar.get(defId);
+            // 配列内に目的の変数が含まれているかをチェック
+            if (definedVars && definedVars.includes(declId)) {
                 result.add(defId);
             }
         }
