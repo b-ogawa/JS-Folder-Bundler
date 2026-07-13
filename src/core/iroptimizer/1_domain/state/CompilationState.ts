@@ -11,6 +11,7 @@ export interface StateMetadata {
 export interface CompilerServices {
     evaluatePureFunction?: (funcNode: IRNode, args: any[]) => any;
     generateId?: (prefix?: string) => string;
+    logger?: (log: { type: 'info' | 'success' | 'error'; msg: string }) => void;
 }
 
 export class CompilationState {

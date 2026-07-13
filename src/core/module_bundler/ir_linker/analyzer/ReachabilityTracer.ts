@@ -68,7 +68,14 @@ export class ReachabilityTracer {
 
             if (isMainEntry) {
                 const origin = 'main';
-                if (logger) logger({ type: 'info', msg: `[Reachability] Setting origin [${origin}] for entry module: ${mod.basePath}` });
+                const program = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
+                const isClassicScript = program?.props.sourceType === 'script';
+                const isInlineScript = mod.basePath.startsWith('_inline_script_');
+
+                if (logger) {
+                    logger({ type: 'info', msg: `[Reachability] Entry module: "${mod.basePath}" (AST Parsed as: ${isClassicScript ? 'Classic Script' : 'ES Module'}, Inline: ${isInlineScript})` });
+                }
+
                 activateModuleSideEffects(mod, origin);
 
                 // 公開 API の実体 ID
@@ -82,18 +89,27 @@ export class ReachabilityTracer {
                         addToQueue(stmt.irNodeId, origin);
                     }
                     
-                    // HTMLから読み込まれた外部スクリプトやインラインスクリプトは、
-                    // 互いにグローバル空間で変数を共有する「クラシックスクリプト」の可能性が高いため、
-                    // エントリーとして指定されたモジュールのトップレベル宣言は安全のためすべて保護する。
-                    if (stmt.type === 'Declaration') {
+                    // クラシックスクリプト かつ インラインスクリプト の場合のみグローバルとして保護
+                    if (isClassicScript && isInlineScript && stmt.type === 'Declaration') {
                         addToQueue(stmt.irNodeId, origin);
                     }
+                }
+
+                if (isClassicScript && isInlineScript && logger) {
+                    logger({ type: 'info', msg: `[Reachability] Protected all top-level declarations in "${mod.basePath}" to preserve potential global scope visibility.` });
                 }
             }
 
             if (isWorkerEntry) {
                 const origin = mod.basePath;
-                if (logger) logger({ type: 'info', msg: `[Reachability] Setting origin [${origin}] for entry module: ${mod.basePath}` });
+                const program = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
+                const isClassicScript = program?.props.sourceType === 'script';
+                const isInlineScript = mod.basePath.startsWith('_inline_script_');
+
+                if (logger) {
+                    logger({ type: 'info', msg: `[Reachability] Worker module: "${mod.basePath}" (AST Parsed as: ${isClassicScript ? 'Classic Script' : 'ES Module'}, Inline: ${isInlineScript})` });
+                }
+
                 activateModuleSideEffects(mod, origin);
 
                 // 公開 API の実体 ID
@@ -107,8 +123,8 @@ export class ReachabilityTracer {
                         addToQueue(stmt.irNodeId, origin);
                     }
 
-                    // Worker自身のエントリーのトップレベル宣言も保護（イベントリスナー等から参照されるため）
-                    if (stmt.type === 'Declaration') {
+                    // 同様にインラインスクリプトの場合のみ保護
+                    if (isClassicScript && isInlineScript && stmt.type === 'Declaration') {
                         addToQueue(stmt.irNodeId, origin);
                     }
                 }

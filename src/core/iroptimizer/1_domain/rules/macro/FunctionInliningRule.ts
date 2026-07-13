@@ -135,7 +135,7 @@ export const FunctionInliningRule: TransformRule = {
         }
 
         if (refCount > 1) {
-            const cost = CostEstimator.estimate(fnNode, false);
+            const cost = CostEstimator.estimate(fnNode, false, state.services?.logger);
             if (cost > 60) return false; 
         }
 

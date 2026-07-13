@@ -41,7 +41,6 @@ export const LogicalSimplificationRule: TransformRule = {
         return false;
     },
     candidates: (node: IRNode, state: CompilationState) => {
-        const genId = () => state.services.generateId!('ir_logic');
         if (node.type === 'BinaryExpression') {
             const bin = node as BinaryExpressionIR;
             const left = bin.children.find(c => c.irNodeId === bin.props.left?.irNodeId)!;

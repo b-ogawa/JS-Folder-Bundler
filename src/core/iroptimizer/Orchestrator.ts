@@ -31,11 +31,12 @@ export class IROptimizer {
         const defaultGenerateId = (prefix = 'ir_opt') => `${prefix}_${(++_optCounter).toString(36)}`;
         const services: CompilerServices = {
             ...config.services,
+            logger: logger, // ロガーをサービスとしてDIコンテナに登録
             generateId: config.services?.generateId || defaultGenerateId
         };
         
         let currentRoot = initialRoot;
-        let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot, {}, null, services), isTerserEnabled);
+        let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot, {}, null, services), isTerserEnabled, logger);
 
         for (let iter = 0; iter < maxIterations; iter++) {
             logger({ type: 'info', msg: `[IROptimizer] Iteration ${iter + 1}/${maxIterations} starting with Cost: ${lastBestCost} bytes` });
@@ -86,8 +87,8 @@ export class IROptimizer {
                     }
 
                     // DecisionEngineによる状態の評価と枝刈り
-                    currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth, isTerserEnabled);
-                    const currentBestCost = DecisionEngine.getInitialCost(currentStates[0], isTerserEnabled);
+                    currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth, isTerserEnabled, logger);
+                    const currentBestCost = DecisionEngine.getInitialCost(currentStates[0], isTerserEnabled, logger);
 
                     // 最小コスト更新時の処理
                     if (currentBestCost < bestOverallCost) {

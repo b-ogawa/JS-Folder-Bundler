@@ -2,7 +2,6 @@ import { IRNode, ProgramIR, IdentifierIR, NumericLiteralIR, VariableDeclaratorIR
 import { CompilationState } from '../../../1_domain/state/CompilationState';
 import { TransformRule } from '../../../interface/TransformRule';
 
-
 interface ClassInfo {
     classDeclNode: IRNode;
     className: string;
@@ -13,13 +12,41 @@ interface ClassInfo {
     arrayDeclIds: Set<string>;
 }
 
+// 解析可能な配列メソッドのシグネチャ定義
+const SAFE_ARRAY_METHODS: Record<string, {
+    callbackIndex: number;          // コールバック関数の引数インデックス
+    elementParamIndices: number[];  // コールバック内で配列要素を受け取るパラメータのインデックス
+    returnsArray: boolean;          // 返却値が配列かどうか
+    returnsInstance: boolean;       // 返却値がインスタンスかどうか
+}> = {
+    'map': { callbackIndex: 0, elementParamIndices: [0], returnsArray: true, returnsInstance: false },
+    'filter': { callbackIndex: 0, elementParamIndices: [0], returnsArray: true, returnsInstance: false },
+    'forEach': { callbackIndex: 0, elementParamIndices: [0], returnsArray: false, returnsInstance: false },
+    'find': { callbackIndex: 0, elementParamIndices: [0], returnsArray: false, returnsInstance: true },
+    'some': { callbackIndex: 0, elementParamIndices: [0], returnsArray: false, returnsInstance: false },
+    'every': { callbackIndex: 0, elementParamIndices: [0], returnsArray: false, returnsInstance: false },
+    'findIndex': { callbackIndex: 0, elementParamIndices: [0], returnsArray: false, returnsInstance: false }
+    // flatMapはデータ構造が平坦化されるため非対応
+    // reduce, sortは制御フローの静的解析が困難なため非対応
+};
+
+// concatは多次元配列が平坦化される可能性があるため非対応
+const PURE_ARRAY_METHODS = ['push', 'unshift', 'slice', 'pop', 'shift', 'at', 'length', 'includes'];
+
 function findEligibleClasses(program: IRNode, state: CompilationState): ClassInfo[] {
     const snapshot = state.analysisSnapshot;
     if (!snapshot) return [];
 
+    const logInfo = (msg: string) => {
+        if (state.services.logger) {
+            state.services.logger({ type: 'info', msg });
+        } else {
+            console.log(msg);
+        }
+    };
+
     const infos: ClassInfo[] = [];
 
-    // Find all ClassDeclarations in the program
     const classDecls: IRNode[] = [];
     for (const [id, irNode] of snapshot.nodeMap.entries()) {
         if (irNode.type === 'ClassDeclaration') {
@@ -37,12 +64,14 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
         const classDeclId = classIdNode.irNodeId;
 
         if (snapshot.escapedVars.has(classDeclId)) {
+            logInfo(`[ClassToTuple] Rejected "${className}": Class definition is escaped.`);
             continue;
         }
-
         if (classDecl.props.superClass) {
+            logInfo(`[ClassToTuple] Rejected "${className}": Extends another class.`);
             continue;
         }
+        logInfo(`[ClassToTuple] Analyzing class "${className}" for tuple optimization...`);
 
         const classBodyRef = classDecl.props.body;
         if (!classBodyRef) continue;
@@ -65,6 +94,7 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
         }
 
         if (hasOtherMethods) {
+            logInfo(`[ClassToTuple] Rejected "${className}": Has methods other than constructor.`);
             continue;
         }
 
@@ -105,12 +135,8 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
         let isThisSafe = true;
         if (constructorNode) {
             const findThisNodes = (n: IRNode, result: IRNode[]) => {
-                if (n.type === 'ThisExpression') {
-                    result.push(n);
-                }
-                for (const child of n.children) {
-                    findThisNodes(child, result);
-                }
+                if (n.type === 'ThisExpression') result.push(n);
+                for (const child of n.children) findThisNodes(child, result);
             };
             const thisNodes: IRNode[] = [];
             findThisNodes(constructorNode, thisNodes);
@@ -119,20 +145,17 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
                 const parentId = snapshot.parentMap.get(thisNode.irNodeId);
                 const parentNode = parentId ? snapshot.nodeMap.get(parentId) : null;
                 if (!parentNode || parentNode.type !== 'MemberExpression' || parentNode.props.object.irNodeId !== thisNode.irNodeId) {
-                    isThisSafe = false;
-                    break;
+                    isThisSafe = false; break;
                 }
-
                 const grandParentId = snapshot.parentMap.get(parentNode.irNodeId);
                 const grandParentNode = grandParentId ? snapshot.nodeMap.get(grandParentId) : null;
                 if (grandParentNode && grandParentNode.type === 'CallExpression' && grandParentNode.props.callee.irNodeId === parentNode.irNodeId) {
-                    isThisSafe = false;
-                    break;
+                    isThisSafe = false; break;
                 }
             }
         }
-
         if (!isThisSafe) {
+            logInfo(`[ClassToTuple] Rejected "${className}": 'this' escapes from constructor.`);
             continue;
         }
 
@@ -141,13 +164,11 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
             if (irNode.type === 'BinaryExpression' && irNode.props.operator === 'instanceof') {
                 const rightId = irNode.props.right.irNodeId;
                 const rightDeclId = snapshot.refToDeclMap.get(rightId) || rightId;
-                if (rightDeclId === classDeclId) {
-                    hasInstanceof = true;
-                    break;
-                }
+                if (rightDeclId === classDeclId) { hasInstanceof = true; break; }
             }
         }
         if (hasInstanceof) {
+            logInfo(`[ClassToTuple] Rejected "${className}": Used in 'instanceof' operator.`);
             continue;
         }
 
@@ -160,58 +181,59 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
             if (irNode.type === 'NewExpression') {
                 const calleeId = irNode.props.callee.irNodeId;
                 const calleeDeclId = snapshot.refToDeclMap.get(calleeId) || calleeId;
-                if (calleeDeclId === classDeclId) {
-                    initNewExprs.push(irNode);
-                }
+                if (calleeDeclId === classDeclId) initNewExprs.push(irNode);
             }
         }
 
-        const queue: IRNode[] = [...initNewExprs];
+        const queue: { node: IRNode, isArray: boolean }[] = initNewExprs.map(n => ({ node: n, isArray: false }));
         const visitedNew = new Set<string>();
 
         while (queue.length > 0) {
-            const current = queue.shift()!;
+            const { node: current, isArray } = queue.shift()!;
             if (visitedNew.has(current.irNodeId)) continue;
             visitedNew.add(current.irNodeId);
 
             const parentId = snapshot.parentMap.get(current.irNodeId);
             const parentNode = parentId ? snapshot.nodeMap.get(parentId) : null;
 
-            if (!parentNode) {
-                trackSuccess = false;
-                break;
+            if (!parentNode) { 
+                logInfo(`[ClassToTuple] Tracking failed for "${className}". Instance escaped into unhandled parent node type: null`);
+                trackSuccess = false; break; 
+            }
+
+            if (parentNode.type === 'ArrayExpression') {
+                if (current.type === 'ArrayExpression') {
+                    logInfo(`[ClassToTuple] Tracking failed for "${className}". Nested array literals are not supported.`);
+                    trackSuccess = false; break;
+                }
+                queue.push({ node: parentNode, isArray: true });
+                continue;
             }
 
             if (parentNode.type === 'VariableDeclarator') {
                 const idRef = parentNode.props.id;
                 const idNode = idRef ? snapshot.nodeMap.get(idRef.irNodeId) : null;
                 if (idNode && idNode.type === 'Identifier') {
-                    if (snapshot.escapedVars.has(idNode.irNodeId)) {
-                        trackSuccess = false;
-                        break;
-                    }
+                    if (snapshot.escapedVars.has(idNode.irNodeId)) { trackSuccess = false; break; }
                     instDeclIds.add(idNode.irNodeId);
-                } else {
-                    trackSuccess = false;
-                    break;
-                }
+                    if (isArray) arrayDeclIds.add(idNode.irNodeId);
+                } else { trackSuccess = false; break; }
             }
             else if (parentNode.type === 'AssignmentExpression') {
                 const leftRef = parentNode.props.left;
                 const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
                 if (leftNode && leftNode.type === 'Identifier') {
                     const leftDeclId = snapshot.refToDeclMap.get(leftNode.irNodeId) || leftNode.irNodeId;
-                    if (snapshot.escapedVars.has(leftDeclId)) {
-                        trackSuccess = false;
-                        break;
-                    }
+                    if (snapshot.escapedVars.has(leftDeclId)) { trackSuccess = false; break; }
                     instDeclIds.add(leftDeclId);
-                } else {
-                    trackSuccess = false;
-                    break;
-                }
+                    if (isArray) arrayDeclIds.add(leftDeclId);
+                } else { trackSuccess = false; break; }
             }
             else if (parentNode.type === 'CallExpression') {
+                if (isArray) {
+                     logInfo(`[ClassToTuple] Tracking failed for "${className}". Array passed to function call directly.`);
+                     trackSuccess = false; break;
+                }
                 const calleeRef = parentNode.props.callee;
                 const calleeNode = calleeRef ? snapshot.nodeMap.get(calleeRef.irNodeId) : null;
                 if (calleeNode && calleeNode.type === 'MemberExpression' && !calleeNode.props.computed) {
@@ -223,69 +245,95 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
                     if (objNode && objNode.type === 'Identifier' && propNode && propNode.type === 'Identifier') {
                         const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
                         const methodName = propNode.props.name;
-
-                        const isSafeArrayMethod = methodName === 'push' || methodName === 'unshift' || methodName === 'concat';
-                        if (isSafeArrayMethod && !snapshot.escapedVars.has(objDeclId)) {
+                        if (['push', 'unshift'].includes(methodName) && !snapshot.escapedVars.has(objDeclId)) {
                             arrayDeclIds.add(objDeclId);
                             instDeclIds.add(objDeclId);
-                        } else {
-                            trackSuccess = false;
-                            break;
+                        } else { 
+                            logInfo(`[ClassToTuple] Tracking failed for "${className}". Unsafe method call: ${methodName}`);
+                            trackSuccess = false; break; 
                         }
-                    } else {
-                        trackSuccess = false;
-                        break;
+                    } else { 
+                        logInfo(`[ClassToTuple] Tracking failed for "${className}". CallExpression callee object is not Identifier.`);
+                        trackSuccess = false; break; 
                     }
-                } else {
-                    trackSuccess = false;
-                    break;
+                } else { 
+                    logInfo(`[ClassToTuple] Tracking failed for "${className}". CallExpression callee is not MemberExpression.`);
+                    trackSuccess = false; break; 
                 }
             }
-            else {
-                trackSuccess = false;
-                break;
+            else { 
+                logInfo(`[ClassToTuple] Tracking failed for "${className}". Instance escaped into unhandled parent node type: ${parentNode.type}`);
+                trackSuccess = false; 
+                break; 
             }
         }
 
-        if (!trackSuccess) {
-            continue;
-        }
+        if (!trackSuccess) continue;
 
         let added = true;
         while (added) {
             added = false;
             for (const [id, irNode] of snapshot.nodeMap.entries()) {
                 
+                if (irNode.type === 'ForOfStatement') {
+                    const rightRef = irNode.props.right;
+                    const rightNode = rightRef ? snapshot.nodeMap.get(rightRef.irNodeId) : null;
+                    if (rightNode && rightNode.type === 'Identifier') {
+                        const rightDeclId = snapshot.refToDeclMap.get(rightNode.irNodeId) || rightNode.irNodeId;
+                        if (arrayDeclIds.has(rightDeclId)) {
+                            const leftRef = irNode.props.left;
+                            const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                            let successfullyTracked = false;
+                            if (leftNode && leftNode.type === 'VariableDeclaration') {
+                                const decls = leftNode.props.declarations || [];
+                                if (decls.length > 0) {
+                                    const decltorRef = decls[0];
+                                    if (decltorRef && decltorRef.type === 'ref') {
+                                        const decltorNode = snapshot.nodeMap.get(decltorRef.irNodeId);
+                                        if (decltorNode && decltorNode.type === 'VariableDeclarator') {
+                                            const idRef = decltorNode.props.id;
+                                            const idNode = idRef ? snapshot.nodeMap.get(idRef.irNodeId) : null;
+                                            if (idNode && idNode.type === 'Identifier') {
+                                                const paramDeclId = idNode.irNodeId;
+                                                if (!instDeclIds.has(paramDeclId)) {
+                                                    if (snapshot.escapedVars.has(paramDeclId)) { trackSuccess = false; break; }
+                                                    instDeclIds.add(paramDeclId);
+                                                    added = true;
+                                                }
+                                                successfullyTracked = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (!successfullyTracked) { trackSuccess = false; break; }
+                        }
+                    }
+                }
+
                 if (irNode.type === 'VariableDeclarator') {
                     const initRef = irNode.props.init;
                     const initNode = initRef ? snapshot.nodeMap.get(initRef.irNodeId) : null;
                     if (initNode) {
                         let isFromInst = false;
                         let isArraySource = false;
-                        
                         if (initNode.type === 'Identifier') {
                             const initDeclId = snapshot.refToDeclMap.get(initNode.irNodeId) || initNode.irNodeId;
                             if (instDeclIds.has(initDeclId)) {
                                 isFromInst = true;
                                 if (arrayDeclIds.has(initDeclId)) isArraySource = true;
                             }
-                        }
-                        else if (initNode.type === 'MemberExpression') {
+                        } else if (initNode.type === 'MemberExpression') {
                             const objRef = initNode.props.object;
                             const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
                             if (objNode && objNode.type === 'Identifier') {
                                 const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
                                 if (instDeclIds.has(objDeclId)) {
                                     isFromInst = true;
-                                    if (arrayDeclIds.has(objDeclId)) {
-                                        isArraySource = false; 
-                                    } else {
-                                        isArraySource = true;
-                                    }
+                                    isArraySource = !arrayDeclIds.has(objDeclId);
                                 }
                             }
-                        }
-                        else if (initNode.type === 'CallExpression') {
+                        } else if (initNode.type === 'CallExpression') {
                             const calleeRef = initNode.props.callee;
                             const calleeNode = calleeRef ? snapshot.nodeMap.get(calleeRef.irNodeId) : null;
                             if (calleeNode && calleeNode.type === 'MemberExpression') {
@@ -295,8 +343,7 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
                                     const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
                                     if (instDeclIds.has(objDeclId)) {
                                         isFromInst = true;
-                                        if (arrayDeclIds.has(objDeclId)) isArraySource = false;
-                                        else isArraySource = true;
+                                        isArraySource = !arrayDeclIds.has(objDeclId);
                                     }
                                 }
                             }
@@ -307,14 +354,9 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
                             const idNode = idRef ? snapshot.nodeMap.get(idRef.irNodeId) : null;
                             if (idNode && idNode.type === 'Identifier') {
                                 if (!instDeclIds.has(idNode.irNodeId)) {
-                                    if (snapshot.escapedVars.has(idNode.irNodeId)) {
-                                        trackSuccess = false;
-                                        break;
-                                    }
+                                    if (snapshot.escapedVars.has(idNode.irNodeId)) { trackSuccess = false; break; }
                                     instDeclIds.add(idNode.irNodeId);
-                                    if (isArraySource) {
-                                        arrayDeclIds.add(idNode.irNodeId);
-                                    }
+                                    if (isArraySource) arrayDeclIds.add(idNode.irNodeId);
                                     added = true;
                                 }
                             }
@@ -328,44 +370,32 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
                     if (rightNode) {
                         let isFromInst = false;
                         let isArraySource = false;
-
                         if (rightNode.type === 'Identifier') {
                             const rightDeclId = snapshot.refToDeclMap.get(rightNode.irNodeId) || rightNode.irNodeId;
                             if (instDeclIds.has(rightDeclId)) {
                                 isFromInst = true;
                                 if (arrayDeclIds.has(rightDeclId)) isArraySource = true;
                             }
-                        }
-                        else if (rightNode.type === 'MemberExpression') {
+                        } else if (rightNode.type === 'MemberExpression') {
                             const objRef = rightNode.props.object;
                             const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
                             if (objNode && objNode.type === 'Identifier') {
                                 const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
                                 if (instDeclIds.has(objDeclId)) {
                                     isFromInst = true;
-                                    if (arrayDeclIds.has(objDeclId)) {
-                                        isArraySource = false; 
-                                    } else {
-                                        isArraySource = true;
-                                    }
+                                    isArraySource = !arrayDeclIds.has(objDeclId);
                                 }
                             }
                         }
-
                         if (isFromInst) {
                             const leftRef = irNode.props.left;
                             const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
                             if (leftNode && leftNode.type === 'Identifier') {
                                 const leftDeclId = snapshot.refToDeclMap.get(leftNode.irNodeId) || leftNode.irNodeId;
                                 if (!instDeclIds.has(leftDeclId)) {
-                                    if (snapshot.escapedVars.has(leftDeclId)) {
-                                        trackSuccess = false;
-                                        break;
-                                    }
+                                    if (snapshot.escapedVars.has(leftDeclId)) { trackSuccess = false; break; }
                                     instDeclIds.add(leftDeclId);
-                                    if (isArraySource) {
-                                        arrayDeclIds.add(leftDeclId);
-                                    }
+                                    if (isArraySource) arrayDeclIds.add(leftDeclId);
                                     added = true;
                                 }
                             }
@@ -386,7 +416,8 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
                             const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
                             const methodName = propNode.props.name;
 
-                            if (methodName === 'push' || methodName === 'unshift' || methodName === 'concat') {
+                            // concatは平坦化によりデータ構造が変化する可能性があるため非対応
+                            if (['push', 'unshift'].includes(methodName)) {
                                 const args = irNode.props.arguments || [];
                                 let hasInstArg = false;
                                 for (const argRef of args) {
@@ -395,23 +426,95 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
                                         if (argNode && argNode.type === 'Identifier') {
                                             const argDeclId = snapshot.refToDeclMap.get(argNode.irNodeId) || argNode.irNodeId;
                                             if (instDeclIds.has(argDeclId) && !arrayDeclIds.has(argDeclId)) {
-                                                hasInstArg = true;
-                                                break;
+                                                hasInstArg = true; break;
                                             }
                                         }
                                     }
                                 }
-
                                 if (hasInstArg) {
                                     if (!arrayDeclIds.has(objDeclId)) {
-                                        if (snapshot.escapedVars.has(objDeclId)) {
-                                            trackSuccess = false;
-                                            break;
-                                        }
+                                        if (snapshot.escapedVars.has(objDeclId)) { trackSuccess = false; break; }
                                         arrayDeclIds.add(objDeclId);
                                         instDeclIds.add(objDeclId);
                                         added = true;
                                     }
+                                }
+                            }
+
+                            if (arrayDeclIds.has(objDeclId)) {
+                                const sig = SAFE_ARRAY_METHODS[methodName];
+                                
+                                if (sig) {
+                                    const args = irNode.props.arguments || [];
+                                    if (args.length > sig.callbackIndex) {
+                                        const cbRef = args[sig.callbackIndex];
+                                        if (cbRef && cbRef.type === 'ref') {
+                                            const cbNode = snapshot.nodeMap.get(cbRef.irNodeId);
+                                            // インライン関数式に限定して解析対象とする
+                                            if (cbNode && (cbNode.type === 'ArrowFunctionExpression' || cbNode.type === 'FunctionExpression')) {
+                                                const params = cbNode.props.params || [];
+                                                for (const paramIdx of sig.elementParamIndices) {
+                                                    if (params.length > paramIdx) {
+                                                        const targetParamRef = params[paramIdx];
+                                                        if (targetParamRef && targetParamRef.type === 'ref') {
+                                                            const targetParamNode = snapshot.nodeMap.get(targetParamRef.irNodeId);
+                                                            if (targetParamNode && targetParamNode.type === 'Identifier') {
+                                                                const pDeclId = targetParamNode.irNodeId;
+                                                                if (!instDeclIds.has(pDeclId)) {
+                                                                    if (snapshot.escapedVars.has(pDeclId)) { trackSuccess = false; break; }
+                                                                    instDeclIds.add(pDeclId);
+                                                                    added = true;
+                                                                }
+                                                            } else {
+                                                                trackSuccess = false; break; // 分割代入などの複雑なパターンは非対応
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                trackSuccess = false; break; // 外部定義のコールバック関数は追跡不可のため非対応
+                                            }
+                                        }
+                                    }
+
+                                    if (trackSuccess && (sig.returnsArray || sig.returnsInstance)) {
+                                        const parentId = snapshot.parentMap.get(irNode.irNodeId);
+                                        let handled = false;
+                                        if (parentId) {
+                                            const parentNode = snapshot.nodeMap.get(parentId);
+                                            if (parentNode && parentNode.type === 'VariableDeclarator') {
+                                                const idRef = parentNode.props.id;
+                                                const idNode = idRef ? snapshot.nodeMap.get(idRef.irNodeId) : null;
+                                                if (idNode && idNode.type === 'Identifier') {
+                                                    const idDeclId = idNode.irNodeId;
+                                                    if (snapshot.escapedVars.has(idDeclId)) { trackSuccess = false; break; }
+                                                    if (!instDeclIds.has(idDeclId) || (sig.returnsArray && !arrayDeclIds.has(idDeclId))) {
+                                                        instDeclIds.add(idDeclId);
+                                                        if (sig.returnsArray) arrayDeclIds.add(idDeclId);
+                                                        added = true;
+                                                    }
+                                                    handled = true;
+                                                }
+                                            } else if (parentNode && parentNode.type === 'AssignmentExpression') {
+                                                const leftRef = parentNode.props.left;
+                                                const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                                                if (leftNode && leftNode.type === 'Identifier') {
+                                                    const leftDeclId = snapshot.refToDeclMap.get(leftNode.irNodeId) || leftNode.irNodeId;
+                                                    if (snapshot.escapedVars.has(leftDeclId)) { trackSuccess = false; break; }
+                                                    if (!instDeclIds.has(leftDeclId) || (sig.returnsArray && !arrayDeclIds.has(leftDeclId))) {
+                                                        instDeclIds.add(leftDeclId);
+                                                        if (sig.returnsArray) arrayDeclIds.add(leftDeclId);
+                                                        added = true;
+                                                    }
+                                                    handled = true;
+                                                }
+                                            }
+                                        }
+                                        if (!handled) { trackSuccess = false; break; }
+                                    }
+                                } else if (!PURE_ARRAY_METHODS.includes(methodName)) {
+                                    // 未知のメソッド呼び出しは安全性が保証されないため解析処理を終了
+                                    trackSuccess = false; break;
                                 }
                             }
                         }
@@ -421,29 +524,119 @@ function findEligibleClasses(program: IRNode, state: CompilationState): ClassInf
             if (!trackSuccess) break;
         }
 
-        if (!trackSuccess) {
-            continue;
-        }
+        if (!trackSuccess) continue;
 
-        let hasDynamicAccess = false;
+        let isSafeUsage = true;
         for (const [id, irNode] of snapshot.nodeMap.entries()) {
-            if (irNode.type === 'MemberExpression' && irNode.props.computed) {
-                const objRef = irNode.props.object;
-                const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
-                if (objNode && objNode.type === 'Identifier') {
-                    const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
-                    
-                    if (instDeclIds.has(objDeclId) && !arrayDeclIds.has(objDeclId)) {
-                        hasDynamicAccess = true;
+            if (irNode.type === 'Identifier') {
+                const declId = snapshot.refToDeclMap.get(irNode.irNodeId) || irNode.irNodeId;
+                if (instDeclIds.has(declId)) {
+                    const parentId = snapshot.parentMap.get(irNode.irNodeId);
+                    const parentNode = parentId ? snapshot.nodeMap.get(parentId) : null;
+                    if (!parentNode) { isSafeUsage = false; break; }
+
+                    if (parentNode.type === 'VariableDeclarator' || parentNode.type === 'AssignmentExpression') {
+                        let isLeft = false;
+                        if (parentNode.type === 'VariableDeclarator') {
+                            isLeft = (parentNode.props.id && parentNode.props.id.irNodeId === irNode.irNodeId);
+                        } else {
+                            isLeft = (parentNode.props.left && parentNode.props.left.irNodeId === irNode.irNodeId);
+                        }
+                        if (!isLeft) {
+                            const leftRef = parentNode.type === 'VariableDeclarator' ? parentNode.props.id : parentNode.props.left;
+                            const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                            if (!leftNode || leftNode.type !== 'Identifier') { isSafeUsage = false; break; }
+                        }
+                        continue;
+                    }
+                    else if (parentNode.type === 'MemberExpression') {
+                        if (parentNode.props.object && parentNode.props.object.irNodeId === irNode.irNodeId) {
+                            if (parentNode.props.computed) {
+                                if (!arrayDeclIds.has(declId)) { isSafeUsage = false; break; }
+                            } else {
+                                const propRef = parentNode.props.property;
+                                const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                                if (propNode && propNode.type === 'Identifier') {
+                                    const propName = propNode.props.name;
+                                    if (arrayDeclIds.has(declId)) {
+                                        if (!SAFE_ARRAY_METHODS[propName] && !PURE_ARRAY_METHODS.includes(propName)) {
+                                            isSafeUsage = false; break;
+                                        }
+
+                                        const sig = SAFE_ARRAY_METHODS[propName];
+                                        if (sig && (sig.returnsArray || sig.returnsInstance)) {
+                                            const callId = snapshot.parentMap.get(parentNode.irNodeId);
+                                            const callNode = callId ? snapshot.nodeMap.get(callId) : null;
+
+                                            if (callNode && callNode.type === 'CallExpression') {
+                                                const grandParentId = snapshot.parentMap.get(callNode.irNodeId);
+                                                const grandParentNode = grandParentId ? snapshot.nodeMap.get(grandParentId) : null;
+                                                if (!grandParentNode) { isSafeUsage = false; break; }
+
+                                                // 戻り値が代入されるか、またはfor-ofの右辺で参照されている場合のみ許可
+                                                const isAssigned = 
+                                                    grandParentNode.type === 'VariableDeclarator' || 
+                                                    grandParentNode.type === 'AssignmentExpression' ||
+                                                    grandParentNode.type === 'ForOfStatement';
+
+                                                if (!isAssigned) { 
+                                                    isSafeUsage = false; 
+                                                    break; 
+                                                }
+                                            }
+                                        }
+
+                                    } else {
+                                        if (!propToIndex.has(propName)) { isSafeUsage = false; break; }
+                                    }
+                                } else { isSafeUsage = false; break; }
+                            }
+                        }
+                        continue;
+                    }
+                    else if (parentNode.type === 'CallExpression') {
+                        let isSafeArg = false;
+                        const calleeRef = parentNode.props.callee;
+                        const calleeNode = calleeRef ? snapshot.nodeMap.get(calleeRef.irNodeId) : null;
+                        if (calleeNode && calleeNode.type === 'MemberExpression' && !calleeNode.props.computed) {
+                            const propRef = calleeNode.props.property;
+                            const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                            if (propNode && propNode.type === 'Identifier') {
+                                const propName = propNode.props.name;
+                                 // concatは平坦化によりデータ構造が変化する可能性があるため非対応
+                                if (['push', 'unshift'].includes(propName)) isSafeArg = true;
+                            }
+                        }
+                        if (!isSafeArg) { isSafeUsage = false; break; }
+                    }
+                    else if (parentNode.type === 'ForOfStatement') {
+                        if (parentNode.props.right && parentNode.props.right.irNodeId === irNode.irNodeId) {
+                            if (!arrayDeclIds.has(declId)) { isSafeUsage = false; break; }
+                        }
+                        continue;
+                    }
+                    else if (parentNode.type === 'ArrowFunctionExpression' || parentNode.type === 'FunctionExpression' || parentNode.type === 'FunctionDeclaration') {
+                        let isParam = false;
+                        const params = parentNode.props.params || [];
+                        for (const p of params) {
+                            if (p && p.irNodeId === irNode.irNodeId) isParam = true;
+                        }
+                        if (!isParam) { isSafeUsage = false; break; }
+                        continue;
+                    }
+                    else if (parentNode.type === 'IfStatement' || parentNode.type === 'LogicalExpression' || parentNode.type === 'BinaryExpression' || parentNode.type === 'ConditionalExpression') {
+                        continue;
+                    }
+                    else {
+                        logInfo(`[ClassToTuple] Safety check failed for "${className}". Variable used in unsafe parent node type: ${parentNode.type}`);
+                        isSafeUsage = false; 
                         break;
                     }
                 }
             }
         }
 
-        if (hasDynamicAccess) {
-            continue;
-        }
+        if (!isSafeUsage) continue;
 
         infos.push({
             classDeclNode: classDecl,
@@ -493,51 +686,26 @@ export const ClassToTupleRule: TransformRule = {
             const factoryFuncName = `_create_${className}`;
             const factoryFuncDeclId = genId();
 
+            const oldToNewId = new Map<string, string>();
+            oldToNewId.set(classDeclNode.irNodeId, '__DELETED__');
+
             const cloneNode = (n: IRNode): IRNode | null => {
                 if (n.type === 'ClassDeclaration' && n.irNodeId === classDeclNode.irNodeId) {
                     return null;
                 }
 
+                let newNodeId = genId();
+                oldToNewId.set(n.irNodeId, newNodeId);
+
                 const newChildren: IRNode[] = [];
-                const childIdMap = new Map<string, string>();
                 for (const child of n.children) {
                     const clonedChild = cloneNode(child);
                     if (clonedChild) {
                         newChildren.push(clonedChild);
-                        if (child.irNodeId !== clonedChild.irNodeId) {
-                            childIdMap.set(child.irNodeId, clonedChild.irNodeId);
-                        }
                     }
                 }
 
                 let newProps = { ...n.props };
-                for (const [key, val] of Object.entries(newProps)) {
-                    if (Array.isArray(val)) {
-                        newProps[key] = val
-                            .map(ref => {
-                                if (ref && ref.type === 'ref') {
-                                    const childNode = snapshot.nodeMap.get(ref.irNodeId);
-                                    if (childNode && childNode.type === 'ClassDeclaration' && childNode.irNodeId === classDeclNode.irNodeId) {
-                                        return null;
-                                    }
-                                    if (childIdMap.has(ref.irNodeId)) {
-                                        return { type: 'ref', irNodeId: childIdMap.get(ref.irNodeId)! };
-                                    }
-                                    return ref;
-                                }
-                                return ref;
-                            })
-                            .filter(ref => ref !== null);
-                    } else if (val && typeof val === 'object' && (val as any).type === 'ref') {
-                        const refNodeId = (val as any).irNodeId;
-                        const childNode = snapshot.nodeMap.get(refNodeId);
-                        if (childNode && childNode.type === 'ClassDeclaration' && childNode.irNodeId === classDeclNode.irNodeId) {
-                            newProps[key] = null;
-                        } else if (childIdMap.has(refNodeId)) {
-                            newProps[key] = { type: 'ref', irNodeId: childIdMap.get(refNodeId)! };
-                        }
-                    }
-                }
 
                 if (n.type === 'NewExpression') {
                     const calleeId = n.props.callee.irNodeId;
@@ -550,13 +718,14 @@ export const ClassToTupleRule: TransformRule = {
                             children: []
                         };
 
-                        const finalChildren = newChildren.filter(c => c.irNodeId !== calleeId);
+                        const newCalleeId = oldToNewId.get(calleeId);
+                        const finalChildren = newChildren.filter(c => c.irNodeId !== newCalleeId);
                         finalChildren.push(factoryIdNode);
 
                         newProps.callee = { type: 'ref', irNodeId: factoryIdNode.irNodeId };
                         return {
                             type: 'CallExpression',
-                            irNodeId: n.irNodeId,
+                            irNodeId: newNodeId,
                             props: newProps,
                             children: finalChildren
                         } as any;
@@ -570,19 +739,15 @@ export const ClassToTupleRule: TransformRule = {
                     let isInstance = false;
                     if (objNode) {
                         if (objNode.type === 'Identifier') {
-                            // 1. 変数アクセス (例: currentNode.x)
                             const objDeclId = snapshot.refToDeclMap.get(objId) || objId;
-                            // 配列変数自身（openList等）へのプロパティアクセス（length等）を誤変換しないよう除外
                             if (instDeclIds.has(objDeclId) && !arrayDeclIds.has(objDeclId)) {
                                 isInstance = true;
                             }
                         } else if (objNode.type === 'MemberExpression' && objNode.props.computed) {
-                            // 2. 配列インデックスアクセス (例: openList[i].x)
                             const listObjRef = objNode.props.object;
                             const listObjNode = listObjRef ? snapshot.nodeMap.get(listObjRef.irNodeId) : null;
                             if (listObjNode && listObjNode.type === 'Identifier') {
                                 const listDeclId = snapshot.refToDeclMap.get(listObjNode.irNodeId) || listObjNode.irNodeId;
-                                // その配列自身がインスタンスのコンテナとしてトラッカーに登録されているか
                                 if (arrayDeclIds.has(listDeclId)) {
                                     isInstance = true;
                                 }
@@ -605,12 +770,13 @@ export const ClassToTupleRule: TransformRule = {
                                     children: []
                                 };
 
-                                const finalChildren = newChildren.filter(c => c.irNodeId !== propNode.irNodeId);
+                                const newPropId = oldToNewId.get(propNode.irNodeId);
+                                const finalChildren = newChildren.filter(c => c.irNodeId !== newPropId);
                                 finalChildren.push(numLiteralNode);
 
                                 return {
                                     type: 'MemberExpression',
-                                    irNodeId: n.irNodeId,
+                                    irNodeId: newNodeId,
                                     props: {
                                         ...newProps,
                                         object: newProps.object,
@@ -626,7 +792,7 @@ export const ClassToTupleRule: TransformRule = {
 
                 return {
                     type: n.type,
-                    irNodeId: n.irNodeId,
+                    irNodeId: newNodeId,
                     props: newProps,
                     children: newChildren
                 } as IRNode;
@@ -636,7 +802,6 @@ export const ClassToTupleRule: TransformRule = {
 
             const paramIdMap = new Map<string, string>();
             
-            // Step 1: 元のパラメータ宣言の declId を特定し、新しい ID を事前に割り当てる
             if (constructorNode && constructorNode.props.params) {
                 for (const paramRef of constructorNode.props.params) {
                     const paramNode = snapshot.nodeMap.get(paramRef.irNodeId);
@@ -653,8 +818,10 @@ export const ClassToTupleRule: TransformRule = {
                 }
             }
 
-            // Step 2: 汎用ディープクローン関数（パラメータや式を安全に再帰コピーする）
             const cloneExpression = (n: IRNode): IRNode => {
+                let newNodeId = genId();
+                oldToNewId.set(n.irNodeId, newNodeId);
+
                 const newChildren: IRNode[] = [];
                 for (const child of n.children) {
                     newChildren.push(cloneExpression(child));
@@ -666,8 +833,8 @@ export const ClassToTupleRule: TransformRule = {
                     const declId = snapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
                     const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId)! : declId;
                     
-                    // 対象ノードが「宣言」である場合は、事前生成したIDを付与する
-                    const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId)! : genId();
+                    const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId)! : newNodeId;
+                    oldToNewId.set(n.irNodeId, newId);
 
                     return {
                         type: 'Identifier',
@@ -680,38 +847,14 @@ export const ClassToTupleRule: TransformRule = {
                     } as any;
                 }
 
-                const childIdMap = new Map<string, string>();
-                for (let i = 0; i < n.children.length; i++) {
-                    childIdMap.set(n.children[i].irNodeId, newChildren[i].irNodeId);
-                }
-
-                for (const [key, val] of Object.entries(newProps)) {
-                    if (Array.isArray(val)) {
-                        newProps[key] = val.map(ref => {
-                            if (ref && ref.type === 'ref') {
-                                if (childIdMap.has(ref.irNodeId)) {
-                                    return { type: 'ref', irNodeId: childIdMap.get(ref.irNodeId)! };
-                                }
-                            }
-                            return ref;
-                        });
-                    } else if (val && typeof val === 'object' && (val as any).type === 'ref') {
-                        const refNodeId = (val as any).irNodeId;
-                        if (childIdMap.has(refNodeId)) {
-                            newProps[key] = { type: 'ref', irNodeId: childIdMap.get(refNodeId)! };
-                        }
-                    }
-                }
-
                 return {
                     type: n.type,
-                    irNodeId: genId(),
+                    irNodeId: newNodeId,
                     props: newProps,
                     children: newChildren
                 } as IRNode;
             };
 
-            // Step 3: パラメータリスト全体を安全にディープクローン
             const paramsRefs: any[] = [];
             const factoryParamsChildren: IRNode[] = [];
             if (constructorNode && constructorNode.props.params) {
@@ -724,7 +867,6 @@ export const ClassToTupleRule: TransformRule = {
                     }
                 }
             }
-            // =========================================================================================
 
             const isSimpleDTO = (): boolean => {
                 if (!constructorNode) return true;
@@ -905,9 +1047,13 @@ export const ClassToTupleRule: TransformRule = {
                 };
 
                 const cloneConstructorBody = (n: IRNode): IRNode => {
+                    let newNodeId = genId();
+                    oldToNewId.set(n.irNodeId, newNodeId);
+
                     const newChildren: IRNode[] = [];
                     for (const child of n.children) {
-                        newChildren.push(cloneConstructorBody(child));
+                        const clonedChild = cloneConstructorBody(child);
+                        newChildren.push(clonedChild);
                     }
 
                     let newProps = { ...n.props };
@@ -915,9 +1061,13 @@ export const ClassToTupleRule: TransformRule = {
                     if (n.type === 'Identifier') {
                         const declId = snapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
                         const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId)! : declId;
+                        
+                        const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId)! : newNodeId;
+                        oldToNewId.set(n.irNodeId, newId);
+
                         return {
                             type: 'Identifier',
-                            irNodeId: genId(),
+                            irNodeId: newId,
                             props: {
                                 ...n.props,
                                 _declId: finalDeclId
@@ -952,7 +1102,7 @@ export const ClassToTupleRule: TransformRule = {
 
                                     return {
                                         type: 'MemberExpression',
-                                        irNodeId: genId(),
+                                        irNodeId: newNodeId,
                                         props: {
                                             ...newProps,
                                             object: { type: 'ref', irNodeId: tIdNode.irNodeId },
@@ -966,32 +1116,9 @@ export const ClassToTupleRule: TransformRule = {
                         }
                     }
 
-                    const childIdMap = new Map<string, string>();
-                    for (let i = 0; i < n.children.length; i++) {
-                        childIdMap.set(n.children[i].irNodeId, newChildren[i].irNodeId);
-                    }
-
-                    for (const [key, val] of Object.entries(newProps)) {
-                        if (Array.isArray(val)) {
-                            newProps[key] = val.map(ref => {
-                                if (ref && ref.type === 'ref') {
-                                    if (childIdMap.has(ref.irNodeId)) {
-                                        return { type: 'ref', irNodeId: childIdMap.get(ref.irNodeId)! };
-                                    }
-                                }
-                                return ref;
-                            });
-                        } else if (val && typeof val === 'object' && (val as any).type === 'ref') {
-                            const refNodeId = (val as any).irNodeId;
-                            if (childIdMap.has(refNodeId)) {
-                                newProps[key] = { type: 'ref', irNodeId: childIdMap.get(refNodeId)! };
-                            }
-                        }
-                    }
-
                     return {
                         type: n.type,
-                        irNodeId: genId(),
+                        irNodeId: newNodeId,
                         props: newProps,
                         children: newChildren
                     } as IRNode;
@@ -1066,10 +1193,51 @@ export const ClassToTupleRule: TransformRule = {
             newProgBase.children.unshift(factoryFuncNode);
             newProgBase.props.body.unshift({ type: 'ref', irNodeId: factoryFuncNode.irNodeId });
 
+            const updateRefs = (n: IRNode) => {
+                for (const [key, val] of Object.entries(n.props)) {
+                    if (Array.isArray(val)) {
+                        n.props[key] = val.map(ref => {
+                            if (ref && ref.type === 'ref') {
+                                const newId = oldToNewId.get(ref.irNodeId);
+                                if (newId === '__DELETED__') return null;
+                                if (newId) return { type: 'ref', irNodeId: newId };
+                            }
+                            return ref;
+                        }).filter(ref => ref !== null);
+                    } else if (val && typeof val === 'object' && (val as any).type === 'ref') {
+                        const refNodeId = (val as any).irNodeId;
+                        const newId = oldToNewId.get(refNodeId);
+                        if (newId === '__DELETED__') {
+                            n.props[key] = null;
+                        } else if (newId) {
+                            n.props[key] = { type: 'ref', irNodeId: newId };
+                        }
+                    }
+                }
+                
+                if (n.type === 'Identifier' && n.props._declId) {
+                    const newDeclId = oldToNewId.get(n.props._declId as string);
+                    if (newDeclId && newDeclId !== '__DELETED__') {
+                        n.props._declId = newDeclId;
+                    }
+                }
+
+                if (n.children) {
+                    for (const child of n.children) updateRefs(child);
+                }
+            };
+            
+            updateRefs(newProgBase);
+
             currentProg = newProgBase;
         }
 
-        console.debug(`[TransformRule] ${ClassToTupleRule.id} rewritten successfully.`);
+        if (state.services.logger) {
+            state.services.logger({ type: 'info', msg: `[ClassToTuple] AST rewriting completed successfully. Submitting candidates to ASTTransformer...` });
+        } else {
+            console.log(`[ClassToTuple] AST rewriting completed successfully. Submitting candidates to ASTTransformer...`);
+        }
         return [currentProg];
     }
 };
+

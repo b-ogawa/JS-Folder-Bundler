@@ -213,18 +213,20 @@ export class ModuleGraphBuilder {
             const refToDeclMap = refToDeclMaps.get(tree.filePath) || new Map<string, string>();
             const statements = TopLevelAnalyzer.analyze(tree, refToDeclMap);
             const isEntry = entryPaths.has(basePath) || entryPaths.has(basePath + '/index');
+            const modExports = exportsMap.get(basePath) || new Map<string, string>();
 
             modules.set(basePath, {
                 filePath: tree.filePath,
                 basePath,
                 statements,
-                exports: exportsMap.get(basePath) || new Map<string, string>(),
+                exports: modExports,
                 imports,
                 isEntry,
                 tree
             });
         }
 
+        // このフェーズ自体はロギング機能を持たないため、構築されたグラフ情報は呼び出し側のIRLinker側でログ統合される
         return modules;
     }
 }

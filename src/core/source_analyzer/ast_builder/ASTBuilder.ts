@@ -136,7 +136,7 @@ export class ASTBuilder {
                 presets: [], 
                 ast: true,
                 code: false, 
-                parserOpts: { sourceType: 'module' }
+                parserOpts: { sourceType: 'unambiguous' }
             });
 
             if (!astResult || !astResult.ast) {

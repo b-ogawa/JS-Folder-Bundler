@@ -1,11 +1,13 @@
 import { IRNode } from '../../../source_analyzer/ir_converter/IRNodeTypes';
 
 export class CostEstimator {
+    private static warnedTypes = new Set<string>();
+
     /**
      * 文字列を実際に生成することなく、IRツリーから最終的なJavaScript出力時の文字数（バイト数）をO(N)で推測計算します。
      * isTerserEnabled = true の場合、TerserによるPeephole変換（代入の短縮など）を先読みした見積もりを行います。
      */
-    static estimate(node: IRNode, isTerserEnabled: boolean = false): number {
+    static estimate(node: IRNode, isTerserEnabled: boolean = false, logger?: (log: any) => void): number {
         if (!node) return 0;
 
         const nodeMap = new Map<string, IRNode>();
@@ -54,6 +56,10 @@ export class CostEstimator {
                     return 4;
                 case 'ThisExpression':
                     return 4;
+                case 'Super':
+                    return 5;
+                case 'Import':
+                    return 6;
                 
                 // --- 式・演算 ---
                 case 'SequenceExpression': {
@@ -114,10 +120,14 @@ export class CostEstimator {
                     return uOp.length + (uOp.match(/[a-z]/i) && !isTerserEnabled ? 1 : 0) + calcChild(n.props['argument'], nodeMap, calc);
                 case 'AwaitExpression':
                     return 6 + calcChild(n.props['argument'], nodeMap, calc);
+                case 'YieldExpression':
+                    return 6 + (n.props['delegate'] ? 1 : 0) + calcChild(n.props['argument'], nodeMap, calc);
                 case 'UpdateExpression':
                     return calcChild(n.props['argument'], nodeMap, calc) + 2;
                 case 'ExpressionStatement':
                     return calcChild(n.props['expression'], nodeMap, calc) + (isTerserEnabled ? 0 : 1);
+                case 'EmptyStatement':
+                    return isTerserEnabled ? 0 : 1;
                 
                 // --- 関数・メソッド呼び出し ---
                 case 'CallExpression':
@@ -147,6 +157,8 @@ export class CostEstimator {
                 case 'OptionalMemberExpression':
                     const isComputedOpt = n.props['computed'];
                     return calcChild(n.props['object'], nodeMap, calc) + (isComputedOpt ? 3 : 2) + calcChild(n.props['property'], nodeMap, calc);
+                case 'ImportExpression':
+                    return 7 + calcChild(n.props['source'], nodeMap, calc);
                 
                 // --- 配列・オブジェクト ---
                 case 'ArrayExpression':
@@ -184,6 +196,8 @@ export class CostEstimator {
                     return (isTerserEnabled ? 6 : 8) + calcChild(n.props['discriminant'], nodeMap, calc) + 4 + casesCost;
                 case 'SwitchCase':
                     return (n.props['test'] ? (isTerserEnabled ? 4 : 5) + calcChild(n.props['test'], nodeMap, calc) : (isTerserEnabled ? 6 : 7)) + 1 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
+                case 'LabeledStatement':
+                    return calcChild(n.props['label'], nodeMap, calc) + 1 + calcChild(n.props['body'], nodeMap, calc);
                 
                 // --- ループ ---
                 case 'ForStatement':
@@ -266,6 +280,8 @@ export class CostEstimator {
                     }
                     return propCost;
                 }
+                case 'StaticBlock':
+                    return 7 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0); // static { ... }
                 
                 case 'ImportDeclaration':
                 case 'ExportNamedDeclaration':
@@ -290,7 +306,15 @@ export class CostEstimator {
                     return 0; 
                 
                 default:
-                    console.warn(`[CostEstimator] Unknown node type encountered: '${n.type}' (NodeID: ${n.irNodeId}). Using fallback estimation.`);
+                    if (!CostEstimator.warnedTypes.has(n.type)) {
+                        CostEstimator.warnedTypes.add(n.type);
+                        const msg = `[CostEstimator] Unknown node type encountered: '${n.type}' (NodeID: ${n.irNodeId}). Using fallback estimation.`;
+                        if (logger) {
+                            logger({ type: 'error', msg }); // UIのログパネルへ転送
+                        } else {
+                            console.warn(msg);
+                        }
+                    }
                     return n.children.reduce((acc, c) => acc + calc(c) + 1, 0) + 2;
             }
         };

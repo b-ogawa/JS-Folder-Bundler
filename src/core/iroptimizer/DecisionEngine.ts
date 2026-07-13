@@ -40,12 +40,12 @@ export class DecisionEngine {
      * @param isTerserEnabled Whether Terser is enabled for physical compression estimation.
      * @returns An array of the best unique CompilationStates up to beamWidth.
      */
-    static evaluateAndPrune(states: CompilationState[], beamWidth: number, isTerserEnabled: boolean = false): CompilationState[] {
+    static evaluateAndPrune(states: CompilationState[], beamWidth: number, isTerserEnabled: boolean = false, logger?: any): CompilationState[] {
         if (states.length === 0) return [];
         
         // Calculate cost and structural signature for each state
         const evaluatedStates = states.map(state => {
-            const cost = CostEstimator.estimate(state.irRoot, isTerserEnabled);
+            const cost = CostEstimator.estimate(state.irRoot, isTerserEnabled, logger || state.services?.logger);
             const signature = getIRSignature(state.irRoot);
             return { state, cost, signature };
         });
@@ -78,8 +78,8 @@ export class DecisionEngine {
         };
     }
     
-    static getInitialCost(state: CompilationState, isTerserEnabled: boolean = false): number {
-        return CostEstimator.estimate(state.irRoot, isTerserEnabled);
+    static getInitialCost(state: CompilationState, isTerserEnabled: boolean = false, logger?: any): number {
+        return CostEstimator.estimate(state.irRoot, isTerserEnabled, logger || state.services?.logger);
     }
 }
 

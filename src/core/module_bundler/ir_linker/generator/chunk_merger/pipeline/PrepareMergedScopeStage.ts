@@ -78,19 +78,40 @@ export class PrepareMergedScopeStage implements PipelineStage<MergeContext> {
 
             // エントリーポイントからのエクスポートされた定義を escapedVars に追加する
             if (isEntryFile || isWorkerEntryFile) {
-                for (const declId of mod.exports.values()) {
+                const exportedNames: string[] = [];
+                for (const [expName, declId] of mod.exports.entries()) {
                     const actualDeclId = context.extImportRedirects.get(declId) || declId;
                     context.mergedScopeInfo.escapedVars.add(actualDeclId);
+                    exportedNames.push(expName);
                 }
 
-                // ReachabilityTracerで行っている保護ロジックと一致させるため、
-                // エントリーファイルのトップレベル宣言も escapedVars に登録し、後段の最適化エンジン(Golf)のDCEから保護する
-                for (const stmt of mod.statements.values()) {
-                    if (stmt.type === 'Declaration') {
-                        for (const declId of stmt.defines) {
-                            const actualDeclId = context.extImportRedirects.get(declId) || declId;
-                            context.mergedScopeInfo.escapedVars.add(actualDeclId);
+                if (context.logger && exportedNames.length > 0) {
+                    context.logger({ type: 'info', msg: `[ScopeMerger] Marked exported variables as ESCAPED in "${basePath}": [${exportedNames.join(', ')}]` });
+                }
+
+                const program = tree.children[0]?.children?.find(c => c.type === 'Program');
+                const isClassicScript = program?.props.sourceType === 'script';
+                const isInlineScript = basePath.startsWith('_inline_script_');
+
+                // クラシックスクリプト かつ インラインスクリプト の場合のみ、トップレベル宣言を escapedVars に登録し、DCEから保護する
+                if (isClassicScript && isInlineScript) {
+                    const classicEscapedNames: string[] = [];
+                    for (const stmt of mod.statements.values()) {
+                        if (stmt.type === 'Declaration') {
+                            for (const declId of stmt.defines) {
+                                const actualDeclId = context.extImportRedirects.get(declId) || declId;
+                                context.mergedScopeInfo.escapedVars.add(actualDeclId);
+
+                                const targetInfo = context.allTopLevelDecls.get(actualDeclId);
+                                if (targetInfo) {
+                                    classicEscapedNames.push(targetInfo.varName);
+                                }
+                            }
                         }
+                    }
+
+                    if (context.logger && classicEscapedNames.length > 0) {
+                        context.logger({ type: 'info', msg: `[ScopeMerger] Marked top-level variables as ESCAPED due to Classic Script semantics in "${basePath}": [${classicEscapedNames.join(', ')}]` });
                     }
                 }
             }

@@ -2424,7 +2424,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           ast: true,
           code: false,
           parserOpts: {
-            sourceType: 'module'
+            sourceType: 'unambiguous'
           }
         });
         if (!astResult || !astResult.ast) {
@@ -3817,16 +3817,17 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         const refToDeclMap = refToDeclMaps.get(tree.filePath) || new Map();
         const statements = TopLevelAnalyzer.analyze(tree, refToDeclMap);
         const isEntry = entryPaths.has(basePath) || entryPaths.has(basePath + '/index');
+        const modExports = exportsMap.get(basePath) || new Map();
         modules.set(basePath, {
           filePath: tree.filePath,
           basePath,
           statements,
-          exports: exportsMap.get(basePath) || new Map(),
+          exports: modExports,
           imports,
           isEntry,
           tree
         });
-      }
+      } // このフェーズ自体はロギング機能を持たないため、構築されたグラフ情報は呼び出し側のIRLinker側でログ統合される
       return modules;
     }
   }
@@ -3886,10 +3887,15 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         const isWorkerEntry = workerEntryBases.has(mod.basePath) || workerEntryBases.has(mod.basePath + '/index');
         if (isMainEntry) {
           const origin = 'main';
-          if (logger) logger({
-            type: 'info',
-            msg: `[Reachability] Setting origin [${origin}] for entry module: ${mod.basePath}`
-          });
+          const program = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
+          const isClassicScript = program?.props.sourceType === 'script';
+          const isInlineScript = mod.basePath.startsWith('_inline_script_');
+          if (logger) {
+            logger({
+              type: 'info',
+              msg: `[Reachability] Entry module: "${mod.basePath}" (AST Parsed as: ${isClassicScript ? 'Classic Script' : 'ES Module'}, Inline: ${isInlineScript})`
+            });
+          }
           activateModuleSideEffects(mod, origin); // 公開 API の実体 ID
           for (const declId of mod.exports.values()) {
             addToQueue(declId, origin);
@@ -3897,20 +3903,29 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           for (const stmt of mod.statements.values()) {
             if (stmt.type === 'SideEffect') {
               addToQueue(stmt.irNodeId, origin);
-            } // HTMLから読み込まれた外部スクリプトやインラインスクリプトは、
-            // 互いにグローバル空間で変数を共有する「クラシックスクリプト」の可能性が高いため、
-            // エントリーとして指定されたモジュールのトップレベル宣言は安全のためすべて保護する。
-            if (stmt.type === 'Declaration') {
+            } // クラシックスクリプト かつ インラインスクリプト の場合のみグローバルとして保護
+            if (isClassicScript && isInlineScript && stmt.type === 'Declaration') {
               addToQueue(stmt.irNodeId, origin);
             }
+          }
+          if (isClassicScript && isInlineScript && logger) {
+            logger({
+              type: 'info',
+              msg: `[Reachability] Protected all top-level declarations in "${mod.basePath}" to preserve potential global scope visibility.`
+            });
           }
         }
         if (isWorkerEntry) {
           const origin = mod.basePath;
-          if (logger) logger({
-            type: 'info',
-            msg: `[Reachability] Setting origin [${origin}] for entry module: ${mod.basePath}`
-          });
+          const program = mod.tree.children[0]?.children?.find(c => c.type === 'Program');
+          const isClassicScript = program?.props.sourceType === 'script';
+          const isInlineScript = mod.basePath.startsWith('_inline_script_');
+          if (logger) {
+            logger({
+              type: 'info',
+              msg: `[Reachability] Worker module: "${mod.basePath}" (AST Parsed as: ${isClassicScript ? 'Classic Script' : 'ES Module'}, Inline: ${isInlineScript})`
+            });
+          }
           activateModuleSideEffects(mod, origin);
           for (const declId of mod.exports.values()) {
             addToQueue(declId, origin);
@@ -3918,8 +3933,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           for (const stmt of mod.statements.values()) {
             if (stmt.type === 'SideEffect') {
               addToQueue(stmt.irNodeId, origin);
-            } // Worker自身のエントリーのトップレベル宣言も保護（イベントリスナー等から参照されるため）
-            if (stmt.type === 'Declaration') {
+            } // 同様にインラインスクリプトの場合のみ保護
+            if (isClassicScript && isInlineScript && stmt.type === 'Declaration') {
               addToQueue(stmt.irNodeId, origin);
             }
           }
@@ -4677,17 +4692,40 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           context.mergedScopeInfo.errors.push(...tree.scopeInfo.errors);
         } // エントリーポイントからのエクスポートされた定義を escapedVars に追加する
         if (isEntryFile || isWorkerEntryFile) {
-          for (const declId of mod.exports.values()) {
+          const exportedNames = [];
+          for (const [expName, declId] of mod.exports.entries()) {
             const actualDeclId = context.extImportRedirects.get(declId) || declId;
             context.mergedScopeInfo.escapedVars.add(actualDeclId);
-          } // ReachabilityTracerで行っている保護ロジックと一致させるため、
-          // エントリーファイルのトップレベル宣言も escapedVars に登録し、後段の最適化エンジン(Golf)のDCEから保護する
-          for (const stmt of mod.statements.values()) {
-            if (stmt.type === 'Declaration') {
-              for (const declId of stmt.defines) {
-                const actualDeclId = context.extImportRedirects.get(declId) || declId;
-                context.mergedScopeInfo.escapedVars.add(actualDeclId);
+            exportedNames.push(expName);
+          }
+          if (context.logger && exportedNames.length > 0) {
+            context.logger({
+              type: 'info',
+              msg: `[ScopeMerger] Marked exported variables as ESCAPED in "${basePath}": [${exportedNames.join(', ')}]`
+            });
+          }
+          const program = tree.children[0]?.children?.find(c => c.type === 'Program');
+          const isClassicScript = program?.props.sourceType === 'script';
+          const isInlineScript = basePath.startsWith('_inline_script_'); // クラシックスクリプト かつ インラインスクリプト の場合のみ、トップレベル宣言を escapedVars に登録し、DCEから保護する
+          if (isClassicScript && isInlineScript) {
+            const classicEscapedNames = [];
+            for (const stmt of mod.statements.values()) {
+              if (stmt.type === 'Declaration') {
+                for (const declId of stmt.defines) {
+                  const actualDeclId = context.extImportRedirects.get(declId) || declId;
+                  context.mergedScopeInfo.escapedVars.add(actualDeclId);
+                  const targetInfo = context.allTopLevelDecls.get(actualDeclId);
+                  if (targetInfo) {
+                    classicEscapedNames.push(targetInfo.varName);
+                  }
+                }
               }
+            }
+            if (context.logger && classicEscapedNames.length > 0) {
+              context.logger({
+                type: 'info',
+                msg: `[ScopeMerger] Marked top-level variables as ESCAPED due to Classic Script semantics in "${basePath}": [${classicEscapedNames.join(', ')}]`
+              });
             }
           }
         }
@@ -6936,35 +6974,34 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
   }
   class ActionScanner {
     /**
-       * 最適化候補の「探索手法」をルールの性質（Micro/Macro）によって完全に分離するFacade。
-       * 見つけた候補はすべてフラットなActionリストとして返し、Orchestratorによる同時展開を可能にする。
+       * ルールの種類（micro/macro）に応じて最適化候補を収集する。
+       * 収集した最適化候補は平坦なリストとして返却する。
        */
     static scan(state, rules) {
       const microRules = rules.filter(r => r.type === 'micro');
       const macroRules = rules.filter(r => r.type === 'macro');
-      const actions = []; // 1. 独立ブロック内の最適化候補のサーチ (ASTトラバーサル型)
+      const actions = []; // 局所最適化（micro）
       if (microRules.length > 0) {
         this.scanMicro(state.irRoot, state, microRules, actions);
-      } // 2. ブロック間/トポロジー最適化候補のサーチ (アナリシス主導型)
+      } // 大域最適化（macro）
       if (macroRules.length > 0) {
         this.scanMacro(state, macroRules, actions);
       }
       return actions;
-    } // ==========================================
-    // Micro Scanner: 局所的なAST構造に基づく探索
+    } // 局所的なAST構造に基づく探索（micro）
     static scanMicro(node, state, rules, actions) {
       if (!node) return;
       for (const rule of rules) {
         try {
           if (rule.match(node, state)) {
-            const candidates = rule.candidates(node, state); // 整合性検証: matchが適合したにもかかわらず候補配列が生成されない例外を検出
+            const candidates = rule.candidates(node, state); // matchに適合したにもかかわらずcandidatesが未生成の場合のエラーチェック
             if (!candidates) {
               console.error(`[ActionScanner] CRITICAL: Rule '${rule.id}' returned null/undefined candidates!`);
             }
             this.recordActions(node.irNodeId, rule.id, candidates || [], actions);
           }
         } catch (e) {
-          // 例外発生時における解析処理の即時中断（Fail-Fast）およびコンテキスト情報の出力
+          // 例外発生時のコンテキストログ出力と再スロー
           console.error(`[ActionScanner] CRASH in Rule '${rule.id}' (Micro) on Node '${node.type}' (${node.irNodeId})`);
           console.error(`[ActionScanner] Node Props:`, node.props);
           throw e; // 呼び出し元への例外の伝播
@@ -6975,11 +7012,10 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           this.scanMicro(child, state, rules, actions);
         }
       }
-    } // Macro Scanner: 分析スナップショットに基づく大域的な探索
+    } // 解析スナップショットに基づく大域的な探索（macro）
     static scanMacro(state, rules, actions) {
       const snapshot = state.analysisSnapshot;
-      if (!snapshot) return; // Macro探索はASTをトップダウンで走査するのではなく、解析結果のノード一覧から
-      // 大域的な条件（参照カウント0など）に合致するノードを直接抽出する
+      if (!snapshot) return; // 解析結果のノード一覧から、大域的な条件に合致するノードを抽出する
       for (const node of snapshot.nodeMap.values()) {
         for (const rule of rules) {
           try {
@@ -6994,25 +7030,19 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           }
         }
       }
-    } // ヘルパー: アクションの記録
+    } // アクションの記録
     static recordActions(targetId, ruleId, candidates, actions) {
       if (candidates.length === 0) {
+        return;
+      }
+      candidates.forEach((candidate, index) => {
         actions.push({
           ruleId,
           targetIrNodeId: targetId,
-          candidateIndex: 0,
-          candidateNode: null
+          candidateIndex: index,
+          candidateNode: candidate
         });
-      } else {
-        candidates.forEach((candidate, index) => {
-          actions.push({
-            ruleId,
-            targetIrNodeId: targetId,
-            candidateIndex: index,
-            candidateNode: candidate
-          });
-        });
-      }
+      });
     }
   }
   class LazyTransaction {
@@ -7211,11 +7241,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     }
   }
   class CostEstimator {
+    static warnedTypes = new Set();
     /**
        * 文字列を実際に生成することなく、IRツリーから最終的なJavaScript出力時の文字数（バイト数）をO(N)で推測計算します。
        * isTerserEnabled = true の場合、TerserによるPeephole変換（代入の短縮など）を先読みした見積もりを行います。
        */
-    static estimate(node, isTerserEnabled = false) {
+    static estimate(node, isTerserEnabled = false, logger) {
       if (!node) return 0;
       const nodeMap = new Map();
       const buildMap = n => {
@@ -7259,6 +7290,10 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             return 4;
           case 'ThisExpression':
             return 4;
+          case 'Super':
+            return 5;
+          case 'Import':
+            return 6;
           // --- 式・演算 ---
           case 'SequenceExpression':
             {
@@ -7310,10 +7345,14 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             return uOp.length + (uOp.match(/[a-z]/i) && !isTerserEnabled ? 1 : 0) + calcChild(n.props['argument'], nodeMap, calc);
           case 'AwaitExpression':
             return 6 + calcChild(n.props['argument'], nodeMap, calc);
+          case 'YieldExpression':
+            return 6 + (n.props['delegate'] ? 1 : 0) + calcChild(n.props['argument'], nodeMap, calc);
           case 'UpdateExpression':
             return calcChild(n.props['argument'], nodeMap, calc) + 2;
           case 'ExpressionStatement':
             return calcChild(n.props['expression'], nodeMap, calc) + (isTerserEnabled ? 0 : 1);
+          case 'EmptyStatement':
+            return isTerserEnabled ? 0 : 1;
           // --- 関数・メソッド呼び出し ---
           case 'CallExpression':
             let argsCost = 0;
@@ -7342,6 +7381,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           case 'OptionalMemberExpression':
             const isComputedOpt = n.props['computed'];
             return calcChild(n.props['object'], nodeMap, calc) + (isComputedOpt ? 3 : 2) + calcChild(n.props['property'], nodeMap, calc);
+          case 'ImportExpression':
+            return 7 + calcChild(n.props['source'], nodeMap, calc);
           // --- 配列・オブジェクト ---
           case 'ArrayExpression':
           case 'ArrayPattern':
@@ -7377,6 +7418,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             return (isTerserEnabled ? 6 : 8) + calcChild(n.props['discriminant'], nodeMap, calc) + 4 + casesCost;
           case 'SwitchCase':
             return (n.props['test'] ? (isTerserEnabled ? 4 : 5) + calcChild(n.props['test'], nodeMap, calc) : isTerserEnabled ? 6 : 7) + 1 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
+          case 'LabeledStatement':
+            return calcChild(n.props['label'], nodeMap, calc) + 1 + calcChild(n.props['body'], nodeMap, calc);
           // --- ループ ---
           case 'ForStatement':
             return 4 + calcChild(n.props['init'], nodeMap, calc) + 1 + calcChild(n.props['test'], nodeMap, calc) + 1 + calcChild(n.props['update'], nodeMap, calc) + 2 + calcChild(n.props['body'], nodeMap, calc);
@@ -7451,6 +7494,9 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               }
               return propCost;
             }
+          case 'StaticBlock':
+            return 7 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
+          // static { ... }
           case 'ImportDeclaration':
           case 'ExportNamedDeclaration':
           case 'ExportDefaultDeclaration':
@@ -7468,7 +7514,18 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           case 'CommentBlock':
             return 0;
           default:
-            console.warn(`[CostEstimator] Unknown node type encountered: '${n.type}' (NodeID: ${n.irNodeId}). Using fallback estimation.`);
+            if (!CostEstimator.warnedTypes.has(n.type)) {
+              CostEstimator.warnedTypes.add(n.type);
+              const msg = `[CostEstimator] Unknown node type encountered: '${n.type}' (NodeID: ${n.irNodeId}). Using fallback estimation.`;
+              if (logger) {
+                logger({
+                  type: 'error',
+                  msg
+                }); // UIのログパネルへ転送
+              } else {
+                console.warn(msg);
+              }
+            }
             return n.children.reduce((acc, c) => acc + calc(c) + 1, 0) + 2;
         }
       };
@@ -7520,10 +7577,10 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
        * @param isTerserEnabled Whether Terser is enabled for physical compression estimation.
        * @returns An array of the best unique CompilationStates up to beamWidth.
        */
-    static evaluateAndPrune(states, beamWidth, isTerserEnabled = false) {
+    static evaluateAndPrune(states, beamWidth, isTerserEnabled = false, logger) {
       if (states.length === 0) return []; // Calculate cost and structural signature for each state
       const evaluatedStates = states.map(state => {
-        const cost = CostEstimator.estimate(state.irRoot, isTerserEnabled);
+        const cost = CostEstimator.estimate(state.irRoot, isTerserEnabled, logger || state.services?.logger);
         const signature = getIRSignature(state.irRoot);
         return {
           state,
@@ -7552,8 +7609,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         nextCost
       };
     }
-    static getInitialCost(state, isTerserEnabled = false) {
-      return CostEstimator.estimate(state.irRoot, isTerserEnabled);
+    static getInitialCost(state, isTerserEnabled = false, logger) {
+      return CostEstimator.estimate(state.irRoot, isTerserEnabled, logger || state.services?.logger);
     }
   }
   const CFG_BRANCH_RULES = {
@@ -9716,7 +9773,6 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       return false;
     },
     candidates: (node, state) => {
-      const genId = () => state.services.generateId('ir_logic');
       if (node.type === 'BinaryExpression') {
         const bin = node;
         const left = bin.children.find(c => c.irNodeId === bin.props.left?.irNodeId);
@@ -9954,6 +10010,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       return [];
     }
   };
+  // 副作用のないノード判定
   function isSimple_1(node) {
     return node.type === 'Identifier' || node.type === 'NumericLiteral' || node.type === 'StringLiteral' || node.type === 'BooleanLiteral' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression';
   }
@@ -9965,7 +10022,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
     defaultEnabled: true,
     match: (node, state) => {
       if (!state.analysisSnapshot) return false;
-      const snapshot = state.analysisSnapshot; // 1. 変数宣言のDCE
+      const snapshot = state.analysisSnapshot; // 変数宣言のデッドコード判定
       if (node.type === 'VariableDeclaration') {
         const varNode = node;
         const declarations = varNode.props.declarations;
@@ -10017,7 +10074,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           }
         }
         return allUnused;
-      } // 2. クラス宣言・関数宣言のDCE
+      } // クラス宣言・関数宣言のデッドコード判定
       if (node.type === 'ClassDeclaration' || node.type === 'FunctionDeclaration') {
         const idRef = node.props.id;
         if (!idRef) return false;
@@ -10031,7 +10088,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           return false;
         }
         return true;
-      } // 3. 不要なインポート宣言のDCE
+      } // 不要なインポート宣言のデッドコード判定
       if (node.type === 'ImportDeclaration') {
         const specifiers = node.props.specifiers;
         if (!Array.isArray(specifiers) || specifiers.length === 0) return false;
@@ -10070,8 +10127,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       return false;
     },
     candidates: (node, state) => {
-      console.debug(`[TransformRule] ${DeadCodeEliminationRule.id} matched on ${node.type}. Generated 0 candidates (deletion).`);
-      return [];
+      console.debug(`[TransformRule] ${DeadCodeEliminationRule.id} matched on ${node.type}. Generated 1 candidate (deletion).`);
+      return [null];
     }
   };
   const GlobalAliasingRule = {
@@ -10751,10 +10808,67 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       }
     }
   };
+  // 解析可能な配列メソッドのシグネチャ定義
+  const SAFE_ARRAY_METHODS = {
+    'map': {
+      callbackIndex: 0,
+      elementParamIndices: [0],
+      returnsArray: true,
+      returnsInstance: false
+    },
+    'filter': {
+      callbackIndex: 0,
+      elementParamIndices: [0],
+      returnsArray: true,
+      returnsInstance: false
+    },
+    'forEach': {
+      callbackIndex: 0,
+      elementParamIndices: [0],
+      returnsArray: false,
+      returnsInstance: false
+    },
+    'find': {
+      callbackIndex: 0,
+      elementParamIndices: [0],
+      returnsArray: false,
+      returnsInstance: true
+    },
+    'some': {
+      callbackIndex: 0,
+      elementParamIndices: [0],
+      returnsArray: false,
+      returnsInstance: false
+    },
+    'every': {
+      callbackIndex: 0,
+      elementParamIndices: [0],
+      returnsArray: false,
+      returnsInstance: false
+    },
+    'findIndex': {
+      callbackIndex: 0,
+      elementParamIndices: [0],
+      returnsArray: false,
+      returnsInstance: false
+    } // flatMapはデータ構造が平坦化されるため非対応
+    // reduce, sortは制御フローの静的解析が困難なため非対応
+  }; // concatは多次元配列が平坦化される可能性があるため非対応
+  const PURE_ARRAY_METHODS = ['push', 'unshift', 'slice', 'pop', 'shift', 'at', 'length', 'includes'];
   function findEligibleClasses(program, state) {
     const snapshot = state.analysisSnapshot;
     if (!snapshot) return [];
-    const infos = []; // Find all ClassDeclarations in the program
+    const logInfo = msg => {
+      if (state.services.logger) {
+        state.services.logger({
+          type: 'info',
+          msg
+        });
+      } else {
+        console.log(msg);
+      }
+    };
+    const infos = [];
     const classDecls = [];
     for (const [id, irNode] of snapshot.nodeMap.entries()) {
       if (irNode.type === 'ClassDeclaration') {
@@ -10769,11 +10883,14 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       const className = classIdNode.props.name;
       const classDeclId = classIdNode.irNodeId;
       if (snapshot.escapedVars.has(classDeclId)) {
+        logInfo(`[ClassToTuple] Rejected "${className}": Class definition is escaped.`);
         continue;
       }
       if (classDecl.props.superClass) {
+        logInfo(`[ClassToTuple] Rejected "${className}": Extends another class.`);
         continue;
       }
+      logInfo(`[ClassToTuple] Analyzing class "${className}" for tuple optimization...`);
       const classBodyRef = classDecl.props.body;
       if (!classBodyRef) continue;
       const classBodyNode = snapshot.nodeMap.get(classBodyRef.irNodeId);
@@ -10792,6 +10909,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         }
       }
       if (hasOtherMethods) {
+        logInfo(`[ClassToTuple] Rejected "${className}": Has methods other than constructor.`);
         continue;
       }
       const propToIndex = new Map();
@@ -10830,12 +10948,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       let isThisSafe = true;
       if (constructorNode) {
         const findThisNodes = (n, result) => {
-          if (n.type === 'ThisExpression') {
-            result.push(n);
-          }
-          for (const child of n.children) {
-            findThisNodes(child, result);
-          }
+          if (n.type === 'ThisExpression') result.push(n);
+          for (const child of n.children) findThisNodes(child, result);
         };
         const thisNodes = [];
         findThisNodes(constructorNode, thisNodes);
@@ -10855,6 +10969,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         }
       }
       if (!isThisSafe) {
+        logInfo(`[ClassToTuple] Rejected "${className}": 'this' escapes from constructor.`);
         continue;
       }
       let hasInstanceof = false;
@@ -10869,6 +10984,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         }
       }
       if (hasInstanceof) {
+        logInfo(`[ClassToTuple] Rejected "${className}": Used in 'instanceof' operator.`);
         continue;
       }
       const instDeclIds = new Set();
@@ -10879,22 +10995,39 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         if (irNode.type === 'NewExpression') {
           const calleeId = irNode.props.callee.irNodeId;
           const calleeDeclId = snapshot.refToDeclMap.get(calleeId) || calleeId;
-          if (calleeDeclId === classDeclId) {
-            initNewExprs.push(irNode);
-          }
+          if (calleeDeclId === classDeclId) initNewExprs.push(irNode);
         }
       }
-      const queue = [...initNewExprs];
+      const queue = initNewExprs.map(n => ({
+        node: n,
+        isArray: false
+      }));
       const visitedNew = new Set();
       while (queue.length > 0) {
-        const current = queue.shift();
+        const {
+          node: current,
+          isArray
+        } = queue.shift();
         if (visitedNew.has(current.irNodeId)) continue;
         visitedNew.add(current.irNodeId);
         const parentId = snapshot.parentMap.get(current.irNodeId);
         const parentNode = parentId ? snapshot.nodeMap.get(parentId) : null;
         if (!parentNode) {
+          logInfo(`[ClassToTuple] Tracking failed for "${className}". Instance escaped into unhandled parent node type: null`);
           trackSuccess = false;
           break;
+        }
+        if (parentNode.type === 'ArrayExpression') {
+          if (current.type === 'ArrayExpression') {
+            logInfo(`[ClassToTuple] Tracking failed for "${className}". Nested array literals are not supported.`);
+            trackSuccess = false;
+            break;
+          }
+          queue.push({
+            node: parentNode,
+            isArray: true
+          });
+          continue;
         }
         if (parentNode.type === 'VariableDeclarator') {
           const idRef = parentNode.props.id;
@@ -10905,6 +11038,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               break;
             }
             instDeclIds.add(idNode.irNodeId);
+            if (isArray) arrayDeclIds.add(idNode.irNodeId);
           } else {
             trackSuccess = false;
             break;
@@ -10919,11 +11053,17 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               break;
             }
             instDeclIds.add(leftDeclId);
+            if (isArray) arrayDeclIds.add(leftDeclId);
           } else {
             trackSuccess = false;
             break;
           }
         } else if (parentNode.type === 'CallExpression') {
+          if (isArray) {
+            logInfo(`[ClassToTuple] Tracking failed for "${className}". Array passed to function call directly.`);
+            trackSuccess = false;
+            break;
+          }
           const calleeRef = parentNode.props.callee;
           const calleeNode = calleeRef ? snapshot.nodeMap.get(calleeRef.irNodeId) : null;
           if (calleeNode && calleeNode.type === 'MemberExpression' && !calleeNode.props.computed) {
@@ -10934,34 +11074,76 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             if (objNode && objNode.type === 'Identifier' && propNode && propNode.type === 'Identifier') {
               const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
               const methodName = propNode.props.name;
-              const isSafeArrayMethod = methodName === 'push' || methodName === 'unshift' || methodName === 'concat';
-              if (isSafeArrayMethod && !snapshot.escapedVars.has(objDeclId)) {
+              if (['push', 'unshift'].includes(methodName) && !snapshot.escapedVars.has(objDeclId)) {
                 arrayDeclIds.add(objDeclId);
                 instDeclIds.add(objDeclId);
               } else {
+                logInfo(`[ClassToTuple] Tracking failed for "${className}". Unsafe method call: ${methodName}`);
                 trackSuccess = false;
                 break;
               }
             } else {
+              logInfo(`[ClassToTuple] Tracking failed for "${className}". CallExpression callee object is not Identifier.`);
               trackSuccess = false;
               break;
             }
           } else {
+            logInfo(`[ClassToTuple] Tracking failed for "${className}". CallExpression callee is not MemberExpression.`);
             trackSuccess = false;
             break;
           }
         } else {
+          logInfo(`[ClassToTuple] Tracking failed for "${className}". Instance escaped into unhandled parent node type: ${parentNode.type}`);
           trackSuccess = false;
           break;
         }
       }
-      if (!trackSuccess) {
-        continue;
-      }
+      if (!trackSuccess) continue;
       let added = true;
       while (added) {
         added = false;
         for (const [id, irNode] of snapshot.nodeMap.entries()) {
+          if (irNode.type === 'ForOfStatement') {
+            const rightRef = irNode.props.right;
+            const rightNode = rightRef ? snapshot.nodeMap.get(rightRef.irNodeId) : null;
+            if (rightNode && rightNode.type === 'Identifier') {
+              const rightDeclId = snapshot.refToDeclMap.get(rightNode.irNodeId) || rightNode.irNodeId;
+              if (arrayDeclIds.has(rightDeclId)) {
+                const leftRef = irNode.props.left;
+                const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                let successfullyTracked = false;
+                if (leftNode && leftNode.type === 'VariableDeclaration') {
+                  const decls = leftNode.props.declarations || [];
+                  if (decls.length > 0) {
+                    const decltorRef = decls[0];
+                    if (decltorRef && decltorRef.type === 'ref') {
+                      const decltorNode = snapshot.nodeMap.get(decltorRef.irNodeId);
+                      if (decltorNode && decltorNode.type === 'VariableDeclarator') {
+                        const idRef = decltorNode.props.id;
+                        const idNode = idRef ? snapshot.nodeMap.get(idRef.irNodeId) : null;
+                        if (idNode && idNode.type === 'Identifier') {
+                          const paramDeclId = idNode.irNodeId;
+                          if (!instDeclIds.has(paramDeclId)) {
+                            if (snapshot.escapedVars.has(paramDeclId)) {
+                              trackSuccess = false;
+                              break;
+                            }
+                            instDeclIds.add(paramDeclId);
+                            added = true;
+                          }
+                          successfullyTracked = true;
+                        }
+                      }
+                    }
+                  }
+                }
+                if (!successfullyTracked) {
+                  trackSuccess = false;
+                  break;
+                }
+              }
+            }
+          }
           if (irNode.type === 'VariableDeclarator') {
             const initRef = irNode.props.init;
             const initNode = initRef ? snapshot.nodeMap.get(initRef.irNodeId) : null;
@@ -10981,11 +11163,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                   const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
                   if (instDeclIds.has(objDeclId)) {
                     isFromInst = true;
-                    if (arrayDeclIds.has(objDeclId)) {
-                      isArraySource = false;
-                    } else {
-                      isArraySource = true;
-                    }
+                    isArraySource = !arrayDeclIds.has(objDeclId);
                   }
                 }
               } else if (initNode.type === 'CallExpression') {
@@ -10998,7 +11176,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                     const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
                     if (instDeclIds.has(objDeclId)) {
                       isFromInst = true;
-                      if (arrayDeclIds.has(objDeclId)) isArraySource = false;else isArraySource = true;
+                      isArraySource = !arrayDeclIds.has(objDeclId);
                     }
                   }
                 }
@@ -11013,9 +11191,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                       break;
                     }
                     instDeclIds.add(idNode.irNodeId);
-                    if (isArraySource) {
-                      arrayDeclIds.add(idNode.irNodeId);
-                    }
+                    if (isArraySource) arrayDeclIds.add(idNode.irNodeId);
                     added = true;
                   }
                 }
@@ -11041,11 +11217,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                   const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
                   if (instDeclIds.has(objDeclId)) {
                     isFromInst = true;
-                    if (arrayDeclIds.has(objDeclId)) {
-                      isArraySource = false;
-                    } else {
-                      isArraySource = true;
-                    }
+                    isArraySource = !arrayDeclIds.has(objDeclId);
                   }
                 }
               }
@@ -11060,9 +11232,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                       break;
                     }
                     instDeclIds.add(leftDeclId);
-                    if (isArraySource) {
-                      arrayDeclIds.add(leftDeclId);
-                    }
+                    if (isArraySource) arrayDeclIds.add(leftDeclId);
                     added = true;
                   }
                 }
@@ -11079,8 +11249,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
               if (objNode && objNode.type === 'Identifier' && propNode && propNode.type === 'Identifier') {
                 const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
-                const methodName = propNode.props.name;
-                if (methodName === 'push' || methodName === 'unshift' || methodName === 'concat') {
+                const methodName = propNode.props.name; // concatは平坦化によりデータ構造が変化する可能性があるため非対応
+                if (['push', 'unshift'].includes(methodName)) {
                   const args = irNode.props.arguments || [];
                   let hasInstArg = false;
                   for (const argRef of args) {
@@ -11107,32 +11277,222 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                     }
                   }
                 }
+                if (arrayDeclIds.has(objDeclId)) {
+                  const sig = SAFE_ARRAY_METHODS[methodName];
+                  if (sig) {
+                    const args = irNode.props.arguments || [];
+                    if (args.length > sig.callbackIndex) {
+                      const cbRef = args[sig.callbackIndex];
+                      if (cbRef && cbRef.type === 'ref') {
+                        const cbNode = snapshot.nodeMap.get(cbRef.irNodeId); // インライン関数式に限定して解析対象とする
+                        if (cbNode && (cbNode.type === 'ArrowFunctionExpression' || cbNode.type === 'FunctionExpression')) {
+                          const params = cbNode.props.params || [];
+                          for (const paramIdx of sig.elementParamIndices) {
+                            if (params.length > paramIdx) {
+                              const targetParamRef = params[paramIdx];
+                              if (targetParamRef && targetParamRef.type === 'ref') {
+                                const targetParamNode = snapshot.nodeMap.get(targetParamRef.irNodeId);
+                                if (targetParamNode && targetParamNode.type === 'Identifier') {
+                                  const pDeclId = targetParamNode.irNodeId;
+                                  if (!instDeclIds.has(pDeclId)) {
+                                    if (snapshot.escapedVars.has(pDeclId)) {
+                                      trackSuccess = false;
+                                      break;
+                                    }
+                                    instDeclIds.add(pDeclId);
+                                    added = true;
+                                  }
+                                } else {
+                                  trackSuccess = false;
+                                  break; // 分割代入などの複雑なパターンは非対応
+                                }
+                              }
+                            }
+                          }
+                        } else {
+                          trackSuccess = false;
+                          break; // 外部定義のコールバック関数は追跡不可のため非対応
+                        }
+                      }
+                    }
+                    if (trackSuccess && (sig.returnsArray || sig.returnsInstance)) {
+                      const parentId = snapshot.parentMap.get(irNode.irNodeId);
+                      let handled = false;
+                      if (parentId) {
+                        const parentNode = snapshot.nodeMap.get(parentId);
+                        if (parentNode && parentNode.type === 'VariableDeclarator') {
+                          const idRef = parentNode.props.id;
+                          const idNode = idRef ? snapshot.nodeMap.get(idRef.irNodeId) : null;
+                          if (idNode && idNode.type === 'Identifier') {
+                            const idDeclId = idNode.irNodeId;
+                            if (snapshot.escapedVars.has(idDeclId)) {
+                              trackSuccess = false;
+                              break;
+                            }
+                            if (!instDeclIds.has(idDeclId) || sig.returnsArray && !arrayDeclIds.has(idDeclId)) {
+                              instDeclIds.add(idDeclId);
+                              if (sig.returnsArray) arrayDeclIds.add(idDeclId);
+                              added = true;
+                            }
+                            handled = true;
+                          }
+                        } else if (parentNode && parentNode.type === 'AssignmentExpression') {
+                          const leftRef = parentNode.props.left;
+                          const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                          if (leftNode && leftNode.type === 'Identifier') {
+                            const leftDeclId = snapshot.refToDeclMap.get(leftNode.irNodeId) || leftNode.irNodeId;
+                            if (snapshot.escapedVars.has(leftDeclId)) {
+                              trackSuccess = false;
+                              break;
+                            }
+                            if (!instDeclIds.has(leftDeclId) || sig.returnsArray && !arrayDeclIds.has(leftDeclId)) {
+                              instDeclIds.add(leftDeclId);
+                              if (sig.returnsArray) arrayDeclIds.add(leftDeclId);
+                              added = true;
+                            }
+                            handled = true;
+                          }
+                        }
+                      }
+                      if (!handled) {
+                        trackSuccess = false;
+                        break;
+                      }
+                    }
+                  } else if (!PURE_ARRAY_METHODS.includes(methodName)) {
+                    // 未知のメソッド呼び出しは安全性が保証されないため解析処理を終了
+                    trackSuccess = false;
+                    break;
+                  }
+                }
               }
             }
           }
         }
         if (!trackSuccess) break;
       }
-      if (!trackSuccess) {
-        continue;
-      }
-      let hasDynamicAccess = false;
+      if (!trackSuccess) continue;
+      let isSafeUsage = true;
       for (const [id, irNode] of snapshot.nodeMap.entries()) {
-        if (irNode.type === 'MemberExpression' && irNode.props.computed) {
-          const objRef = irNode.props.object;
-          const objNode = objRef ? snapshot.nodeMap.get(objRef.irNodeId) : null;
-          if (objNode && objNode.type === 'Identifier') {
-            const objDeclId = snapshot.refToDeclMap.get(objNode.irNodeId) || objNode.irNodeId;
-            if (instDeclIds.has(objDeclId) && !arrayDeclIds.has(objDeclId)) {
-              hasDynamicAccess = true;
+        if (irNode.type === 'Identifier') {
+          const declId = snapshot.refToDeclMap.get(irNode.irNodeId) || irNode.irNodeId;
+          if (instDeclIds.has(declId)) {
+            const parentId = snapshot.parentMap.get(irNode.irNodeId);
+            const parentNode = parentId ? snapshot.nodeMap.get(parentId) : null;
+            if (!parentNode) {
+              isSafeUsage = false;
+              break;
+            }
+            if (parentNode.type === 'VariableDeclarator' || parentNode.type === 'AssignmentExpression') {
+              let isLeft = false;
+              if (parentNode.type === 'VariableDeclarator') {
+                isLeft = parentNode.props.id && parentNode.props.id.irNodeId === irNode.irNodeId;
+              } else {
+                isLeft = parentNode.props.left && parentNode.props.left.irNodeId === irNode.irNodeId;
+              }
+              if (!isLeft) {
+                const leftRef = parentNode.type === 'VariableDeclarator' ? parentNode.props.id : parentNode.props.left;
+                const leftNode = leftRef ? snapshot.nodeMap.get(leftRef.irNodeId) : null;
+                if (!leftNode || leftNode.type !== 'Identifier') {
+                  isSafeUsage = false;
+                  break;
+                }
+              }
+              continue;
+            } else if (parentNode.type === 'MemberExpression') {
+              if (parentNode.props.object && parentNode.props.object.irNodeId === irNode.irNodeId) {
+                if (parentNode.props.computed) {
+                  if (!arrayDeclIds.has(declId)) {
+                    isSafeUsage = false;
+                    break;
+                  }
+                } else {
+                  const propRef = parentNode.props.property;
+                  const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                  if (propNode && propNode.type === 'Identifier') {
+                    const propName = propNode.props.name;
+                    if (arrayDeclIds.has(declId)) {
+                      if (!SAFE_ARRAY_METHODS[propName] && !PURE_ARRAY_METHODS.includes(propName)) {
+                        isSafeUsage = false;
+                        break;
+                      }
+                      const sig = SAFE_ARRAY_METHODS[propName];
+                      if (sig && (sig.returnsArray || sig.returnsInstance)) {
+                        const callId = snapshot.parentMap.get(parentNode.irNodeId);
+                        const callNode = callId ? snapshot.nodeMap.get(callId) : null;
+                        if (callNode && callNode.type === 'CallExpression') {
+                          const grandParentId = snapshot.parentMap.get(callNode.irNodeId);
+                          const grandParentNode = grandParentId ? snapshot.nodeMap.get(grandParentId) : null;
+                          if (!grandParentNode) {
+                            isSafeUsage = false;
+                            break;
+                          } // 戻り値が代入されるか、またはfor-ofの右辺で参照されている場合のみ許可
+                          const isAssigned = grandParentNode.type === 'VariableDeclarator' || grandParentNode.type === 'AssignmentExpression' || grandParentNode.type === 'ForOfStatement';
+                          if (!isAssigned) {
+                            isSafeUsage = false;
+                            break;
+                          }
+                        }
+                      }
+                    } else {
+                      if (!propToIndex.has(propName)) {
+                        isSafeUsage = false;
+                        break;
+                      }
+                    }
+                  } else {
+                    isSafeUsage = false;
+                    break;
+                  }
+                }
+              }
+              continue;
+            } else if (parentNode.type === 'CallExpression') {
+              let isSafeArg = false;
+              const calleeRef = parentNode.props.callee;
+              const calleeNode = calleeRef ? snapshot.nodeMap.get(calleeRef.irNodeId) : null;
+              if (calleeNode && calleeNode.type === 'MemberExpression' && !calleeNode.props.computed) {
+                const propRef = calleeNode.props.property;
+                const propNode = propRef ? snapshot.nodeMap.get(propRef.irNodeId) : null;
+                if (propNode && propNode.type === 'Identifier') {
+                  const propName = propNode.props.name;
+                  if (['push', 'unshift'].includes(propName)) isSafeArg = true;
+                }
+              }
+              if (!isSafeArg) {
+                isSafeUsage = false;
+                break;
+              }
+            } else if (parentNode.type === 'ForOfStatement') {
+              if (parentNode.props.right && parentNode.props.right.irNodeId === irNode.irNodeId) {
+                if (!arrayDeclIds.has(declId)) {
+                  isSafeUsage = false;
+                  break;
+                }
+              }
+              continue;
+            } else if (parentNode.type === 'ArrowFunctionExpression' || parentNode.type === 'FunctionExpression' || parentNode.type === 'FunctionDeclaration') {
+              let isParam = false;
+              const params = parentNode.props.params || [];
+              for (const p of params) {
+                if (p && p.irNodeId === irNode.irNodeId) isParam = true;
+              }
+              if (!isParam) {
+                isSafeUsage = false;
+                break;
+              }
+              continue;
+            } else if (parentNode.type === 'IfStatement' || parentNode.type === 'LogicalExpression' || parentNode.type === 'BinaryExpression' || parentNode.type === 'ConditionalExpression') {
+              continue;
+            } else {
+              logInfo(`[ClassToTuple] Safety check failed for "${className}". Variable used in unsafe parent node type: ${parentNode.type}`);
+              isSafeUsage = false;
               break;
             }
           }
         }
       }
-      if (hasDynamicAccess) {
-        continue;
-      }
+      if (!isSafeUsage) continue;
       infos.push({
         classDeclNode: classDecl,
         className,
@@ -11173,55 +11533,24 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         const arrayDeclIds = info.arrayDeclIds;
         const factoryFuncName = `_create_${className}`;
         const factoryFuncDeclId = genId();
+        const oldToNewId = new Map();
+        oldToNewId.set(classDeclNode.irNodeId, '__DELETED__');
         const cloneNode = n => {
           if (n.type === 'ClassDeclaration' && n.irNodeId === classDeclNode.irNodeId) {
             return null;
           }
+          let newNodeId = genId();
+          oldToNewId.set(n.irNodeId, newNodeId);
           const newChildren = [];
-          const childIdMap = new Map();
           for (const child of n.children) {
             const clonedChild = cloneNode(child);
             if (clonedChild) {
               newChildren.push(clonedChild);
-              if (child.irNodeId !== clonedChild.irNodeId) {
-                childIdMap.set(child.irNodeId, clonedChild.irNodeId);
-              }
             }
           }
           let newProps = {
             ...n.props
           };
-          for (const [key, val] of Object.entries(newProps)) {
-            if (Array.isArray(val)) {
-              newProps[key] = val.map(ref => {
-                if (ref && ref.type === 'ref') {
-                  const childNode = snapshot.nodeMap.get(ref.irNodeId);
-                  if (childNode && childNode.type === 'ClassDeclaration' && childNode.irNodeId === classDeclNode.irNodeId) {
-                    return null;
-                  }
-                  if (childIdMap.has(ref.irNodeId)) {
-                    return {
-                      type: 'ref',
-                      irNodeId: childIdMap.get(ref.irNodeId)
-                    };
-                  }
-                  return ref;
-                }
-                return ref;
-              }).filter(ref => ref !== null);
-            } else if (val && typeof val === 'object' && val.type === 'ref') {
-              const refNodeId = val.irNodeId;
-              const childNode = snapshot.nodeMap.get(refNodeId);
-              if (childNode && childNode.type === 'ClassDeclaration' && childNode.irNodeId === classDeclNode.irNodeId) {
-                newProps[key] = null;
-              } else if (childIdMap.has(refNodeId)) {
-                newProps[key] = {
-                  type: 'ref',
-                  irNodeId: childIdMap.get(refNodeId)
-                };
-              }
-            }
-          }
           if (n.type === 'NewExpression') {
             const calleeId = n.props.callee.irNodeId;
             const calleeDeclId = snapshot.refToDeclMap.get(calleeId) || calleeId;
@@ -11235,7 +11564,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 },
                 children: []
               };
-              const finalChildren = newChildren.filter(c => c.irNodeId !== calleeId);
+              const newCalleeId = oldToNewId.get(calleeId);
+              const finalChildren = newChildren.filter(c => c.irNodeId !== newCalleeId);
               finalChildren.push(factoryIdNode);
               newProps.callee = {
                 type: 'ref',
@@ -11243,7 +11573,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               };
               return {
                 type: 'CallExpression',
-                irNodeId: n.irNodeId,
+                irNodeId: newNodeId,
                 props: newProps,
                 children: finalChildren
               };
@@ -11255,17 +11585,15 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             let isInstance = false;
             if (objNode) {
               if (objNode.type === 'Identifier') {
-                // 1. 変数アクセス (例: currentNode.x)
-                const objDeclId = snapshot.refToDeclMap.get(objId) || objId; // 配列変数自身（openList等）へのプロパティアクセス（length等）を誤変換しないよう除外
+                const objDeclId = snapshot.refToDeclMap.get(objId) || objId;
                 if (instDeclIds.has(objDeclId) && !arrayDeclIds.has(objDeclId)) {
                   isInstance = true;
                 }
               } else if (objNode.type === 'MemberExpression' && objNode.props.computed) {
-                // 2. 配列インデックスアクセス (例: openList[i].x)
                 const listObjRef = objNode.props.object;
                 const listObjNode = listObjRef ? snapshot.nodeMap.get(listObjRef.irNodeId) : null;
                 if (listObjNode && listObjNode.type === 'Identifier') {
-                  const listDeclId = snapshot.refToDeclMap.get(listObjNode.irNodeId) || listObjNode.irNodeId; // その配列自身がインスタンスのコンテナとしてトラッカーに登録されているか
+                  const listDeclId = snapshot.refToDeclMap.get(listObjNode.irNodeId) || listObjNode.irNodeId;
                   if (arrayDeclIds.has(listDeclId)) {
                     isInstance = true;
                   }
@@ -11287,11 +11615,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                     },
                     children: []
                   };
-                  const finalChildren = newChildren.filter(c => c.irNodeId !== propNode.irNodeId);
+                  const newPropId = oldToNewId.get(propNode.irNodeId);
+                  const finalChildren = newChildren.filter(c => c.irNodeId !== newPropId);
                   finalChildren.push(numLiteralNode);
                   return {
                     type: 'MemberExpression',
-                    irNodeId: n.irNodeId,
+                    irNodeId: newNodeId,
                     props: {
                       ...newProps,
                       object: newProps.object,
@@ -11309,13 +11638,13 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           }
           return {
             type: n.type,
-            irNodeId: n.irNodeId,
+            irNodeId: newNodeId,
             props: newProps,
             children: newChildren
           };
         };
         const newProgBase = cloneNode(currentProg);
-        const paramIdMap = new Map(); // Step 1: 元のパラメータ宣言の declId を特定し、新しい ID を事前に割り当てる
+        const paramIdMap = new Map();
         if (constructorNode && constructorNode.props.params) {
           for (const paramRef of constructorNode.props.params) {
             const paramNode = snapshot.nodeMap.get(paramRef.irNodeId);
@@ -11330,8 +11659,10 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               }
             }
           }
-        } // Step 2: 汎用ディープクローン関数（パラメータや式を安全に再帰コピーする）
+        }
         const cloneExpression = n => {
+          let newNodeId = genId();
+          oldToNewId.set(n.irNodeId, newNodeId);
           const newChildren = [];
           for (const child of n.children) {
             newChildren.push(cloneExpression(child));
@@ -11341,8 +11672,9 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           };
           if (n.type === 'Identifier') {
             const declId = snapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
-            const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId) : declId; // 対象ノードが「宣言」である場合は、事前生成したIDを付与する
-            const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId) : genId();
+            const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId) : declId;
+            const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId) : newNodeId;
+            oldToNewId.set(n.irNodeId, newId);
             return {
               type: 'Identifier',
               irNodeId: newId,
@@ -11353,40 +11685,13 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               children: []
             };
           }
-          const childIdMap = new Map();
-          for (let i = 0; i < n.children.length; i++) {
-            childIdMap.set(n.children[i].irNodeId, newChildren[i].irNodeId);
-          }
-          for (const [key, val] of Object.entries(newProps)) {
-            if (Array.isArray(val)) {
-              newProps[key] = val.map(ref => {
-                if (ref && ref.type === 'ref') {
-                  if (childIdMap.has(ref.irNodeId)) {
-                    return {
-                      type: 'ref',
-                      irNodeId: childIdMap.get(ref.irNodeId)
-                    };
-                  }
-                }
-                return ref;
-              });
-            } else if (val && typeof val === 'object' && val.type === 'ref') {
-              const refNodeId = val.irNodeId;
-              if (childIdMap.has(refNodeId)) {
-                newProps[key] = {
-                  type: 'ref',
-                  irNodeId: childIdMap.get(refNodeId)
-                };
-              }
-            }
-          }
           return {
             type: n.type,
-            irNodeId: genId(),
+            irNodeId: newNodeId,
             props: newProps,
             children: newChildren
           };
-        }; // Step 3: パラメータリスト全体を安全にディープクローン
+        };
         const paramsRefs = [];
         const factoryParamsChildren = [];
         if (constructorNode && constructorNode.props.params) {
@@ -11401,7 +11706,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               });
             }
           }
-        } // =========================================================================================
+        }
         const isSimpleDTO = () => {
           if (!constructorNode) return true;
           const blockRef = constructorNode.props.body;
@@ -11595,9 +11900,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             children: [arrayDeclaratorNode]
           };
           const cloneConstructorBody = n => {
+            let newNodeId = genId();
+            oldToNewId.set(n.irNodeId, newNodeId);
             const newChildren = [];
             for (const child of n.children) {
-              newChildren.push(cloneConstructorBody(child));
+              const clonedChild = cloneConstructorBody(child);
+              newChildren.push(clonedChild);
             }
             let newProps = {
               ...n.props
@@ -11605,9 +11913,11 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
             if (n.type === 'Identifier') {
               const declId = snapshot.refToDeclMap.get(n.irNodeId) || n.props._declId || n.irNodeId;
               const finalDeclId = paramIdMap.has(declId) ? paramIdMap.get(declId) : declId;
+              const newId = paramIdMap.has(n.irNodeId) ? paramIdMap.get(n.irNodeId) : newNodeId;
+              oldToNewId.set(n.irNodeId, newId);
               return {
                 type: 'Identifier',
-                irNodeId: genId(),
+                irNodeId: newId,
                 props: {
                   ...n.props,
                   _declId: finalDeclId
@@ -11643,7 +11953,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                     };
                     return {
                       type: 'MemberExpression',
-                      irNodeId: genId(),
+                      irNodeId: newNodeId,
                       props: {
                         ...newProps,
                         object: {
@@ -11662,36 +11972,9 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
                 }
               }
             }
-            const childIdMap = new Map();
-            for (let i = 0; i < n.children.length; i++) {
-              childIdMap.set(n.children[i].irNodeId, newChildren[i].irNodeId);
-            }
-            for (const [key, val] of Object.entries(newProps)) {
-              if (Array.isArray(val)) {
-                newProps[key] = val.map(ref => {
-                  if (ref && ref.type === 'ref') {
-                    if (childIdMap.has(ref.irNodeId)) {
-                      return {
-                        type: 'ref',
-                        irNodeId: childIdMap.get(ref.irNodeId)
-                      };
-                    }
-                  }
-                  return ref;
-                });
-              } else if (val && typeof val === 'object' && val.type === 'ref') {
-                const refNodeId = val.irNodeId;
-                if (childIdMap.has(refNodeId)) {
-                  newProps[key] = {
-                    type: 'ref',
-                    irNodeId: childIdMap.get(refNodeId)
-                  };
-                }
-              }
-            }
             return {
               type: n.type,
-              irNodeId: genId(),
+              irNodeId: newNodeId,
               props: newProps,
               children: newChildren
             };
@@ -11775,9 +12058,54 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
           type: 'ref',
           irNodeId: factoryFuncNode.irNodeId
         });
+        const updateRefs = n => {
+          for (const [key, val] of Object.entries(n.props)) {
+            if (Array.isArray(val)) {
+              n.props[key] = val.map(ref => {
+                if (ref && ref.type === 'ref') {
+                  const newId = oldToNewId.get(ref.irNodeId);
+                  if (newId === '__DELETED__') return null;
+                  if (newId) return {
+                    type: 'ref',
+                    irNodeId: newId
+                  };
+                }
+                return ref;
+              }).filter(ref => ref !== null);
+            } else if (val && typeof val === 'object' && val.type === 'ref') {
+              const refNodeId = val.irNodeId;
+              const newId = oldToNewId.get(refNodeId);
+              if (newId === '__DELETED__') {
+                n.props[key] = null;
+              } else if (newId) {
+                n.props[key] = {
+                  type: 'ref',
+                  irNodeId: newId
+                };
+              }
+            }
+          }
+          if (n.type === 'Identifier' && n.props._declId) {
+            const newDeclId = oldToNewId.get(n.props._declId);
+            if (newDeclId && newDeclId !== '__DELETED__') {
+              n.props._declId = newDeclId;
+            }
+          }
+          if (n.children) {
+            for (const child of n.children) updateRefs(child);
+          }
+        };
+        updateRefs(newProgBase);
         currentProg = newProgBase;
       }
-      console.debug(`[TransformRule] ${ClassToTupleRule.id} rewritten successfully.`);
+      if (state.services.logger) {
+        state.services.logger({
+          type: 'info',
+          msg: `[ClassToTuple] AST rewriting completed successfully. Submitting candidates to ASTTransformer...`
+        });
+      } else {
+        console.log(`[ClassToTuple] AST rewriting completed successfully. Submitting candidates to ASTTransformer...`);
+      }
       return [currentProg];
     }
   };
@@ -11989,7 +12317,7 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
         if (declId) refCount = state.analysisSnapshot.referenceCounts.get(declId) || 1;
       }
       if (refCount > 1) {
-        const cost = CostEstimator.estimate(fnNode, false);
+        const cost = CostEstimator.estimate(fnNode, false, state.services?.logger);
         if (cost > 60) return false;
       }
       return true;
@@ -12198,10 +12526,12 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
       const defaultGenerateId = (prefix = 'ir_opt') => `${prefix}_${(++_optCounter).toString(36)}`;
       const services = {
         ...config.services,
+        logger: logger,
+        // ロガーをサービスとしてDIコンテナに登録
         generateId: config.services?.generateId || defaultGenerateId
       };
       let currentRoot = initialRoot;
-      let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot, {}, null, services), isTerserEnabled);
+      let lastBestCost = DecisionEngine.getInitialCost(new CompilationState(currentRoot, {}, null, services), isTerserEnabled, logger);
       for (let iter = 0; iter < maxIterations; iter++) {
         logger({
           type: 'info',
@@ -12245,8 +12575,8 @@ if (!__isWorker && (!_chunkId || _chunkId === 'main')) {
               });
               break;
             } // DecisionEngineによる状態の評価と枝刈り
-            currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth, isTerserEnabled);
-            const currentBestCost = DecisionEngine.getInitialCost(currentStates[0], isTerserEnabled); // 最小コスト更新時の処理
+            currentStates = DecisionEngine.evaluateAndPrune(allNextStates, schedule.beamWidth, isTerserEnabled, logger);
+            const currentBestCost = DecisionEngine.getInitialCost(currentStates[0], isTerserEnabled, logger); // 最小コスト更新時の処理
             if (currentBestCost < bestOverallCost) {
               const actionTaken = currentStates[0].metadata.lastAction || 'Unknown Action';
               const savedBytes = bestOverallCost - currentBestCost;

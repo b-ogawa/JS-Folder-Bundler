@@ -2,7 +2,7 @@ import { IRNode, VariableDeclarationIR, VariableDeclaratorIR, IdentifierIR } fro
 import { CompilationState } from '../../../1_domain/state/CompilationState';
 import { TransformRule } from '../../../interface/TransformRule';
 
-// 副作用を持たない安全なノードかどうかを判定
+// 副作用のないノード判定
 function isSimple(node: IRNode): boolean {
     return node.type === 'Identifier' || 
            node.type === 'NumericLiteral' || 
@@ -22,7 +22,7 @@ export const DeadCodeEliminationRule: TransformRule = {
         if (!state.analysisSnapshot) return false;
         const snapshot = state.analysisSnapshot;
 
-        // 1. 変数宣言のDCE
+        // 変数宣言のデッドコード判定
         if (node.type === 'VariableDeclaration') {
             const varNode = node as VariableDeclarationIR;
             const declarations = varNode.props.declarations;
@@ -83,7 +83,7 @@ export const DeadCodeEliminationRule: TransformRule = {
             return allUnused;
         }
 
-        // 2. クラス宣言・関数宣言のDCE
+        // クラス宣言・関数宣言のデッドコード判定
         if (node.type === 'ClassDeclaration' || node.type === 'FunctionDeclaration') {
             const idRef = node.props.id;
             if (!idRef) return false;
@@ -102,7 +102,7 @@ export const DeadCodeEliminationRule: TransformRule = {
             return true;
         }
 
-        // 3. 不要なインポート宣言のDCE
+        // 不要なインポート宣言のデッドコード判定
         if (node.type === 'ImportDeclaration') {
             const specifiers = node.props.specifiers;
             if (!Array.isArray(specifiers) || specifiers.length === 0) return false;
@@ -145,7 +145,7 @@ export const DeadCodeEliminationRule: TransformRule = {
         return false;
     },
     candidates: (node: IRNode, state: CompilationState) => {
-        console.debug(`[TransformRule] ${DeadCodeEliminationRule.id} matched on ${node.type}. Generated 0 candidates (deletion).`);
-        return [];
+        console.debug(`[TransformRule] ${DeadCodeEliminationRule.id} matched on ${node.type}. Generated 1 candidate (deletion).`);
+        return [null];
     }
 };
