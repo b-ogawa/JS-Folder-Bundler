@@ -1,5 +1,6 @@
 import { IRNode } from '../../../source_analyzer/ir_converter/IRNodeTypes';
 import { CompilationState } from '../state/CompilationState';
+import { IRUtils } from '../../../source_analyzer/ir_converter/IRUtils';
 
 export class IRNodeCloner {
     public static clone(
@@ -14,14 +15,36 @@ export class IRNodeCloner {
         const localDecls = new Set<string>();
         
         const collectDecls = (node: IRNode) => {
-            if (node.type === 'VariableDeclarator' || node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression') {
+            if (node.type === 'VariableDeclarator' || node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ClassDeclaration') {
                 const idRef = (node.props as any).id;
-                if (idRef && idRef.type === 'ref') localDecls.add(idRef.irNodeId);
+                if (idRef && idRef.type === 'ref') {
+                    const idNode = IRUtils.resolveRef(node, idRef);
+                    if (idNode) {
+                        const boundIdents = IRUtils.extractPatternIdentifiers(idNode);
+                        for (const b of boundIdents) localDecls.add(b.irNodeId);
+                    }
+                }
             }
             if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type)) {
                 if (Array.isArray((node.props as any).params)) {
                     for (const param of (node.props as any).params) {
-                        if (param && param.type === 'ref') localDecls.add(param.irNodeId);
+                        if (param && param.type === 'ref') {
+                            const paramNode = IRUtils.resolveRef(node, param);
+                            if (paramNode) {
+                                const boundIdents = IRUtils.extractPatternIdentifiers(paramNode);
+                                for (const b of boundIdents) localDecls.add(b.irNodeId);
+                            }
+                        }
+                    }
+                }
+            }
+            if (node.type === 'CatchClause') {
+                const paramRef = (node.props as any).param;
+                if (paramRef && paramRef.type === 'ref') {
+                    const paramNode = IRUtils.resolveRef(node, paramRef);
+                    if (paramNode) {
+                        const boundIdents = IRUtils.extractPatternIdentifiers(paramNode);
+                        for (const b of boundIdents) localDecls.add(b.irNodeId);
                     }
                 }
             }
@@ -45,7 +68,6 @@ export class IRNodeCloner {
                 if (substituteMap.has(declId)) {
                     const argNode = substituteMap.get(declId)!;
                     const clonedArg = IRNodeCloner.clone(argNode, state);
-                    // 親ノードからの参照（ref）を更新するため、元のIdentifierのIDと新しいIDの対応を記録
                     oldToNewId.set(node.irNodeId, clonedArg.irNodeId);
                     return clonedArg;
                 }
@@ -59,8 +81,9 @@ export class IRNodeCloner {
                 newChildren.push(cloneNode(child));
             }
 
-            let newName = node.props.name;
+            const newProps = { ...node.props };
             if (node.type === 'Identifier') {
+                let newName = node.props.name;
                 if (localDecls.has(node.irNodeId)) {
                     newName = declToNewName.get(node.irNodeId) || newName;
                 } else {
@@ -69,12 +92,18 @@ export class IRNodeCloner {
                         newName = declToNewName.get(resolvedDeclId)!;
                     }
                 }
+                newProps.name = newName;
+
+                const resolvedDeclId = snapshot.refToDeclMap.get(node.irNodeId) || (node.props as any)._declId || (localDecls.has(node.irNodeId) ? node.irNodeId : undefined);
+                if (resolvedDeclId) {
+                    newProps._declId = resolvedDeclId;
+                }
             }
 
             return {
                 type: node.type,
                 irNodeId: newId,
-                props: { ...node.props, name: newName },
+                props: newProps,
                 children: newChildren
             };
         };

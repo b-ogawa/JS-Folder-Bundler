@@ -59,12 +59,13 @@ export class MergeExternalImportsStage implements PipelineStage<MergeContext> {
                     }
                 } else if (specNode.type === 'ImportSpecifier') {
                     const importedRef = specNode.props['imported'];
+                    const importedNode = importedRef ? specNode.children.find((c: any) => c.irNodeId === importedRef.irNodeId) : null;
                     const localRef = specNode.props['local'] || importedRef;
                     const localNode = specNode.children.find((c: any) => c.irNodeId === localRef?.irNodeId);
-                    const localName = localNode ? localNode.props['name'] as string : '';
+                    const importedName = importedNode ? (importedNode.props['name'] as string) : (localNode ? (localNode.props['name'] as string) : '');
                     
-                    if (localName && !group.namedSpecifiers.has(localName)) {
-                        group.namedSpecifiers.set(localName, specNode);
+                    if (importedName && !group.namedSpecifiers.has(importedName)) {
+                        group.namedSpecifiers.set(importedName, specNode);
                     }
                 }
             }
@@ -155,7 +156,8 @@ export class MergeExternalImportsStage implements PipelineStage<MergeContext> {
                             children: [memberExpr, objExpr, argNode]
                         };
 
-                        const origIdent: IRNode = { type: 'Identifier', irNodeId: actualDeclId, props: { name: finalName, _declId: actualDeclId }, children: [] };
+                        const origIdentId = genId();
+                        const origIdent: IRNode = { type: 'Identifier', irNodeId: origIdentId, props: { name: finalName, _declId: actualDeclId }, children: [] };
                         const decltor: IRNode = {
                             type: 'VariableDeclarator',
                             irNodeId: genId(),
@@ -364,7 +366,7 @@ export class MergeExternalImportsStage implements PipelineStage<MergeContext> {
                 hasNamespace = true;
                 namespaceLocalId = localDeclId;
                 namespaceLocalName = localName;
-                break; 
+                continue;
             }
 
             if (specNode.type === 'ImportDefaultSpecifier') {
@@ -389,23 +391,6 @@ export class MergeExternalImportsStage implements PipelineStage<MergeContext> {
             }
         }
 
-        let declaratorIdNode: IRNode;
-        if (hasNamespace) {
-            declaratorIdNode = {
-                type: 'Identifier',
-                irNodeId: namespaceLocalId,
-                props: { name: namespaceLocalName, _declId: namespaceLocalId },
-                children: []
-            };
-        } else {
-            declaratorIdNode = {
-                type: 'ObjectPattern',
-                irNodeId: genId(),
-                props: { properties: propertyRefs },
-                children: properties
-            };
-        }
-
         const importIdent: IRNode = { type: 'Import', irNodeId: genId(), props: {}, children: [] };
         const argStrNode: IRNode = { type: 'StringLiteral', irNodeId: genId(), props: { value: sourceVal, _isWorkerImport: isWorkerImport }, children: [] };
         const importCallNode: IRNode = {
@@ -422,18 +407,69 @@ export class MergeExternalImportsStage implements PipelineStage<MergeContext> {
             children: [importCallNode]
         };
 
-        const declaratorNode: IRNode = {
-            type: 'VariableDeclarator',
-            irNodeId: genId(),
-            props: { id: { type: 'ref', irNodeId: declaratorIdNode.irNodeId }, init: { type: 'ref', irNodeId: awaitNode.irNodeId } },
-            children: [declaratorIdNode, awaitNode] 
-        };
+        const declarators: IRNode[] = [];
+        const declaratorRefs: any[] = [];
+
+        if (hasNamespace) {
+            const nsIdNode: IRNode = {
+                type: 'Identifier',
+                irNodeId: namespaceLocalId,
+                props: { name: namespaceLocalName, _declId: namespaceLocalId },
+                children: []
+            };
+            const nsDeclarator: IRNode = {
+                type: 'VariableDeclarator',
+                irNodeId: genId(),
+                props: { id: { type: 'ref', irNodeId: nsIdNode.irNodeId }, init: { type: 'ref', irNodeId: awaitNode.irNodeId } },
+                children: [nsIdNode, awaitNode]
+            };
+            declarators.push(nsDeclarator);
+            declaratorRefs.push({ type: 'ref', irNodeId: nsDeclarator.irNodeId });
+
+            if (properties.length > 0) {
+                const patternNode: IRNode = {
+                    type: 'ObjectPattern',
+                    irNodeId: genId(),
+                    props: { properties: propertyRefs },
+                    children: properties
+                };
+                const nsRefIdent: IRNode = {
+                    type: 'Identifier',
+                    irNodeId: genId(),
+                    props: { name: namespaceLocalName, _declId: namespaceLocalId },
+                    children: []
+                };
+                const namedDeclarator: IRNode = {
+                    type: 'VariableDeclarator',
+                    irNodeId: genId(),
+                    props: { id: { type: 'ref', irNodeId: patternNode.irNodeId }, init: { type: 'ref', irNodeId: nsRefIdent.irNodeId } },
+                    children: [patternNode, nsRefIdent]
+                };
+                declarators.push(namedDeclarator);
+                declaratorRefs.push({ type: 'ref', irNodeId: namedDeclarator.irNodeId });
+            }
+        } else {
+            const patternNode: IRNode = {
+                type: 'ObjectPattern',
+                irNodeId: genId(),
+                props: { properties: propertyRefs },
+                children: properties
+            };
+            const declaratorNode: IRNode = {
+                type: 'VariableDeclarator',
+                irNodeId: genId(),
+                props: { id: { type: 'ref', irNodeId: patternNode.irNodeId }, init: { type: 'ref', irNodeId: awaitNode.irNodeId } },
+                children: [patternNode, awaitNode]
+            };
+            declarators.push(declaratorNode);
+            declaratorRefs.push({ type: 'ref', irNodeId: declaratorNode.irNodeId });
+        }
 
         return {
             type: 'VariableDeclaration',
-            irNodeId: importDecl.irNodeId,
-            props: { kind: 'const', declarations: [{ type: 'ref', irNodeId: declaratorNode.irNodeId }] },
-            children: [declaratorNode]
+            irNodeId: genId(),
+            props: { kind: 'const', declarations: declaratorRefs },
+            children: declarators
         };
     }
 }

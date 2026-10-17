@@ -101,6 +101,15 @@ export class ScopeAnalyzer {
                          }
                     }
                     
+                    // エスケープ判定（バインディングと参照スコープの関数親の比較）
+                    const bindingFn = babelScope.getFunctionParent() || babelScope.getProgramParent();
+                    for (const refPath of [...b.referencePaths, ...b.constantViolations]) {
+                        const refFn = refPath.scope.getFunctionParent() || refPath.scope.getProgramParent();
+                        if (bindingFn !== refFn && b.identifier._astNodeId) {
+                            scopeInfo.escapedVars.add(b.identifier._astNodeId);
+                        }
+                    }
+                    
                     scopeInfo.bindings.set(astNodeId, {
                         name,
                         scopeId,
@@ -109,22 +118,11 @@ export class ScopeAnalyzer {
                 }
             }
 
-            // エスケープ変数の検知
+            // 未束縛の参照識別子（グローバル変数）のみを収集
             traverse(ast, {
-                Identifier(path: any) {
+                ReferencedIdentifier(path: any) {
                     const name = path.node.name;
-                    if (path.scope.hasBinding(name, true)) {
-                        const binding = path.scope.getBinding(name);
-                        if (binding && binding.scope !== path.scope) {
-                            const bindingFn = binding.scope.getFunctionParent() || binding.scope.getProgramParent();
-                            const pathFn = path.scope.getFunctionParent() || path.scope.getProgramParent();
-                            if (bindingFn !== pathFn) {
-                                if (binding.identifier._astNodeId) {
-                                    scopeInfo.escapedVars.add(binding.identifier._astNodeId);
-                                }
-                            }
-                        }
-                    } else {
+                    if (!path.scope.hasBinding(name, true) && path.node._astNodeId) {
                         scopeInfo.escapedVars.add(path.node._astNodeId);
                     }
                 }

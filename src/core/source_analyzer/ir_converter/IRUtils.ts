@@ -18,4 +18,48 @@ export class IRUtils {
         if (!Array.isArray(propArray)) return [];
         return propArray.map(p => this.resolveRef(node, p)).filter((n): n is IRNode => n !== undefined);
     }
+
+    /**
+     * パターンノード（Identifier, ObjectPattern, ArrayPattern 等）から定義識別子ノードを再帰抽出します。
+     */
+    static extractPatternIdentifiers(patternNode: IRNode): IRNode[] {
+        const results: IRNode[] = [];
+        const walk = (node: IRNode) => {
+            if (!node) return;
+            if (node.type === 'Identifier') {
+                results.push(node);
+                return;
+            }
+            if (node.type === 'ObjectPattern') {
+                const properties = node.props.properties || [];
+                for (const propRef of properties) {
+                    const propNode = IRUtils.resolveRef(node, propRef);
+                    if (propNode) {
+                        if (propNode.type === 'Property' || propNode.type === 'ObjectProperty') {
+                            const valNode = IRUtils.resolveRef(propNode, propNode.props.value);
+                            if (valNode) walk(valNode);
+                        } else if (propNode.type === 'RestElement') {
+                            const argNode = IRUtils.resolveRef(propNode, propNode.props.argument);
+                            if (argNode) walk(argNode);
+                        }
+                    }
+                }
+            } else if (node.type === 'ArrayPattern') {
+                const elements = node.props.elements || [];
+                for (const elRef of elements) {
+                    const elNode = IRUtils.resolveRef(node, elRef);
+                    if (elNode) walk(elNode);
+                }
+            } else if (node.type === 'AssignmentPattern') {
+                const leftNode = IRUtils.resolveRef(node, node.props.left);
+                if (leftNode) walk(leftNode);
+            } else if (node.type === 'RestElement') {
+                const argNode = IRUtils.resolveRef(node, node.props.argument);
+                if (argNode) walk(argNode);
+            }
+        };
+        walk(patternNode);
+        return results;
+    }
 }
+

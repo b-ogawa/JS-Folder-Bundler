@@ -194,8 +194,17 @@ export class CostEstimator {
                         for (const c of cases) casesCost += calcChild(c, nodeMap, calc);
                     }
                     return (isTerserEnabled ? 6 : 8) + calcChild(n.props['discriminant'], nodeMap, calc) + 4 + casesCost;
-                case 'SwitchCase':
-                    return (n.props['test'] ? (isTerserEnabled ? 4 : 5) + calcChild(n.props['test'], nodeMap, calc) : (isTerserEnabled ? 6 : 7)) + 1 + n.children.reduce((acc, c) => acc + calc(c) + 1, 0);
+                case 'SwitchCase': {
+                    const testCost = n.props['test'] ? (isTerserEnabled ? 4 : 5) + calcChild(n.props['test'], nodeMap, calc) : (isTerserEnabled ? 6 : 7);
+                    let consequentCost = 0;
+                    const consequent = n.props['consequent'];
+                    if (Array.isArray(consequent)) {
+                        for (const stmt of consequent) {
+                            consequentCost += calcChild(stmt, nodeMap, calc) + 1;
+                        }
+                    }
+                    return testCost + 1 + consequentCost;
+                }
                 case 'LabeledStatement':
                     return calcChild(n.props['label'], nodeMap, calc) + 1 + calcChild(n.props['body'], nodeMap, calc);
                 

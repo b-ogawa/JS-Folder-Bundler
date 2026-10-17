@@ -7,6 +7,7 @@ import { IdentifierRenameRule } from '../rules/IdentifierRenameRule';
 import { UrlConstructorRule } from '../rules/UrlConstructorRule';
 import { WorkerConstructorRule } from '../rules/WorkerConstructorRule';
 import { ImportScriptsRule } from '../rules/ImportScriptsRule';
+import { IRUtils } from '../../../../../source_analyzer/ir_converter/IRUtils';
 
 export class TransformASTNodesStage implements PipelineStage<MergeContext> {
     public readonly name = 'TransformASTNodesStage';
@@ -117,7 +118,8 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
                                                         const keyNode: IRNode = { type: 'Identifier', irNodeId: genId(), props: { name: expName }, children: [] };
                                                         
                                                         const actualDeclId = context.extImportRedirects.get(expDeclId) || expDeclId;
-                                                        const valName = context.renameJobs.get(actualDeclId) || 'unknown'; 
+                                                        const targetInfo = context.allTopLevelDecls.get(actualDeclId);
+                                                        const valName = context.renameJobs.get(actualDeclId) || (targetInfo ? targetInfo.varName : expName); 
                                                         
                                                         const valNode: IRNode = { 
                                                             type: 'Identifier', 
@@ -280,13 +282,6 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
 
                     const assignmentStmts: IRNode[] = [];
 
-                    const cloneNode = (n: IRNode): IRNode => {
-                        const newId = context.getDeterministicId('ir_clone');
-                        const newChildren = n.children ? n.children.map(cloneNode) : [];
-                        const newProps = n.props ? { ...n.props } : {};
-                        return { type: n.type, irNodeId: newId, props: newProps, children: newChildren };
-                    };
-
                     const decls = stmt.props.declarations || [];
                     for (const dRef of decls) {
                         if (dRef && dRef.type === 'ref') {
@@ -295,46 +290,59 @@ export class TransformASTNodesStage implements PipelineStage<MergeContext> {
                                 const idRef = dNode.props.id;
                                 const initRef = dNode.props.init;
 
-                                const newDNodeId = genId();
-                                const newDNode: IRNode = {
-                                    type: 'VariableDeclarator',
-                                    irNodeId: newDNodeId,
-                                    props: {
-                                        id: idRef,
-                                        init: null
-                                    },
-                                    children: []
-                                };
-                                
                                 let idNode: IRNode | undefined;
                                 if (idRef && idRef.type === 'ref') {
                                     idNode = dNode.children.find(c => c.irNodeId === idRef.irNodeId);
-                                    if (idNode) {
-                                        newDNode.children.push(idNode);
-                                    }
                                 }
-                                
-                                declNode.props.declarations.push({ type: 'ref', irNodeId: newDNodeId });
-                                declNode.children.push(newDNode);
+                                if (!idNode) continue;
+
+                                const boundIdentifiers = IRUtils.extractPatternIdentifiers(idNode);
+                                for (const ident of boundIdentifiers) {
+                                    const origDeclId = refToDeclMap.get(ident.irNodeId) || ident.irNodeId;
+                                    const newDeclId = genId();
+                                    const declIdentNode: IRNode = {
+                                        type: 'Identifier',
+                                        irNodeId: newDeclId,
+                                        props: { ...ident.props, _declId: origDeclId },
+                                        children: []
+                                    };
+                                    refToDeclMap.set(newDeclId, origDeclId);
+
+                                    const newDNodeId = genId();
+                                    const newDNode: IRNode = {
+                                        type: 'VariableDeclarator',
+                                        irNodeId: newDNodeId,
+                                        props: {
+                                            id: { type: 'ref', irNodeId: newDeclId },
+                                            init: null
+                                        },
+                                        children: [declIdentNode]
+                                    };
+                                    declNode.props.declarations.push({ type: 'ref', irNodeId: newDNodeId });
+                                    declNode.children.push(newDNode);
+                                }
 
                                 if (initRef && initRef.type === 'ref') {
                                     const initNode = dNode.children.find(c => c.irNodeId === initRef.irNodeId);
-                                    if (idRef && idRef.type === 'ref' && idNode && initNode) {
+                                    if (initNode) {
                                         const assignId = genId();
                                         const exprStmtId = genId();
 
-                                        const clonedIdNode = cloneNode(idNode);
-                                        const clonedInitNode = cloneNode(initNode);
+                                        for (const ident of boundIdentifiers) {
+                                            const origDeclId = refToDeclMap.get(ident.irNodeId) || ident.irNodeId;
+                                            ident.props = { ...ident.props, _declId: origDeclId };
+                                            refToDeclMap.set(ident.irNodeId, origDeclId);
+                                        }
 
                                         const assignNode: IRNode = {
                                             type: 'AssignmentExpression',
                                             irNodeId: assignId,
                                             props: {
                                                 operator: '=',
-                                                left: { type: 'ref', irNodeId: clonedIdNode.irNodeId },
-                                                right: { type: 'ref', irNodeId: clonedInitNode.irNodeId }
+                                                left: { type: 'ref', irNodeId: idNode.irNodeId },
+                                                right: { type: 'ref', irNodeId: initNode.irNodeId }
                                             },
-                                            children: [clonedIdNode, clonedInitNode]
+                                            children: [idNode, initNode]
                                         };
 
                                         const exprStmtNode: IRNode = {

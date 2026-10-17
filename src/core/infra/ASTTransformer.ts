@@ -25,7 +25,11 @@ export class ASTTransformer<TContext> {
             // 1. ルールがマッチした場合は早期に適用し、自動での子ノード走査はスキップする（ショートサーキット）
             for (const rule of this.rules) {
                 if (rule.match(node, context)) {
-                    return rule.transform(node, context, walk, parent);
+                    const transformedNode = rule.transform(node, context, walk, parent);
+                    if (transformedNode && transformedNode.irNodeId !== node.irNodeId && !transformedNode.props._originalId) {
+                        transformedNode.props._originalId = node.irNodeId;
+                    }
+                    return transformedNode;
                 }
             }
 

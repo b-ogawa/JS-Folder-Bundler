@@ -6,6 +6,7 @@ import { ConstantResolver } from '../../../../../source_analyzer/scope_analyzer/
 export class UrlConstructorRule implements ASTTransformerRule<MergeContext> {
     public match(node: IRNode, context: MergeContext): boolean {
         if (node.type !== 'NewExpression') return false;
+        if (!context.workerEntryBases || context.workerEntryBases.size === 0) return false;
 
         const calleeRef = node.props['callee'];
         if (!calleeRef || calleeRef.type !== 'ref') return false;
@@ -19,11 +20,8 @@ export class UrlConstructorRule implements ASTTransformerRule<MergeContext> {
         const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId);
         if (!firstArgNode) return false;
 
-        const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath);
-        if (!currentTree) return false;
-
-        const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map<string, string>();
-        const resolver = new ConstantResolver(currentTree, refToDeclMap);
+        const resolver = context.getConstantResolver(context.currentFilePath);
+        if (!resolver) return false;
 
         const resolvedUrlArg = resolver.resolve(firstArgNode);
         if (!resolvedUrlArg || (resolvedUrlArg.type !== 'StringLiteral' && resolvedUrlArg.type !== 'Literal')) return false;
@@ -34,7 +32,7 @@ export class UrlConstructorRule implements ASTTransformerRule<MergeContext> {
         const resolved = context.resolvePath(context.currentFilePath, val);
         const base = context.getBase(resolved);
 
-        return !!context.workerEntryBases && context.workerEntryBases.has(base);
+        return context.workerEntryBases.has(base);
     }
 
     public transform(
@@ -47,9 +45,8 @@ export class UrlConstructorRule implements ASTTransformerRule<MergeContext> {
         const args = node.props['arguments'] || [];
         const firstArgNode = node.children.find(c => c.irNodeId === args[0].irNodeId)!;
 
-        const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath)!;
-        const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map<string, string>();
-        const resolver = new ConstantResolver(currentTree, refToDeclMap);
+        const resolver = context.getConstantResolver(context.currentFilePath);
+        if (!resolver) return node;
         const resolvedUrlArg = resolver.resolve(firstArgNode);
         const val = resolvedUrlArg.props['value'] as string;
 

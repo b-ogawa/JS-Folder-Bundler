@@ -1,7 +1,9 @@
 import { IRRoot, IRNode, IRScopeInfo } from '../../../../source_analyzer/ir_converter/ASTtoIRConverter';
 import { ModuleInfo } from '../../types';
+import { ConstantResolver } from '../../../../source_analyzer/scope_analyzer/ConstantResolver';
 
 export class MergeContext {
+    private constantResolverCache = new Map<string, ConstantResolver>();
     // 1. 静的なインプット
     public irTrees: IRRoot[];
     public modules: Map<string, ModuleInfo>;
@@ -95,5 +97,17 @@ export class MergeContext {
             this.chunkIdMap.set(base, `chunk_${base.replace(/[^a-zA-Z0-9]/g, '_')}_${this.chunkIdMap.size}`);
         }
         return this.chunkIdMap.get(base)!;
+    }
+
+    public getConstantResolver(filePath: string): ConstantResolver | null {
+        if (this.constantResolverCache.has(filePath)) {
+            return this.constantResolverCache.get(filePath)!;
+        }
+        const tree = this.irTrees.find(t => t.filePath === filePath);
+        if (!tree) return null;
+        const refToDeclMap = this.refToDeclMaps.get(filePath) || new Map<string, string>();
+        const resolver = new ConstantResolver(tree, refToDeclMap);
+        this.constantResolverCache.set(filePath, resolver);
+        return resolver;
     }
 }

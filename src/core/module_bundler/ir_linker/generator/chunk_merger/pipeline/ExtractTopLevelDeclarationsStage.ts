@@ -1,6 +1,7 @@
 import { IRNode } from '../../../../../source_analyzer/ir_converter/ASTtoIRConverter';
 import { PipelineStage } from '../../../../../infra/Pipeline';
 import { MergeContext } from '../MergeContext';
+import { IRUtils } from '../../../../../source_analyzer/ir_converter/IRUtils';
 
 export class ExtractTopLevelDeclarationsStage implements PipelineStage<MergeContext> {
     public readonly name = 'ExtractTopLevelDeclarationsStage';
@@ -20,12 +21,15 @@ export class ExtractTopLevelDeclarationsStage implements PipelineStage<MergeCont
                             const decltorNode = declNode.children.find(c => c.irNodeId === decltorRef.irNodeId);
                             if (decltorNode && decltorNode.props.id && decltorNode.props.id.type === 'ref') {
                                 const idNode = decltorNode.children.find(c => c.irNodeId === decltorNode.props.id.irNodeId);
-                                if (idNode && idNode.type === 'Identifier') {
-                                    context.allTopLevelDecls.set(idNode.irNodeId, { 
-                                        varName: idNode.props.name as string, 
-                                        declId: idNode.irNodeId, 
-                                        filePath: mod.filePath 
-                                    });
+                                if (idNode) {
+                                    const boundIdentifiers = IRUtils.extractPatternIdentifiers(idNode);
+                                    for (const ident of boundIdentifiers) {
+                                        context.allTopLevelDecls.set(ident.irNodeId, {
+                                            varName: ident.props.name as string,
+                                            declId: ident.irNodeId,
+                                            filePath: mod.filePath
+                                        });
+                                    }
                                 }
                             }
                         }

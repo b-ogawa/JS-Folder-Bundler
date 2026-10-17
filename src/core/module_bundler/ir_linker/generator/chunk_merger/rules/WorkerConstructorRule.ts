@@ -6,11 +6,12 @@ import { WorkerDetector } from '../../../../dependency_extractor/WorkerDetector'
 
 export class WorkerConstructorRule implements ASTTransformerRule<MergeContext> {
     public match(node: IRNode, context: MergeContext): boolean {
-        const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath);
-        if (!currentTree) return false;
+        // 早期リターン：対象ノード型以外や Worker 定義がない場合はスキップ
+        if (node.type !== 'NewExpression' && node.type !== 'CallExpression') return false;
+        if (!context.workerEntryBases || context.workerEntryBases.size === 0) return false;
 
-        const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map<string, string>();
-        const resolver = new ConstantResolver(currentTree, refToDeclMap);
+        const resolver = context.getConstantResolver(context.currentFilePath);
+        if (!resolver) return false;
 
         const ref = WorkerDetector.detectWorkerPattern(node, resolver);
         if (!ref || !ref.rawPath || (ref.kind !== 'Worker' && ref.kind !== 'SharedWorker')) return false;
@@ -20,9 +21,7 @@ export class WorkerConstructorRule implements ASTTransformerRule<MergeContext> {
         const base = context.getBase(resolved);
         const isExisting = context.modules.has(base) || context.modules.has(base + '/index') || context.fileExists(resolved);
 
-        if (!isExisting) return false;
-
-        return !!context.workerEntryBases && context.workerEntryBases.has(base);
+        return isExisting && context.workerEntryBases.has(base);
     }
 
     public transform(
@@ -31,9 +30,8 @@ export class WorkerConstructorRule implements ASTTransformerRule<MergeContext> {
         walk: (n: IRNode, parent?: IRNode) => IRNode,
         parent?: IRNode
     ): IRNode {
-        const currentTree = context.irTrees.find(t => t.filePath === context.currentFilePath)!;
-        const refToDeclMap = context.refToDeclMaps.get(context.currentFilePath) || new Map<string, string>();
-        const resolver = new ConstantResolver(currentTree, refToDeclMap);
+        const resolver = context.getConstantResolver(context.currentFilePath);
+        if (!resolver) return node;
 
         const ref = WorkerDetector.detectWorkerPattern(node, resolver)!;
         const resolved = context.resolvePath(context.currentFilePath, ref.rawPath!);

@@ -89,6 +89,33 @@ function getDefinedVars(node: IRNode, refToDeclMap: Map<string, string>, nodeMap
             const declId = refToDeclMap.get(argNode.irNodeId) || argNode.irNodeId;
             vars.push(declId);
         }
+    } else if (node.type === 'CatchClause') {
+        const paramNode = getChild(node, 'param');
+        if (paramNode) {
+            const rawIds = new Set<string>();
+            extractIdentifiersFromPattern(paramNode, rawIds, nodeMap);
+            for (const rawId of rawIds) {
+                const declId = refToDeclMap.get(rawId) || rawId;
+                vars.push(declId);
+            }
+        }
+    } else if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type)) {
+        const params = node.props['params'];
+        if (Array.isArray(params)) {
+            for (const pRef of params) {
+                if (pRef && pRef.type === 'ref') {
+                    const pNode = nodeMap.get(pRef.irNodeId);
+                    if (pNode) {
+                        const rawIds = new Set<string>();
+                        extractIdentifiersFromPattern(pNode, rawIds, nodeMap);
+                        for (const rawId of rawIds) {
+                            const declId = refToDeclMap.get(rawId) || rawId;
+                            vars.push(declId);
+                        }
+                    }
+                }
+            }
+        }
     }
     return vars;
 }
@@ -102,6 +129,11 @@ function isLVal(node: IRNode, parentMap: Map<string, string>, nodeMap: Map<strin
     if (parent.type === 'VariableDeclarator' && getChild(parent, 'id')?.irNodeId === node.irNodeId) return true;
     if (parent.type === 'AssignmentExpression' && getChild(parent, 'left')?.irNodeId === node.irNodeId) return true;
     if (parent.type === 'UpdateExpression' && getChild(parent, 'argument')?.irNodeId === node.irNodeId) return true;
+    if (parent.type === 'CatchClause' && getChild(parent, 'param')?.irNodeId === node.irNodeId) return true;
+    if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(parent.type)) {
+        const params = parent.props['params'];
+        if (Array.isArray(params) && params.some((p: any) => p && p.irNodeId === node.irNodeId)) return true;
+    }
     
     let curr: IRNode | undefined = parent;
     let childId = node.irNodeId;

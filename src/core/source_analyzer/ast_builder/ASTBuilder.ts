@@ -1,3 +1,5 @@
+import { JsoncUtils } from '../../utils/JsoncUtils';
+
 interface JSXConfig {
     factory?: string;
     fragment?: string;
@@ -7,75 +9,61 @@ interface JSXConfig {
 }
 
 export class ASTBuilder {
-    private static inferJSXConfig(vfs?: any): JSXConfig {
+    private static inferJSXConfig(vfs?: any, sourceCode?: string): JSXConfig {
         const config: JSXConfig = {};
-        if (!vfs) return config;
 
-        // 1. Try to read tsconfig.json
-        const tsconfigContent = typeof vfs.read === 'function' 
-            ? (vfs.read('tsconfig.json') || vfs.read('/tsconfig.json'))
-            : null;
-
-        if (tsconfigContent) {
-            try {
-                const placeholders: string[] = [];
-                const stringRegex = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g;
-                let cleaned = tsconfigContent.replace(stringRegex, (match) => {
-                    const id = `___JSONC_STR_${placeholders.length}___`;
-                    placeholders.push(match);
-                    return id;
-                });
-                cleaned = cleaned.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-                for (let i = placeholders.length - 1; i >= 0; i--) {
-                    cleaned = cleaned.replace(`___JSONC_STR_${i}___`, () => placeholders[i]);
-                }
-                const parsed = JSON.parse(cleaned);
-                const compilerOptions = parsed?.compilerOptions;
-                if (compilerOptions) {
-                    if (compilerOptions.jsxFactory) {
-                        config.factory = compilerOptions.jsxFactory;
-                    }
-                    if (compilerOptions.jsxFragmentFactory) {
-                        config.fragment = compilerOptions.jsxFragmentFactory;
-                    }
-                    if (compilerOptions.jsx) {
-                        const jsx = String(compilerOptions.jsx).toLowerCase();
-                        if (jsx.includes('react-jsx')) {
-                            config.runtime = 'automatic';
-                        } else if (jsx === 'preserve' || jsx === 'react') {
-                            config.runtime = 'classic';
+        // 1. tsconfig.json / jsconfig.json の compilerOptions 解析（ルートフォルダプレフィックス対応）
+        if (vfs && typeof vfs.read === 'function') {
+            let tsconfigContent = vfs.read('tsconfig.json') || vfs.read('/tsconfig.json') || vfs.read('jsconfig.json');
+            if (!tsconfigContent && typeof vfs.list === 'function') {
+                const allFiles: string[] = vfs.list();
+                const tcPath = allFiles.find(f => f.endsWith('/tsconfig.json') || f.endsWith('/jsconfig.json'));
+                if (tcPath) tsconfigContent = vfs.read(tcPath);
+            }
+            if (tsconfigContent) {
+                try {
+                    const parsed = JsoncUtils.parse(tsconfigContent);
+                    const compilerOptions = parsed?.compilerOptions;
+                    if (compilerOptions) {
+                        if (compilerOptions.jsxFactory) config.factory = compilerOptions.jsxFactory;
+                        if (compilerOptions.jsxFragmentFactory) config.fragment = compilerOptions.jsxFragmentFactory;
+                        if (compilerOptions.jsxImportSource) config.importSource = compilerOptions.jsxImportSource;
+                        if (compilerOptions.jsx) {
+                            const jsx = String(compilerOptions.jsx).toLowerCase();
+                            if (jsx.includes('react-jsx')) {
+                                config.runtime = 'automatic';
+                            } else if (jsx === 'preserve' || jsx === 'react') {
+                                config.runtime = 'classic';
+                            }
                         }
                     }
-                    if (compilerOptions.jsxImportSource) {
-                        config.importSource = compilerOptions.jsxImportSource;
-                    }
+                } catch (e) {
+                    console.warn('[JSXInference] Failed to parse tsconfig.json:', e);
                 }
-            } catch (e) {
-                console.warn('[JSXInference] Failed to parse tsconfig.json:', e);
             }
         }
 
-        // 2. Try to read package.json
-        const packageContent = typeof vfs.read === 'function'
-            ? (vfs.read('package.json') || vfs.read('/package.json'))
-            : null;
+        // 2. ソースコード内プラグマコメントの静的解析
+        if (sourceCode) {
+            const pragmaMatch = sourceCode.match(/@jsx\s+([^\s*]+)/);
+            if (pragmaMatch) config.factory = pragmaMatch[1];
+            const fragMatch = sourceCode.match(/@jsxFrag\s+([^\s*]+)/);
+            if (fragMatch) config.fragment = fragMatch[1];
+            const importSourceMatch = sourceCode.match(/@jsxImportSource\s+([^\s*]+)/);
+            if (importSourceMatch) config.importSource = importSourceMatch[1];
+            const runtimeMatch = sourceCode.match(/@jsxRuntime\s+(classic|automatic)/);
+            if (runtimeMatch) config.runtime = runtimeMatch[1] as 'classic' | 'automatic';
+        }
 
-        if (packageContent) {
-            try {
-                const parsed = JSON.parse(packageContent);
-                const deps = { ...parsed?.dependencies, ...parsed?.devDependencies };
-                if (deps) {
-                    if (deps['preact']) {
-                        config.factory = config.factory || 'h';
-                        config.fragment = config.fragment || 'Fragment';
-                        config.importSource = config.importSource || 'preact';
-                        config.runtime = config.runtime || 'classic';
-                    } else if (deps['solid-js']) {
-                        config.isSolid = true;
-                    }
-                }
-            } catch (e) {
-                console.warn('[JSXInference] Failed to parse package.json:', e);
+        // 3. インポート状況からのランタイム安全推論
+        if (!config.runtime && sourceCode) {
+            const hasModuleImports = /\bimport\s+(?:[\s\S]*?\s+from\s+)?['"][^'"]+['"]/.test(sourceCode);
+            const hasClassicFactoryImport = /\bimport\s+(?:(?:\*\s+as\s+React\b)|(?:React\b)|(?:\{[^}]*\bh\b[^}]*\}))/.test(sourceCode);
+
+            if (hasModuleImports && !hasClassicFactoryImport) {
+                config.runtime = 'automatic';
+            } else {
+                config.runtime = 'classic';
             }
         }
 
@@ -90,53 +78,74 @@ export class ASTBuilder {
             }
 
             const isTS = filePath.endsWith('.ts') || filePath.endsWith('.tsx');
-            
-            // .js 拡張子でのJSX記述（Create React App等）を許容する。
-            // 念のため、誤って .ts 拡張子でJSXが書かれた場合のヒューリスティック・フォールバックも追加。
-            const isJSX = filePath.endsWith('.jsx') || 
-                          filePath.endsWith('.tsx') || 
-                          filePath.endsWith('.js') ||
-                          (filePath.endsWith('.ts') && /<[A-Za-z]+/.test(sourceCode));
-                          
-            const presets = [];
-            
-            if (isTS) presets.push('typescript');
-             if (isJSX) {
-                const jsxConfig = this.inferJSXConfig(vfs);
-                if (jsxConfig.isSolid && Babel.availablePresets && Babel.availablePresets['solid']) {
-                    presets.push('solid');
+            const isExplicitJSX = filePath.endsWith('.jsx') || filePath.endsWith('.tsx') || filePath.endsWith('.js');
+
+            const buildPresets = (enableJsx: boolean) => {
+                const presets: any[] = [];
+                if (isTS) presets.push('typescript');
+                if (enableJsx) {
+                    const jsxConfig = this.inferJSXConfig(vfs, sourceCode);
+                    if (jsxConfig.isSolid && Babel.availablePresets && Babel.availablePresets['solid']) {
+                        presets.push('solid');
+                    } else {
+                        const reactOpts: any = { runtime: jsxConfig.runtime || 'classic' };
+                        if (jsxConfig.factory) reactOpts.pragma = jsxConfig.factory;
+                        if (jsxConfig.fragment) reactOpts.pragmaFrag = jsxConfig.fragment;
+                        if (jsxConfig.importSource) reactOpts.importSource = jsxConfig.importSource;
+                        presets.push(['react', reactOpts]);
+                    }
+                }
+                return presets;
+            };
+
+            let transformed: any;
+            try {
+                // .ts ファイルは TS ジェネリクス誤爆を防ぐため JSX なしでトランスパイルを試行
+                transformed = Babel.transform(sourceCode, {
+                    filename: filePath,
+                    presets: buildPresets(isExplicitJSX && !filePath.endsWith('.ts')),
+                    ast: false,
+                    code: true,
+                    caller: { name: 'ast-builder', supportsStaticESM: true }
+                });
+            } catch (firstErr) {
+                // .ts ファイルで構文エラーとなった場合のみ、フォールバックとして JSX を有効化して再試行
+                if (filePath.endsWith('.ts')) {
+                    transformed = Babel.transform(sourceCode, {
+                        filename: filePath.replace(/\.ts$/, '.tsx'),
+                        presets: buildPresets(true),
+                        ast: false,
+                        code: true,
+                        caller: { name: 'ast-builder', supportsStaticESM: true }
+                    });
                 } else {
-                    const reactOpts: any = {};
-                    if (jsxConfig.factory) reactOpts.pragma = jsxConfig.factory;
-                    if (jsxConfig.fragment) reactOpts.pragmaFrag = jsxConfig.fragment;
-                    
-                    // ランタイムが明示されていない場合は、UMD環境との互換性を保つため 'classic' を強制する
-                    reactOpts.runtime = jsxConfig.runtime || 'classic';
-                    
-                    if (jsxConfig.importSource) reactOpts.importSource = jsxConfig.importSource;
-                    
-                    presets.push(['react', reactOpts]);
+                    throw firstErr;
                 }
             }
 
-            // 1. まず完全にトランスパイルを実行し、型とJSXを消し去った「ピュアなJS文字列」を得る
-            const transformed = Babel.transform(sourceCode, {
-                filename: filePath,
-                presets,
-                ast: false, 
-                code: true,
-                caller: { name: 'ast-builder', supportsStaticESM: true } 
-            });
-
             const pureJsCode = transformed.code || '';
 
-            // 2. ピュアなJS文字列を、今度はプラグインなしで純粋にパースしてクリーンなASTを得る
+            let parserSourceType: 'module' | 'script' | 'unambiguous' = 'unambiguous';
+            if (vfs && typeof vfs.read === 'function') {
+                const inlineMetaStr = vfs.read('_meta_inline_scripts.json');
+                if (inlineMetaStr) {
+                    try {
+                        const inlineList = JSON.parse(inlineMetaStr);
+                        const matched = inlineList.find((item: any) => item.path === filePath);
+                        if (matched) {
+                            parserSourceType = matched.isModule ? 'module' : 'script';
+                        }
+                    } catch {}
+                }
+            }
+
+            // ピュアなJS文字列をクリーンなASTへパース
             const astResult = Babel.transform(pureJsCode, {
                 filename: filePath.replace(/\.(ts|tsx|jsx)$/, '.js'),
-                presets: [], 
+                presets: [],
                 ast: true,
-                code: false, 
-                parserOpts: { sourceType: 'unambiguous' }
+                code: false,
+                parserOpts: { sourceType: parserSourceType }
             });
 
             if (!astResult || !astResult.ast) {

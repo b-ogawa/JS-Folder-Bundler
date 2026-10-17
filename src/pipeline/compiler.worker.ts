@@ -21,17 +21,19 @@ try {
 }
 
 // グローバルエラーのハンドリング
+let currentActiveRequestId: string | null = null;
+
 self.addEventListener('error', (e) => {
     console.error('[Worker Global Error]', e);
     self.postMessage({
-        type: 'error', requestId: 'unknown',
+        type: 'error', requestId: currentActiveRequestId || 'unknown',
         error: { message: `[Worker Global Error] ${e.message} (File: ${e.filename}, Line: ${e.lineno})`, stack: e.error?.stack || '' }
     });
 });
 self.addEventListener('unhandledrejection', (e) => {
     console.error('[Worker Unhandled Rejection]', e);
     self.postMessage({
-        type: 'error', requestId: 'unknown',
+        type: 'error', requestId: currentActiveRequestId || 'unknown',
         error: { message: `[Worker Unhandled Rejection] ${e.reason?.message || String(e.reason)}`, stack: e.reason?.stack || '' }
     });
 });
@@ -39,6 +41,7 @@ self.addEventListener('unhandledrejection', (e) => {
 // 3. メッセージハンドラ
 self.onmessage = async (e: MessageEvent<any>) => {
     const reqId = e.data?.requestId || 'unknown';
+    currentActiveRequestId = reqId;
     const logger = (log: { type: 'info' | 'success' | 'error'; msg: string }) => {
         self.postMessage({ type: 'log', requestId: reqId, log });
     };
@@ -71,7 +74,7 @@ self.onmessage = async (e: MessageEvent<any>) => {
             if (htmlContent) originalSize += new Blob([htmlContent]).size;
         }
 
-        const worldCompiler = new WorldCompiler(vfs, config, filterOptions, logger);
+        const worldCompiler = new WorldCompiler(vfs, config, filterOptions, logger, irTrees);
 
         // インラインスクリプトの最適化と圧縮 (WorldCompiler + VariableMangler)
         const inlineMetaStr = vfs.read('_meta_inline_scripts.json');
@@ -102,9 +105,10 @@ self.onmessage = async (e: MessageEvent<any>) => {
         }
 
         const cleanCode = jsCodeStr.trim();
+        const isModule = /(?:^|\s)(?:import|export)\s/.test(cleanCode) || externalImportsSet.size > 0 || actualMode !== 'direct';
         if (cleanCode === '') {
             jsCodeStr = '';
-        } else if (config.addStrict && !cleanCode.startsWith('"use strict"') && !cleanCode.startsWith("'use strict'")) {
+        } else if (config.addStrict && !isModule && !cleanCode.startsWith('"use strict"') && !cleanCode.startsWith("'use strict'")) {
             jsCodeStr = '"use strict";\n' + jsCodeStr;
         }
 

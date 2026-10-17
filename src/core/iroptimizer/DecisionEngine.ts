@@ -1,19 +1,32 @@
 import { CompilationState } from './1_domain/state/CompilationState';
 import { CostEstimator } from './1_domain/utils/CostEstimator';
 
-function getIRSignature(node: any): string {
+function getIRSignature(node: any, childIndexMap?: Map<string, number>): string {
     if (!node || typeof node !== 'object') {
         return String(node);
     }
     if (Array.isArray(node)) {
-        return `[${node.map(getIRSignature).join(',')}]`;
+        return `[${node.map(item => getIRSignature(item, childIndexMap)).join(',')}]`;
+    }
+    if (node.type === 'ref') {
+        const idx = childIndexMap ? childIndexMap.get(node.irNodeId) : undefined;
+        return idx !== undefined ? `{ref:#${idx}}` : `{ref:${node.irNodeId}}`;
     }
     const parts: string[] = [];
     if (node.type) {
         parts.push(`t:${node.type}`);
     }
     if (node.props) {
-        parts.push(`p:${getIRSignature(node.props)}`);
+        const localIndexMap = new Map<string, number>();
+        if (Array.isArray(node.children)) {
+            for (let i = 0; i < node.children.length; i++) {
+                const c = node.children[i];
+                if (c && c.irNodeId) {
+                    localIndexMap.set(c.irNodeId, i);
+                }
+            }
+        }
+        parts.push(`p:${getIRSignatureProps(node.props, localIndexMap)}`);
     }
     if (node.children) {
         parts.push(`c:${getIRSignature(node.children)}`);
@@ -21,10 +34,26 @@ function getIRSignature(node: any): string {
     if (parts.length === 0) {
         const keys = Object.keys(node).sort();
         for (const k of keys) {
-            if (k !== 'id') {
-                parts.push(`${k}:${getIRSignature(node[k])}`);
+            if (k !== 'id' && !k.startsWith('_')) {
+                parts.push(`${k}:${getIRSignature(node[k], childIndexMap)}`);
             }
         }
+    }
+    return `{${parts.join(',')}}`;
+}
+
+function getIRSignatureProps(props: any, childIndexMap: Map<string, number>): string {
+    if (!props || typeof props !== 'object') {
+        return String(props);
+    }
+    if (Array.isArray(props)) {
+        return `[${props.map(item => getIRSignatureProps(item, childIndexMap)).join(',')}]`;
+    }
+    const parts: string[] = [];
+    const keys = Object.keys(props).sort();
+    for (const k of keys) {
+        if (k.startsWith('_')) continue;
+        parts.push(`${k}:${getIRSignature(props[k], childIndexMap)}`);
     }
     return `{${parts.join(',')}}`;
 }

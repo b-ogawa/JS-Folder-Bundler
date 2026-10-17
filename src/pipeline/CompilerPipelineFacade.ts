@@ -16,6 +16,8 @@ export class CompilerPipelineFacade {
     private static currentRequestId: string | null = null;
     // 3. メッセージ通信用のシーケンシャルカウンター
     private static messageCounter: number = 0;
+    // 4. 前回の未完了コンパイル要求の reject ハンドラ
+    private static activeReject: ((reason?: any) => void) | null = null;
 
     private static getOrCreateWorker(): Worker {
         if (!this.workerInstance) {
@@ -30,6 +32,13 @@ export class CompilerPipelineFacade {
 
     async compile(state: AppState, logger: (log: CompileLog) => void): Promise<{code: string, stats: any}> {
         return new Promise(async (resolve, reject) => {
+            // 前回の未完了リクエストが存在する場合はキャンセル
+            if (CompilerPipelineFacade.activeReject) {
+                CompilerPipelineFacade.activeReject(new Error('Compilation cancelled by newer request'));
+                CompilerPipelineFacade.activeReject = null;
+            }
+            CompilerPipelineFacade.activeReject = reject;
+
             try {
                 logger({ type: 'info', msg: 'Initializing Compiler Pipeline' });
                 
@@ -110,6 +119,13 @@ export class CompilerPipelineFacade {
                 worker.onmessage = (e: MessageEvent) => {
                     const data = e.data;
                     if (data.requestId !== CompilerPipelineFacade.currentRequestId) {
+                        if (data.requestId === 'unknown' && data.type === 'error') {
+                            const errorMsg = `Worker Global Error: ${data.error?.message || 'Unknown error'}\nStack: ${data.error?.stack || ''}`;
+                            logger({ type: 'error', msg: errorMsg });
+                            CompilerPipelineFacade.activeReject = null;
+                            reject(new Error(data.error?.message || 'Worker Global Error'));
+                            return;
+                        }
                         logger({ type: 'error', msg: `[Facade] Message ignored due to requestId mismatch (Expected: ${CompilerPipelineFacade.currentRequestId}, Got: ${data.requestId}). Type: ${data.type}` });
                         if (data.type === 'error') {
                             logger({ type: 'error', msg: `[Facade] Ignored Error Content: ${data.error?.message}` });
@@ -120,9 +136,14 @@ export class CompilerPipelineFacade {
                     if (data.type === 'log') {
                         logger(data.log);
                     } else if (data.type === 'success') {
+                        CompilerPipelineFacade.activeReject = null;
                         const { jsCodeStr, serializedVfs, originalSize, externalImports } = data.result;
                         const updatedVfs = VirtualFileSystem.fromSerialized(serializedVfs);
                         
+                        logger({ type: 'info', msg: `[Multiplex Debug] JS Bundle Length: ${jsCodeStr.length} chars, External Imports: [${externalImports.join(', ')}]` });
+                        logger({ type: 'info', msg: `[Multiplex Debug] VFS Files: [${ updatedVfs.list().join(', ') }]` });
+                        logger({ type: 'info', msg: `[Multiplex Debug] Extracted CSS Meta: ${updatedVfs.read('_meta_extracted_css.json') || 'none'}` });
+
                         logger({ type: 'info', msg: 'Recombining assets (Multiplexing)...' });
                         const compressorConfig = {
                             ...state.config,
@@ -140,6 +161,7 @@ export class CompilerPipelineFacade {
                         logger({ type: 'success', msg: 'Compilation complete' });
                         resolve({ code: outputCode, stats: { originalSize, finalSize } });
                     } else if (data.type === 'error') {
+                        CompilerPipelineFacade.activeReject = null;
                         const errorMsg = `Worker Error: ${data.error.message}\nStack: ${data.error.stack || ''}`;
                         logger({ type: 'error', msg: errorMsg });
                         reject(new Error(data.error.message));
@@ -147,6 +169,7 @@ export class CompilerPipelineFacade {
                 };
 
                 worker.onerror = (err: any) => {
+                    CompilerPipelineFacade.activeReject = null;
                     // messageが空の場合にオブジェクト全体をシリアライズして原因を特定する
                     const errMsg = err.message || (err.error && err.error.message) || JSON.stringify(err, ['message', 'filename', 'lineno', 'colno', 'type']);
                     logger({ type: 'error', msg: `Worker internal process error: ${errMsg}` });
@@ -166,11 +189,13 @@ export class CompilerPipelineFacade {
                     });
                     logger({ type: 'info', msg: '[Facade] Data successfully dispatched to Worker.' });
                 } catch (postErr: any) {
+                    CompilerPipelineFacade.activeReject = null;
                     logger({ type: 'error', msg: `[Facade] Failed to postMessage to Worker. Serialization error? ${postErr.message}` });
                     reject(postErr);
                 }
 
             } catch (err: any) {
+                CompilerPipelineFacade.activeReject = null;
                 logger({ type: 'error', msg: `Error: ${err.message}` });
                 reject(err);
             }

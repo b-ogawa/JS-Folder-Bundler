@@ -62,8 +62,14 @@ export class AssetExtractorFacade {
                         } else {
                             const content = script.textContent || '';
                             if (content.trim()) {
-                                // 古い importmap は抽出せずに消去してリセットする
+                                // 1. 既存の importmap を退避
                                 if (typeAttr === 'importmap') {
+                                    try {
+                                        const parsedMap = JSON.parse(content);
+                                        if (parsedMap && parsedMap.imports) {
+                                            vfs.write('_meta_importmap.json', JSON.stringify(parsedMap.imports));
+                                        }
+                                    } catch {}
                                     script.remove();
                                     return;
                                 }
@@ -73,11 +79,9 @@ export class AssetExtractorFacade {
                                     return;
                                 }
 
-                                const isTS = typeAttr.includes('ts') || typeAttr.includes('typescript') || content.includes(': number') || content.includes(': string') || content.includes('interface ') || content.includes('type ');
-                                const isJSX = content.includes('React.') || /<[A-Z][A-Za-z0-9]*\s*\/?>/.test(content);
-                                                                let ext = '.js';
-                                if (isTS) ext = isJSX ? '.tsx' : '.ts';
-                                else if (isJSX) ext = '.jsx';
+                                const isExplicitTS = typeAttr.includes('ts') || typeAttr.includes('typescript');
+                                const isModule = typeAttr === 'module';
+                                const ext = isExplicitTS ? '.tsx' : '.js';
 
                                 const namespace = config.htmlEntry.replace(/[^a-zA-Z0-9_]/g, '_');
                                 const inlinePath = `_inline_script_${namespace}_${idx}${ext}`;
@@ -87,9 +91,10 @@ export class AssetExtractorFacade {
                                 const placeholder = `___INLINE_SCRIPT_${namespace}_${idx}___`;
                                 script.textContent = placeholder;
                                 
+                                // 2. isModule フラグをメタデータに記録
                                 const metaStr = vfs.read('_meta_inline_scripts.json');
                                 const inlineList = metaStr ? JSON.parse(metaStr) : [];
-                                inlineList.push({ id: `${namespace}_${idx}`, placeholder, path: inlinePath });
+                                inlineList.push({ id: `${namespace}_${idx}`, placeholder, path: inlinePath, isModule });
                                 vfs.write('_meta_inline_scripts.json', JSON.stringify(inlineList));
                             }
                         }
@@ -120,6 +125,7 @@ export class AssetExtractorFacade {
                     // Write back the cleaned HTML (without the extracted tags) and the metadata
                     vfs.write(config.htmlEntry, cleanedHtml);
                     vfs.write('_meta_extracted_js.json', JSON.stringify(jsEntries));
+                    vfs.write('_meta_extracted_css.json', JSON.stringify(cssEntries));
                     
                     console.log(`[AssetExtractorFacade] Successfully parsed HTML entry '${config.htmlEntry}':`, {
                         jsEntries,

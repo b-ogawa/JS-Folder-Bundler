@@ -73,7 +73,8 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                             var OriginalWorker = _g.Worker;
                             _g.Worker = function(url, options) {
                                 var intercepted = getInterceptedUrl(url, false);
-                                return new OriginalWorker(intercepted || url, options);
+                                var opts = intercepted ? Object.assign({ type: 'module' }, options) : options;
+                                return new OriginalWorker(intercepted || url, opts);
                             };
                             _g.Worker.prototype = OriginalWorker.prototype;
                         }
@@ -82,7 +83,8 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
                             var OriginalSharedWorker = _g.SharedWorker;
                             _g.SharedWorker = function(url, options) {
                                 var intercepted = getInterceptedUrl(url, true);
-                                return new OriginalSharedWorker(intercepted || url, options);
+                                var opts = intercepted ? Object.assign({ type: 'module' }, options) : options;
+                                return new OriginalSharedWorker(intercepted || url, opts);
                             };
                             _g.SharedWorker.prototype = OriginalSharedWorker.prototype;
                         }
@@ -223,7 +225,9 @@ export class AssembleFinalBundleStage implements PipelineStage<MergeContext> {
             const safeChunkId = chunkIdMap.get(workerId) || `chunk_${workerId.replace(/[^a-zA-Z0-9]/g, '_')}`;
             workerBranchesCode += `
                 else if (_chunkId === '${safeChunkId}') {
-                    __INJECT_WORKER_${safeChunkId}__();
+                    (async function() {
+                        __INJECT_WORKER_${safeChunkId}__();
+                    })();
                 }
             `;
         }

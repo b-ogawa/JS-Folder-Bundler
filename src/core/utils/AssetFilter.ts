@@ -1,4 +1,5 @@
 import { VirtualFileSystem } from '../asset_extractor/VirtualFileSystem';
+import { JsoncUtils } from './JsoncUtils';
 
 export interface FilterOptions {
     includeNodeModules?: boolean;
@@ -29,25 +30,22 @@ export class AssetFilter {
             let tsconfigContent = '';
             if (vfs instanceof Map) {
                 tsconfigContent = vfs.get('tsconfig.json') || vfs.get('/tsconfig.json') || '';
+                if (!tsconfigContent) {
+                    for (const [k, v] of vfs.entries()) {
+                        if (k.endsWith('/tsconfig.json')) { tsconfigContent = v; break; }
+                    }
+                }
             } else if (vfs && typeof vfs.read === 'function') {
                 tsconfigContent = vfs.read('tsconfig.json') || vfs.read('/tsconfig.json') || '';
+                if (!tsconfigContent && typeof vfs.list === 'function') {
+                    const tcPath = vfs.list().find((f: string) => f.endsWith('/tsconfig.json'));
+                    if (tcPath) tsconfigContent = vfs.read(tcPath) || '';
+                }
             }
 
             if (tsconfigContent) {
                 try {
-                    // コメント付きJSONを処理するため、簡易的なクリーンアップを行ってパースを試みる
-                    const placeholders: string[] = [];
-                    const stringRegex = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g;
-                    let cleaned = tsconfigContent.replace(stringRegex, (match) => {
-                        const id = `___JSONC_STR_${placeholders.length}___`;
-                        placeholders.push(match);
-                        return id;
-                    });
-                    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-                    for (let i = placeholders.length - 1; i >= 0; i--) {
-                        cleaned = cleaned.replace(`___JSONC_STR_${i}___`, () => placeholders[i]);
-                    }
-                    const config = JSON.parse(cleaned);
+                    const config = JsoncUtils.parse(tsconfigContent);
                     if (config && Array.isArray(config.exclude)) {
                         config.exclude.forEach((pat: string) => {
                             const escaped = pat

@@ -48,11 +48,12 @@ export class IRLinker {
         const refToDeclMaps = new Map<string, Map<string, string>>();
 
         for (const tree of irTrees) {
+            // 匿名 default export の正規化をスコープ解決前に実行
+            TopLevelAnalyzer.normalizeAnonymousExports(tree, getBase);
+
             const refToDeclMap = ScopeResolver.resolve(tree);
             refToDeclMaps.set(tree.filePath, refToDeclMap);
 
-            // 匿名 default export の正規化を事前実行
-            TopLevelAnalyzer.normalizeAnonymousExports(tree, getBase);
             const statements = TopLevelAnalyzer.analyze(tree, refToDeclMap);
             for (const stmt of statements.values()) {
                 if (stmt.chunkReferences) {

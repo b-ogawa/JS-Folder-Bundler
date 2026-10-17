@@ -24,12 +24,16 @@ export class WorldCompiler {
         vfs: VirtualFileSystem,
         config: any,
         filterOptions: any,
-        logger: (log: { type: 'info' | 'success' | 'error'; msg: string }) => void
+        logger: (log: { type: 'info' | 'success' | 'error'; msg: string }) => void,
+        initialIRTrees?: IRRoot[]
     ) {
         this.vfs = vfs;
         this.config = config;
         this.filterOptions = filterOptions;
         this.logger = logger;
+        if (initialIRTrees) {
+            this.parsedIRCache = initialIRTrees;
+        }
 
         PathResolver.setLogger(logger);
     }
@@ -166,7 +170,11 @@ export class WorldCompiler {
 
         let packageJson: any = null;
         try {
-            const pjContent = this.vfs.read('package.json');
+            let pjContent = this.vfs.read('package.json') || this.vfs.read('/package.json');
+            if (!pjContent && typeof this.vfs.list === 'function') {
+                const pjPath = this.vfs.list().find(f => f.endsWith('/package.json'));
+                if (pjPath) pjContent = this.vfs.read(pjPath);
+            }
             if (pjContent) packageJson = JSON.parse(pjContent);
         } catch (err) {}
 
@@ -327,11 +335,41 @@ export class WorldCompiler {
             }
         };
 
-        this.logger({ type: 'info', msg: `Scanning all files for Worker dependencies...` });
+        this.logger({ type: 'info', msg: `Scanning reachable files for Worker dependencies...` });
         const workerPathsSet = new Set<string>();
-        
-        // 解析済みASTファイルを走査しWorker依存を静的に抽出
+
+        // エントリーポイントからモジュール依存関係を辿り到達可能なファイルのみを特定
+        const treeByPath = new Map<string, IRRoot>();
         for (const tree of irTreesForPrep) {
+            treeByPath.set(tree.filePath, tree);
+        }
+
+        const reachableFilePaths = new Set<string>();
+        const queue: string[] = [...paths];
+
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            const tree = treeByPath.get(current);
+            if (!tree || reachableFilePaths.has(tree.filePath)) continue;
+            reachableFilePaths.add(tree.filePath);
+
+            const deps = DependencyExtractor.extract(tree);
+            for (const dep of deps) {
+                try {
+                    const resolved = PathResolver.resolve(tree.filePath, dep, existingFiles, false);
+                    if (treeByPath.has(resolved) && !reachableFilePaths.has(resolved)) {
+                        queue.push(resolved);
+                    }
+                } catch {
+                    // 外部パッケージや未解決パスはスキップ
+                }
+            }
+        }
+
+        // 到達可能なモジュールのみから Worker 依存を静的に抽出
+        for (const filePath of reachableFilePaths) {
+            const tree = treeByPath.get(filePath);
+            if (!tree) continue;
             const rawPaths = WorkerDetector.extractRawWorkerPaths(tree, this.logger);
             for (const p of rawPaths) {
                 try {
@@ -339,7 +377,7 @@ export class WorldCompiler {
                     const resolved = PathResolver.resolve(tree.filePath, p, existingFiles, true);
                     const base = resolved.replace(/\.(js|ts|jsx|tsx)$/, '');
                     const exists = existingFiles.some(f => f.replace(/\.(js|ts|jsx|tsx)$/, '') === base);
-                    
+
                     if (exists) {
                         if (!workerPathsSet.has(resolved)) {
                             workerPathsSet.add(resolved);
@@ -353,7 +391,7 @@ export class WorldCompiler {
                 }
             }
         }
-        
+
         const workerPaths = Array.from(workerPathsSet);
 
         // プレリンク処理の廃止
@@ -364,7 +402,7 @@ export class WorldCompiler {
 
         this.logger({ type: 'info', msg: `Executing unified multi-thread link pipeline for ${cacheKey}` });
         const irTrees = this.cloneIRTrees(this.parsedIRCache);
-        
+
         // 抽出されたWorkerパスを渡してリンクを実行
         const linkedIR = IRLinker.link(irTrees, this.vfs, entryPaths, workerPaths.length > 0 ? workerPaths : undefined, this.logger, this.config.bundleId, parseTemplate);
 
@@ -377,10 +415,9 @@ export class WorldCompiler {
                 if (!Babel) throw new Error("Babel not available");
                 const ast = IRtoASTConverter.convert(funcNode);
                 const { code: funcCode } = Babel.transformFromAst({ type: 'Program', body: [ast] }, '', { presets: [], ast: false });
-                
-                const argStrings = args.map(arg => typeof arg === 'string' ? JSON.stringify(arg) : String(arg));
-                const iifeCode = `return (${funcCode})(${argStrings.join(', ')});`;
-                return new Function(iifeCode)();
+
+                const fn = new Function(`return (${funcCode});`)();
+                return fn(...args);
             };
 
             const optimizerConfig = {

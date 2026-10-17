@@ -1,6 +1,7 @@
 import { VirtualFileSystem } from '../asset_extractor/VirtualFileSystem';
 import { HtmlMinifier } from './HtmlMinifier';
 import { CssMinifier } from './CssMinifier';
+import { PathResolver } from '../module_bundler/path_resolver/PathResolver';
 
 export interface CompressorConfig {
     golfEnabled: boolean;
@@ -42,16 +43,25 @@ const RUNTIME_RULES: RuntimeInjectionRule[] = [
 ];
 
 export class AssetMultiplexer {
+    private static readPackageJson(vfs: VirtualFileSystem): any {
+        try {
+            let pjContent = vfs.read('package.json') || vfs.read('/package.json');
+            if (!pjContent) {
+                const allFiles = typeof vfs.list === 'function' ? vfs.list() : Array.from(vfs.getAll().keys());
+                const pjPath = allFiles.find(f => f === 'package.json' || f.endsWith('/package.json'));
+                if (pjPath) pjContent = vfs.read(pjPath);
+            }
+            if (pjContent) return JSON.parse(pjContent);
+        } catch {}
+        return null;
+    }
+
     private static generateImportUrl(modulePath: string, vfs: VirtualFileSystem, cdnTemplate: string): string {
         if (/^(https?:)?\/\//i.test(modulePath)) {
             return modulePath;
         }
 
-        let packageJson: any = null;
-        try {
-            const pjContent = vfs.read('package.json');
-            if (pjContent) packageJson = JSON.parse(pjContent);
-        } catch (err) {}
+        const packageJson = this.readPackageJson(vfs);
 
         let basePackage = modulePath;
         let subpath = '';
@@ -92,7 +102,16 @@ export class AssetMultiplexer {
     }
 
     private static buildImportMap(externalImports: string[], vfs: VirtualFileSystem, template: string): Record<string, string> {
-        const imports: Record<string, string> = {};
+        let existingImports: Record<string, string> = {};
+        const metaMapStr = vfs.read('_meta_importmap.json');
+        if (metaMapStr) {
+            try {
+                existingImports = JSON.parse(metaMapStr) || {};
+            } catch {}
+        }
+
+        const imports: Record<string, string> = { ...existingImports };
+        const hasPackageJson = !!this.readPackageJson(vfs);
         
         const externalModules = new Set<string>();
         for (const m of externalImports) {
@@ -108,6 +127,9 @@ export class AssetMultiplexer {
         }
         
         for (const modulePath of externalImports) {
+            if (/^(https?:)?\/\//i.test(modulePath)) continue;
+            if (imports[modulePath] && !hasPackageJson) continue;
+
             let url = this.generateImportUrl(modulePath, vfs, template);
             
             let base = '';
@@ -136,24 +158,104 @@ export class AssetMultiplexer {
             }
         }
 
-        const addImplicitSubpath = (basePkg: string, subpath: string) => {
-            if (externalModules.has(basePkg) && !imports[subpath]) {
-                let url = this.generateImportUrl(subpath, vfs, template);
-                const filteredExternal = Array.from(externalModules).filter(m => m !== basePkg).join(',');
-                if (url.includes('esm.sh') && filteredExternal && !url.includes('external=')) {
-                    url += (url.includes('?') ? '&' : '?') + 'external=' + filteredExternal;
-                }
-                imports[subpath] = url;
-            }
-        };
-
-        addImplicitSubpath('react', 'react/jsx-runtime');
-        addImplicitSubpath('react', 'react/jsx-dev-runtime');
-        addImplicitSubpath('preact', 'preact/jsx-runtime');
-        addImplicitSubpath('preact', 'preact/jsx-dev-runtime');
-
-
         return imports;
+    }
+
+    private static resolveCssFiles(vfs: VirtualFileSystem, htmlEntry: string, allFiles: string[]): string[] {
+        let cssFiles: string[] = [];
+        const metaCssStr = vfs.read('_meta_extracted_css.json');
+        if (metaCssStr) {
+            try {
+                const parsed = JSON.parse(metaCssStr);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    for (const rawCssPath of parsed) {
+                        try {
+                            const resolved = PathResolver.resolve(htmlEntry, rawCssPath, allFiles, true);
+                            if (resolved && vfs.read(resolved) !== undefined) {
+                                cssFiles.push(resolved);
+                            } else if (vfs.read(rawCssPath) !== undefined) {
+                                cssFiles.push(rawCssPath);
+                            }
+                        } catch {
+                            if (vfs.read(rawCssPath) !== undefined) {
+                                cssFiles.push(rawCssPath);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
+        // JS/TS 側から import './index.css' されている CSS ファイルも対象に含める
+        for (const f of allFiles) {
+            if (f.endsWith('.css') && !cssFiles.includes(f)) {
+                cssFiles.push(f);
+            }
+        }
+        return cssFiles;
+    }
+
+    private static processCssFiles(
+        vfs: VirtualFileSystem,
+        htmlEntry: string,
+        allFiles: string[],
+        template: string
+    ): { finalCss: string; activeRuntimes: Set<string> } {
+        let mergedCss = '';
+        const importsHoisted: string[] = [];
+        const activeRuntimes = new Set<string>();
+        const cssFiles = this.resolveCssFiles(vfs, htmlEntry, allFiles);
+        
+        for (const cssFile of cssFiles) {
+            let content = vfs.read(cssFile) || '';
+
+            // 1. ランタイムディレクティブ（@import "tailwindcss" や @tailwind 等）の検知と変換
+            for (const rule of RUNTIME_RULES) {
+                if (rule.detectCss && rule.detectCss.test(content)) {
+                    activeRuntimes.add(rule.id);
+                    content = content.replace(new RegExp(rule.detectCss.source, 'g'), '/* build directive removed */');
+                }
+                if (rule.detectFiles && rule.detectFiles.some(df => allFiles.some(f => f === df || f.endsWith('/' + df)))) {
+                    activeRuntimes.add(rule.id);
+                }
+            }
+
+            // 2. 外部 URL (https?://) の @import を先頭へホイスト
+            content = content.replace(/@import\s+(?:url\()?['"]?(https?:\/\/[^'"\)]+)['"]?\)?\s*;/g, (match) => {
+                importsHoisted.push(match);
+                return '/* hoisted external import */';
+            });
+
+            // 3. ローカルまたは明示的な .css パッケージの @import 解決
+            content = content.replace(/@import\s+(?:url\()?['"]([^'"]+)['"]\)?\s*;/g, (match, importPath) => {
+                const trimmed = importPath.trim();
+                if (trimmed.startsWith('.') || trimmed.startsWith('/')) {
+                    try {
+                        const resolved = PathResolver.resolve(cssFile, trimmed, allFiles, true);
+                        const inlined = vfs.read(resolved);
+                        if (inlined !== undefined) {
+                            return inlined;
+                        }
+                    } catch {}
+                    return match;
+                }
+                // 明示的に .css で終わる外部パッケージのみ CDN URL としてホイスト
+                if (trimmed.endsWith('.css')) {
+                    const cdnUrl = this.generateImportUrl(trimmed, vfs, template);
+                    if (cdnUrl && cdnUrl !== trimmed) {
+                        importsHoisted.push(`@import url("${cdnUrl}");`);
+                        return `/* hoisted package css: ${trimmed} */`;
+                    }
+                }
+                return match;
+            });
+
+            if (content.trim()) {
+                mergedCss += `/* ${cssFile} */\n${content}\n`;
+            }
+        }
+        
+        const finalCss = (importsHoisted.join('\n') + '\n' + mergedCss).trim();
+        return { finalCss, activeRuntimes };
     }
 
     static multiplex(jsCode: string, vfs: VirtualFileSystem, htmlEntry: string, config: CompressorConfig): string {
@@ -161,62 +263,37 @@ export class AssetMultiplexer {
         if (!html) return jsCode;
         
         const template = config.cdnTemplate || 'https://esm.sh/[module]@[version]/[path]';
+        const allFiles = typeof vfs.list === 'function' ? vfs.list() : Array.from(vfs.getAll().keys());
 
         try {
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
 
-            if (config.externalImports && config.externalImports.length > 0) {
-                const imports = this.buildImportMap(config.externalImports, vfs, template);
-                
-                const importMapScript = doc.createElement('script');
-                importMapScript.setAttribute('type', 'importmap');
-                importMapScript.textContent = JSON.stringify({ imports }, null, 2);
-                if (doc.head) doc.head.insertBefore(importMapScript, doc.head.firstChild);
-                else if (doc.body) doc.body.insertBefore(importMapScript, doc.body.firstChild);
-                else doc.documentElement.insertBefore(importMapScript, doc.documentElement.firstChild);
+            const hasExternalImports = !!(config.externalImports && config.externalImports.length > 0);
+            const hasExistingImportMap = !!vfs.read('_meta_importmap.json');
+
+            if (hasExternalImports || hasExistingImportMap) {
+                const imports = this.buildImportMap(config.externalImports || [], vfs, template);
+                if (Object.keys(imports).length > 0) {
+                    const importMapScript = doc.createElement('script');
+                    importMapScript.setAttribute('type', 'importmap');
+                    importMapScript.textContent = JSON.stringify({ imports }, null, 2);
+                    if (doc.head) doc.head.insertBefore(importMapScript, doc.head.firstChild);
+                    else if (doc.body) doc.body.insertBefore(importMapScript, doc.body.firstChild);
+                    else doc.documentElement.insertBefore(importMapScript, doc.documentElement.firstChild);
+                }
             }
 
             if (config.htmlOptCss !== false) {
-                let mergedCss = '';
-                const importsHoisted: string[] = [];
-                
-                const allFiles = typeof vfs.list === 'function' ? vfs.list() : Array.from(vfs.getAll().keys());
-                const cssFiles = allFiles.filter(f => f.endsWith('.css'));
-                const activeRuntimes = new Set<string>();
-                
-                for (const cssFile of cssFiles) {
-                    let content = vfs.read(cssFile) || '';
-                    
-                    for (const rule of RUNTIME_RULES) {
-                        if (rule.detectCss && rule.detectCss.test(content)) {
-                            activeRuntimes.add(rule.id);
-                            content = content.replace(new RegExp(rule.detectCss.source, 'g'), '/* build directive removed */');
-                        }
-                        if (rule.detectFiles && rule.detectFiles.some(f => allFiles.includes(f))) {
-                            activeRuntimes.add(rule.id);
-                        }
-                    }
+                const { finalCss, activeRuntimes } = this.processCssFiles(vfs, htmlEntry, allFiles, template);
 
-                    content = content.replace(/@import\s+(?:url\()?['"]?(https?:\/\/[^'"\)]+)['"]?\)?\s*;/g, (match) => {
-                        importsHoisted.push(match);
-                        return '/* hoisted external import */';
-                    });
-
-                    if (content.trim()) {
-                        mergedCss += `/* ${cssFile} */\n${content}\n`;
-                    }
-                }
-                
                 for (const rule of RUNTIME_RULES) {
                     if (activeRuntimes.has(rule.id)) {
                         rule.injectTags(doc);
                     }
                 }
-                
-                const finalCss = importsHoisted.join('\n') + '\n' + mergedCss;
 
-                if (finalCss.trim()) {
+                if (finalCss) {
                     const styleEl = doc.createElement('style');
                     styleEl.textContent = CssMinifier.minify(finalCss);
                     if (doc.head) doc.head.appendChild(styleEl);
@@ -231,16 +308,21 @@ export class AssetMultiplexer {
                     const src = img.getAttribute('src');
                     if (src && !src.startsWith('data:') && !src.startsWith('http://') && !src.startsWith('https://')) {
                         const normalizedSrc = src.replace(/^\.\//, '');
-                        const imageContent = vfs.read(normalizedSrc);
+                        let resolvedImgPath = normalizedSrc;
+                        try {
+                            resolvedImgPath = PathResolver.resolve(htmlEntry, src, allFiles, true) || normalizedSrc;
+                        } catch {}
+                        const imageContent = vfs.read(resolvedImgPath) ?? vfs.read(normalizedSrc);
                         if (imageContent) {
                             if (imageContent.startsWith('data:')) {
                                 img.setAttribute('src', imageContent);
                             } else {
                                 let mimeType = 'image/png';
-                                if (normalizedSrc.endsWith('.jpg') || normalizedSrc.endsWith('.jpeg')) mimeType = 'image/jpeg';
-                                else if (normalizedSrc.endsWith('.gif')) mimeType = 'image/gif';
-                                else if (normalizedSrc.endsWith('.svg')) mimeType = 'image/svg+xml';
-                                else if (normalizedSrc.endsWith('.webp')) mimeType = 'image/webp';
+                                const targetPathForMime = resolvedImgPath || normalizedSrc;
+                                if (targetPathForMime.endsWith('.jpg') || targetPathForMime.endsWith('.jpeg')) mimeType = 'image/jpeg';
+                                else if (targetPathForMime.endsWith('.gif')) mimeType = 'image/gif';
+                                else if (targetPathForMime.endsWith('.svg')) mimeType = 'image/svg+xml';
+                                else if (targetPathForMime.endsWith('.webp')) mimeType = 'image/webp';
 
                                 let base64Data = '';
                                 if (mimeType === 'image/svg+xml') {
@@ -269,12 +351,8 @@ export class AssetMultiplexer {
 
             if (config.htmlOptJs !== false && jsCode.trim() !== '') {
                 const lt = String.fromCharCode(60);
-                
-                // 一貫した bundleId を取得
                 const bundleId = config.bundleId || 'bundle_default';
                 const safeJsCode = jsCode.replace(/<\/script>/gi, lt + '\\/script>');
-                
-                // id="${bundleId}" を付与
                 const scriptTag = `${lt}script type="module" id="${bundleId}">\n${safeJsCode}\n${lt}/script>`;
                 
                 const bodyMatch = resultHtml.match(/<\/body>/i);
@@ -302,38 +380,21 @@ export class AssetMultiplexer {
             console.error('[AssetMultiplexer] Failed to multiplex assets via DOMParser:', e.message);
             
             let importMapTag = '';
-            if (config.externalImports && config.externalImports.length > 0) {
-                const imports = this.buildImportMap(config.externalImports, vfs, template);
-                const lt = String.fromCharCode(60);
-                importMapTag = `${lt}script type="importmap">\n${JSON.stringify({ imports }, null, 2)}\n${lt}/script>\n`;
+            const hasExternalImports = !!(config.externalImports && config.externalImports.length > 0);
+            const hasExistingImportMap = !!vfs.read('_meta_importmap.json');
+
+            if (hasExternalImports || hasExistingImportMap) {
+                const imports = this.buildImportMap(config.externalImports || [], vfs, template);
+                if (Object.keys(imports).length > 0) {
+                    const lt = String.fromCharCode(60);
+                    importMapTag = `${lt}script type="importmap">\n${JSON.stringify({ imports }, null, 2)}\n${lt}/script>\n`;
+                }
             }
 
             let styleTag = '';
             let fallbackRuntimeTags = '';
             if (config.htmlOptCss !== false) {
-                let mergedCss = '';
-                const importsHoisted: string[] = [];
-                const activeRuntimes = new Set<string>();
-                const allFiles = typeof vfs.list === 'function' ? vfs.list() : Array.from(vfs.getAll().keys());
-                const cssFiles = allFiles.filter(f => f.endsWith('.css'));
-                
-                for (const cssFile of cssFiles) {
-                    let content = vfs.read(cssFile) || '';
-                    for (const rule of RUNTIME_RULES) {
-                        if (rule.detectCss && rule.detectCss.test(content)) {
-                            activeRuntimes.add(rule.id);
-                            content = content.replace(new RegExp(rule.detectCss.source, 'g'), '/* build directive removed */');
-                        }
-                        if (rule.detectFiles && rule.detectFiles.some(f => allFiles.includes(f))) {
-                            activeRuntimes.add(rule.id);
-                        }
-                    }
-                    content = content.replace(/@import\s+(?:url\()?['"]?(https?:\/\/[^'"\)]+)['"]?\)?\s*;/g, (match) => {
-                        importsHoisted.push(match);
-                        return '/* hoisted */';
-                    });
-                    if (content.trim()) mergedCss += `/* ${cssFile} */\n${content}\n`;
-                }
+                const { finalCss, activeRuntimes } = this.processCssFiles(vfs, htmlEntry, allFiles, template);
 
                 for (const rule of RUNTIME_RULES) {
                     if (activeRuntimes.has(rule.id)) {
@@ -343,8 +404,7 @@ export class AssetMultiplexer {
                     }
                 }
 
-                const finalCss = importsHoisted.join('\n') + '\n' + mergedCss;
-                if (finalCss.trim()) {
+                if (finalCss) {
                     const lt = String.fromCharCode(60);
                     styleTag = `${lt}style>\n${CssMinifier.minify(finalCss)}\n${lt}/style>\n`;
                 }
@@ -363,10 +423,8 @@ export class AssetMultiplexer {
 
             if (config.htmlOptJs !== false && jsCode.trim() !== '') {
                 const lt = String.fromCharCode(60);
-                
-                // 一貫した bundleId を取得
                 const bundleId = config.bundleId || 'bundle_default';
-                const scriptStart = lt + `script type="module" id="${bundleId}">\n"use strict";\n`;
+                const scriptStart = lt + `script type="module" id="${bundleId}">\n`;
                 const scriptEnd = '\n' + lt + "/script>";
                 const bodyEndRegex = /<\/body>/i;
                 

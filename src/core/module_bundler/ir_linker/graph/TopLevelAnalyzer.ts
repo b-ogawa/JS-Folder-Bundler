@@ -51,6 +51,7 @@ export class TopLevelAnalyzer {
                             const virtualVarId = `virtual_decl_default_${suffix}`;
                             const virtualIdNodeId = `virtual_id_default_${suffix}`;
                             const virtualDecltorId = `virtual_decltor_default_${suffix}`;
+                            const virtualRefIdNodeId = `virtual_ref_default_${suffix}`;
 
                             if (declNode.type === 'FunctionDeclaration') declNode.type = 'FunctionExpression';
                             else if (declNode.type === 'ClassDeclaration') declNode.type = 'ClassExpression';
@@ -67,11 +68,28 @@ export class TopLevelAnalyzer {
                                 children: [virtualDeclarator]
                             };
 
+                            const virtualRefIdNode: IRNode = {
+                                type: 'Identifier',
+                                irNodeId: virtualRefIdNodeId,
+                                props: { name: `_default_anon${suffix}`, _declId: virtualIdNodeId },
+                                children: []
+                            };
+
+                            // ExportDefaultDeclaration の declaration を仮想 Identifier への参照に差し替える
+                            child.props['declaration'] = { type: 'ref', irNodeId: virtualRefIdNodeId };
+                            child.children = [virtualRefIdNode];
+
+                            // Program に仮想 VariableDeclaration を追加し、bodyRefs には宣言と export default の両方を並べる
                             fileProgram.children.push(virtualVarDecl);
-                            bodyRefs[i] = { type: 'ref', irNodeId: virtualVarId };
+                            bodyRefs.splice(i, 1, { type: 'ref', irNodeId: virtualVarId }, { type: 'ref', irNodeId: child.irNodeId });
+                            i++; // 挿入した分インデックスを進める
 
                             if (tree.scopeInfo) {
-                                tree.scopeInfo.bindings.set(virtualIdNodeId, { name: `_default_anon${suffix}`, scopeId: 'root', references: [] });
+                                tree.scopeInfo.bindings.set(virtualIdNodeId, {
+                                    name: `_default_anon${suffix}`,
+                                    scopeId: 'root',
+                                    references: [virtualRefIdNodeId]
+                                });
                             }
                         }
                     }
@@ -202,6 +220,8 @@ export class TopLevelAnalyzer {
             }
         };
 
+        const resolver = new ConstantResolver(tree, refToDeclMap);
+
         for (const ref of bodyRefs) {
             if (!ref || ref.type !== 'ref') continue;
             const child = fileProgram.children.find(c => c.irNodeId === ref.irNodeId);
@@ -302,8 +322,6 @@ export class TopLevelAnalyzer {
             const chunkReferences = new Set<string>();
             const classicImports: string[] = [];
             const dynamicImports: string[] = [];
-            
-            const resolver = new ConstantResolver(tree, refToDeclMap);
 
             IRTraverser.traverse(child, {
                 ImportExpression: (n: IRNode) => {

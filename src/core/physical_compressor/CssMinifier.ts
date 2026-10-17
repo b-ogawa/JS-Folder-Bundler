@@ -3,16 +3,19 @@ export class CssMinifier {
         if (!css) return '';
 
         const placeholders: string[] = [];
-        const stringRegex = /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|url\([^)]+\))/gi;
-        
-        let minified = css.replace(stringRegex, (match) => {
-            const id = `___CSS_STR_${placeholders.length}___`;
-            placeholders.push(match);
-            return id;
-        });
+        // 1パスで文字列・url()を保護しつつコメント(/* ... */)を先に除去する
+        let minified = css.replace(
+            /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|url\([^)]+\))|\/\*[\s\S]*?\*\//gi,
+            (match, protectedToken) => {
+                if (protectedToken) {
+                    const id = `___CSS_STR_${placeholders.length}___`;
+                    placeholders.push(protectedToken);
+                    return id;
+                }
+                return '';
+            }
+        );
 
-        // 1. コメント削除
-        minified = minified.replace(/\/\*[\s\S]*?\*\//g, '');
         // 2. 改行や連続スペースを単一スペースに
         minified = minified.replace(/\s+/g, ' ');
         // 3. { } ; , の前後のスペースを削除（コロンはここでは除外）
@@ -22,7 +25,6 @@ export class CssMinifier {
         // 5. 不要なセミコロンの削除
         minified = minified.replace(/;\}/g, '}');
 
-        // アロー関数で返すことで、コード内の $& や $1 による自己破壊を防ぐ
         for (let i = placeholders.length - 1; i >= 0; i--) {
             minified = minified.replace(`___CSS_STR_${i}___`, () => placeholders[i]);
         }

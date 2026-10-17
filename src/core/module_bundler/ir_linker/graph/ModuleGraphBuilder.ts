@@ -2,11 +2,9 @@ import { IRRoot, IRNode } from '../../../source_analyzer/ir_converter/ASTtoIRCon
 import { ModuleInfo, ImportInfo } from '../types';
 import { TopLevelAnalyzer } from './TopLevelAnalyzer';
 import { PathResolver } from '../../path_resolver/PathResolver';
+import { IRUtils } from '../../../source_analyzer/ir_converter/IRUtils';
 
 export class ModuleGraphBuilder {
-    /**
-     * IRRoot[] からモジュール間の依存構造（ModuleInfo の Map）を構築します。
-     */
     public static build(
         irTrees: IRRoot[],
         entryPaths: Set<string>,
@@ -18,17 +16,15 @@ export class ModuleGraphBuilder {
         const modules = new Map<string, ModuleInfo>();
         const exportsMap = new Map<string, Map<string, string>>();
 
-        // 1. 各モジュールの初期化と匿名 export default の正規化
         for (const tree of irTrees) {
             const basePath = getBase(tree.filePath);
-            // 事前抽出フェーズで正規化処理が完了しているため、重複呼び出しを避けてスキップする
             exportsMap.set(basePath, new Map<string, string>());
         }
 
-        // 2. トポロジカルソート順に従い、再エクスポート関係を解決しながら exportsMap を作成
         for (const tree of irTrees) {
             const moduleBase = getBase(tree.filePath);
             const fileExports = exportsMap.get(moduleBase)!;
+            const refToDeclMap = refToDeclMaps.get(tree.filePath);
 
             const fileProgram = tree.children[0]?.children?.find(c => c.type === 'Program');
             if (!fileProgram) continue;
@@ -44,6 +40,7 @@ export class ModuleGraphBuilder {
                 if (child.type === 'ExportNamedDeclaration') {
                     const sourceRef = child.props['source'];
                     let fromExports: Map<string, string> | undefined;
+
                     if (sourceRef && sourceRef.type === 'ref') {
                         const sourceNode = child.children.find(c => c.irNodeId === sourceRef.irNodeId);
                         if (sourceNode && !isExternalModule(sourceNode.props['value'], tree.filePath)) {
@@ -62,8 +59,11 @@ export class ModuleGraphBuilder {
                                         const decltorNode = declNode.children.find(c => c.irNodeId === decltorRef.irNodeId);
                                         if (decltorNode && decltorNode.props.id && decltorNode.props.id.type === 'ref') {
                                             const idNode = decltorNode.children.find(c => c.irNodeId === decltorNode.props.id.irNodeId);
-                                            if (idNode && idNode.type === 'Identifier') {
-                                                fileExports.set(idNode.props.name as string, idNode.irNodeId);
+                                            if (idNode) {
+                                                const boundIdentifiers = IRUtils.extractPatternIdentifiers(idNode);
+                                                for (const ident of boundIdentifiers) {
+                                                    fileExports.set(ident.props.name as string, ident.irNodeId);
+                                                }
                                             }
                                         }
                                     }
@@ -98,7 +98,8 @@ export class ModuleGraphBuilder {
                                                 fileExports.set(exportedName, targetDeclId);
                                             }
                                         } else {
-                                            fileExports.set(exportedName, localNode.irNodeId);
+                                            const resolvedDeclId = refToDeclMap?.get(localNode.irNodeId) || localNode.irNodeId;
+                                            fileExports.set(exportedName, resolvedDeclId);
                                         }
                                     }
                                 }
@@ -119,7 +120,8 @@ export class ModuleGraphBuilder {
                                 }
                             }
                             if (idNode) {
-                                fileExports.set('default', idNode.irNodeId);
+                                const resolvedDeclId = refToDeclMap?.get(idNode.irNodeId) || idNode.irNodeId;
+                                fileExports.set('default', resolvedDeclId);
                             }
                         }
                     }
@@ -143,7 +145,6 @@ export class ModuleGraphBuilder {
             }
         }
 
-        // 3. 各モジュールのインポート情報、およびトップレベル文の構築
         for (const tree of irTrees) {
             const basePath = getBase(tree.filePath);
             const fileProgram = tree.children[0]?.children?.find(c => c.type === 'Program');
@@ -213,20 +214,18 @@ export class ModuleGraphBuilder {
             const refToDeclMap = refToDeclMaps.get(tree.filePath) || new Map<string, string>();
             const statements = TopLevelAnalyzer.analyze(tree, refToDeclMap);
             const isEntry = entryPaths.has(basePath) || entryPaths.has(basePath + '/index');
-            const modExports = exportsMap.get(basePath) || new Map<string, string>();
 
             modules.set(basePath, {
                 filePath: tree.filePath,
                 basePath,
                 statements,
-                exports: modExports,
+                exports: exportsMap.get(basePath) || new Map<string, string>(),
                 imports,
                 isEntry,
                 tree
             });
         }
 
-        // このフェーズ自体はロギング機能を持たないため、構築されたグラフ情報は呼び出し側のIRLinker側でログ統合される
         return modules;
     }
 }

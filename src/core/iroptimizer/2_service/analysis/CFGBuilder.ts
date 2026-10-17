@@ -89,18 +89,32 @@ export class CFGBuilder {
             if (!node) return;
             if (parentId) parentMap.set(node.irNodeId, parentId);
 
-            // ラベルのキャプチャ
+            // ラベルのキャプチャと制御フローの構築
             if (node.type === 'LabeledStatement') {
                 const labelRef = node.props['label'];
+                let labelName: string | undefined;
                 if (labelRef && labelRef.type === 'ref') {
                     const labelNode = node.children.find(c => c.irNodeId === labelRef.irNodeId);
                     if (labelNode && labelNode.type === 'Identifier') {
-                        pendingLabel = labelNode.props['name'] as string;
+                        labelName = labelNode.props['name'] as string;
                     }
                 }
                 const body = getChild(node, 'body');
-                walk(body, node.irNodeId);
-                return; // LabeledStatement自体はイベントノードではないのでここでリターン
+                const bodyRule = body ? CFG_BRANCH_RULES[body.type] : null;
+                const isLoopOrSwitch = bodyRule && (bodyRule.type.startsWith('loop-') || bodyRule.type === 'switch');
+
+                if (isLoopOrSwitch) {
+                    pendingLabel = labelName || null;
+                    walk(body, node.irNodeId);
+                } else {
+                    const exitBlock = createBlock();
+                    loopStack.push({ label: labelName, breakTarget: exitBlock });
+                    walk(body, node.irNodeId);
+                    loopStack.pop();
+                    if (currentBlock) link(currentBlock, exitBlock);
+                    currentBlock = exitBlock;
+                }
+                return;
             }
 
             const rule = CFG_BRANCH_RULES[node.type];
@@ -193,10 +207,15 @@ export class CFGBuilder {
                         finallyStack.push(finallyEntryBlock);
                     }
                     
+                    if (currentBlock) {
+                        link(currentBlock, catchEntryBlock);
+                    }
+                    
                     walk(block, node.irNodeId);
                     
                     if (currentBlock) {
                         link(currentBlock, finallyEntryBlock || endBlock);
+                        link(currentBlock, catchEntryBlock);
                     }
                     
                     currentContext.catchBlock = prevCatch;
@@ -457,17 +476,20 @@ export class CFGBuilder {
                     if (labelNode && labelNode.type === 'Identifier') targetLabel = labelNode.props['name'] as string;
                 }
 
-                if (loopStack.length > 0) {
-                    let targetBlock = loopStack[loopStack.length - 1].breakTarget;
-                    if (targetLabel) {
-                        // 指定されたラベル名を持つスタックを探す
-                        for (let i = loopStack.length - 1; i >= 0; i--) {
-                            if (loopStack[i].label === targetLabel) {
-                                targetBlock = loopStack[i].breakTarget;
-                                break;
-                            }
+                let targetBlock: CFGBlock | null = null;
+                if (targetLabel) {
+                    // 指定されたラベル名を持つスタックを探す
+                    for (let i = loopStack.length - 1; i >= 0; i--) {
+                        if (loopStack[i].label === targetLabel) {
+                            targetBlock = loopStack[i].breakTarget;
+                            break;
                         }
                     }
+                } else if (loopStack.length > 0) {
+                    targetBlock = loopStack[loopStack.length - 1].breakTarget;
+                }
+
+                if (currentBlock && targetBlock) {
                     link(currentBlock, targetBlock);
                 }
                 currentBlock = null;
